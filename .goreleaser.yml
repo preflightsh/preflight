@@ -1,0 +1,48 @@
+project_name: preflight
+
+builds:
+  - id: preflight
+    main: ./main.go
+    binary: preflight
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X github.com/phillips-jon/preflight/cmd.version={{.Version}}
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: "checksums.txt"
+
+brews:
+  - name: preflight
+    repository:
+      owner: preflightsh
+      name: homebrew-tap
+    description: "Preflight CLI for launch readiness checks"
+    homepage: "https://preflight.sh"
+    commit_author:
+      name: "Preflight Bot"
+      email: "bot@preflight.sh"
+    install: |
+      bin.install "preflight"
+
+dockers: []
+
+release:
+  prerelease: false
+
+changelog:
+  skip: true

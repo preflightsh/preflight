@@ -1,0 +1,35 @@
+# Binaries
+bin/
+preflight
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test coverage
+coverage.out
+coverage.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Go
+vendor/
+
+# Build artifacts
+dist/
+
+# Local config (for testing)
+preflight.yml
+
+# Environment files
+.env
+.env.local
