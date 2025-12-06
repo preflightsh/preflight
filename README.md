@@ -84,7 +84,7 @@ Preflight auto-detects and validates configuration for these services:
 - Algolia
 
 **AI / LLMs**
-- OpenAI, Anthropic Claude, Google AI (Gemini), Mistral, Cohere, Replicate, Hugging Face, Groq, Perplexity, Together AI
+- OpenAI, Anthropic Claude, Google AI (Gemini), Mistral, Cohere, Replicate, Hugging Face, Grok (X/Twitter), Perplexity, Together AI
 
 ## Configuration
 

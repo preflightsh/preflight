@@ -293,7 +293,7 @@ func formatServiceName(svc string) string {
 		"cohere":      "Cohere",
 		"replicate":   "Replicate",
 		"huggingface": "Hugging Face",
-		"groq":        "Groq",
+		"grok":        "Grok (X/Twitter)",
 		"perplexity":  "Perplexity",
 		"together_ai": "Together AI",
 	}

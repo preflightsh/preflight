@@ -127,7 +127,7 @@ var AllServices = []string{
 	"cohere",
 	"replicate",
 	"huggingface",
-	"groq",
+	"grok",
 	"perplexity",
 	"together_ai",
 }
@@ -336,8 +336,8 @@ func detectServicesFromContent(content string, services map[string]bool, lang st
 	if strings.Contains(content, "huggingface") || strings.Contains(content, "@huggingface") || strings.Contains(content, "transformers") {
 		services["huggingface"] = true
 	}
-	if strings.Contains(content, "groq") {
-		services["groq"] = true
+	if strings.Contains(content, "grok") || strings.Contains(content, "x.ai") {
+		services["grok"] = true
 	}
 	if strings.Contains(content, "perplexity") {
 		services["perplexity"] = true
@@ -420,7 +420,7 @@ func detectServicesFromEnv(rootDir string, services map[string]bool) map[string]
 		"cohere":      {"COHERE_", "CO_API_KEY"},
 		"replicate":   {"REPLICATE_"},
 		"huggingface": {"HUGGINGFACE_", "HF_TOKEN", "HF_API_"},
-		"groq":        {"GROQ_"},
+		"grok":        {"GROK_", "XAI_"},
 		"perplexity":  {"PERPLEXITY_", "PPLX_"},
 		"together_ai": {"TOGETHER_", "TOGETHER_AI_"},
 	}
