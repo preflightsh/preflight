@@ -25,6 +25,83 @@ func DetectStack(rootDir string) string {
 		return "laravel"
 	}
 
+	// === Traditional CMS ===
+
+	// Check for WordPress
+	if fileExists(rootDir, "wp-config.php") || fileExists(rootDir, "wp-content/themes") {
+		return "wordpress"
+	}
+
+	// Check for Craft CMS
+	if fileExists(rootDir, "craft") || fileContains(rootDir, "composer.json", "craftcms/cms") {
+		return "craft"
+	}
+
+	// Check for Drupal
+	if fileExists(rootDir, "core/lib/Drupal.php") || (fileExists(rootDir, "sites/default") && fileExists(rootDir, "core")) {
+		return "drupal"
+	}
+
+	// Check for Ghost (before generic Node.js check)
+	if fileContains(rootDir, "package.json", "\"ghost\"") || fileExists(rootDir, "content/themes") {
+		return "ghost"
+	}
+
+	// === Static Site Generators ===
+
+	// Check for Hugo
+	if fileExists(rootDir, "hugo.toml") || fileExists(rootDir, "hugo.yaml") || fileExists(rootDir, "hugo.json") ||
+		(fileExists(rootDir, "config.toml") && fileExists(rootDir, "content") && fileExists(rootDir, "themes")) {
+		return "hugo"
+	}
+
+	// Check for Jekyll
+	if fileExists(rootDir, "_config.yml") && (fileExists(rootDir, "_posts") || fileExists(rootDir, "_layouts")) {
+		return "jekyll"
+	}
+
+	// Check for Gatsby
+	if fileExists(rootDir, "gatsby-config.js") || fileExists(rootDir, "gatsby-config.ts") || fileExists(rootDir, "gatsby-config.mjs") {
+		return "gatsby"
+	}
+
+	// Check for Eleventy (11ty)
+	if fileExists(rootDir, ".eleventy.js") || fileExists(rootDir, "eleventy.config.js") || fileExists(rootDir, "eleventy.config.mjs") ||
+		fileContains(rootDir, "package.json", "@11ty/eleventy") {
+		return "eleventy"
+	}
+
+	// Check for Astro
+	if fileExists(rootDir, "astro.config.mjs") || fileExists(rootDir, "astro.config.ts") || fileExists(rootDir, "astro.config.js") {
+		return "astro"
+	}
+
+	// === Headless CMS ===
+
+	// Check for Strapi
+	if fileContains(rootDir, "package.json", "@strapi/strapi") || fileExists(rootDir, "src/api") && fileExists(rootDir, "config/database.js") {
+		return "strapi"
+	}
+
+	// Check for Sanity
+	if fileExists(rootDir, "sanity.json") || fileExists(rootDir, "sanity.config.ts") || fileExists(rootDir, "sanity.config.js") ||
+		fileContains(rootDir, "package.json", "sanity") {
+		return "sanity"
+	}
+
+	// Check for Contentful (usually detected via env vars, but check for config)
+	if fileContains(rootDir, "package.json", "contentful") {
+		return "contentful"
+	}
+
+	// Check for Prismic
+	if fileExists(rootDir, "prismicio.js") || fileExists(rootDir, "slicemachine.config.json") ||
+		fileContains(rootDir, "package.json", "@prismicio") {
+		return "prismic"
+	}
+
+	// === General Stacks ===
+
 	// Check for Go
 	if fileExists(rootDir, "go.mod") {
 		return "go"
@@ -54,6 +131,16 @@ func DetectStack(rootDir string) string {
 	}
 
 	return "unknown"
+}
+
+// fileContains checks if a file exists and contains a specific string
+func fileContains(rootDir, relativePath, search string) bool {
+	path := filepath.Join(rootDir, relativePath)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(content), search)
 }
 
 // AllServices returns the list of all supported services
@@ -86,6 +173,8 @@ var AllServices = []string{
 	// Analytics
 	"plausible",
 	"fathom",
+	"fullres",
+	"datafast",
 	"google_analytics",
 	"mixpanel",
 	"amplitude",
@@ -240,6 +329,12 @@ func detectServicesFromContent(content string, services map[string]bool, lang st
 	if strings.Contains(content, "fathom") {
 		services["fathom"] = true
 	}
+	if strings.Contains(content, "fullres") {
+		services["fullres"] = true
+	}
+	if strings.Contains(content, "datafast") || strings.Contains(content, "datafa.st") {
+		services["datafast"] = true
+	}
 	if strings.Contains(content, "mixpanel") {
 		services["mixpanel"] = true
 	}
@@ -379,6 +474,8 @@ func detectServicesFromEnv(rootDir string, services map[string]bool) map[string]
 		// Analytics
 		"plausible":        {"PLAUSIBLE_", "NEXT_PUBLIC_PLAUSIBLE"},
 		"fathom":           {"FATHOM_", "NEXT_PUBLIC_FATHOM"},
+		"fullres":          {"FULLRES_", "NEXT_PUBLIC_FULLRES"},
+		"datafast":         {"DATAFAST_", "NEXT_PUBLIC_DATAFAST"},
 		"google_analytics": {"GA_TRACKING_ID", "GOOGLE_ANALYTICS", "NEXT_PUBLIC_GA", "GA_MEASUREMENT_ID", "GTM_"},
 		"mixpanel":         {"MIXPANEL_"},
 		"amplitude":        {"AMPLITUDE_"},
@@ -453,6 +550,8 @@ func detectAnalyticsScripts(rootDir string, services map[string]bool) {
 	patterns := map[string]*regexp.Regexp{
 		"plausible":        regexp.MustCompile(`plausible\.io/js/`),
 		"fathom":           regexp.MustCompile(`(usefathom\.com|cdn\.usefathom\.com)`),
+		"fullres":          regexp.MustCompile(`fullres\.com`),
+		"datafast":         regexp.MustCompile(`datafa\.st`),
 		"google_analytics": regexp.MustCompile(`(googletagmanager\.com|google-analytics\.com|gtag\(|ga\()`),
 		"hotjar":           regexp.MustCompile(`hotjar\.com`),
 		"intercom":         regexp.MustCompile(`intercom`),

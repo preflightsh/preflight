@@ -52,7 +52,7 @@ preflight scan --ci --format json
 | **ads.txt** | Validates ads.txt for ad-supported sites (optional) |
 | **LICENSE** | Checks for license file (opt-in, for open source projects) |
 
-## Supported Services (45)
+## Supported Services (47)
 
 Preflight auto-detects and validates configuration for these services:
 
@@ -66,7 +66,7 @@ Preflight auto-detects and validates configuration for these services:
 - Postmark, SendGrid, Mailgun, AWS SES, Resend, Mailchimp, ConvertKit
 
 **Analytics**
-- Plausible, Fathom, Google Analytics, Mixpanel, Amplitude, Segment, Hotjar
+- Plausible, Fathom, Fullres, Datafast, Google Analytics, Mixpanel, Amplitude, Segment, Hotjar
 
 **Auth**
 - Auth0, Clerk, Firebase, Supabase
@@ -136,13 +136,19 @@ checks:
 
 ## Supported Stacks
 
-- Ruby on Rails
-- Next.js
-- Node.js (Express, etc.)
-- Laravel
-- Go
-- Python / Django
-- Rust
+**Frameworks**
+- Ruby on Rails, Next.js, Node.js (Express), Laravel, Go, Python/Django, Rust
+
+**Traditional CMS**
+- WordPress, Craft CMS, Drupal, Ghost
+
+**Static Site Generators**
+- Hugo, Jekyll, Gatsby, Eleventy (11ty), Astro
+
+**Headless CMS**
+- Strapi, Sanity, Contentful, Prismic
+
+**Other**
 - Static sites
 
 ## CI Integration

@@ -55,8 +55,8 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	// Get URLs
 	fmt.Println()
-	stagingURL := promptOptional(reader, "Staging URL (optional)")
-	productionURL := promptOptional(reader, "Production URL (optional)")
+	stagingURL := promptOptional(reader, "Staging URL (include https://, optional)")
+	productionURL := promptOptional(reader, "Production URL (include https://, optional)")
 
 	// Confirm services
 	fmt.Println()
@@ -204,11 +204,32 @@ func buildDefaultChecks(cwd, stack string, services map[string]config.ServiceCon
 
 func detectMainLayout(cwd, stack string) string {
 	layouts := map[string][]string{
+		// Frameworks
 		"rails":   {"app/views/layouts/application.html.erb"},
 		"next":    {"app/layout.tsx", "app/layout.js", "pages/_document.tsx", "pages/_document.js"},
 		"node":    {"views/layout.ejs", "views/layout.pug", "views/layout.hbs"},
 		"laravel": {"resources/views/layouts/app.blade.php"},
+		"django":  {"templates/base.html", "templates/layout.html"},
 		"static":  {"index.html"},
+
+		// Traditional CMS
+		"wordpress": {"wp-content/themes/theme/header.php", "wp-content/themes/theme/functions.php"},
+		"craft":     {"templates/_layout.twig", "templates/_layout.html"},
+		"drupal":    {"themes/custom/theme/templates/html.html.twig"},
+		"ghost":     {"content/themes/casper/default.hbs"},
+
+		// Static Site Generators
+		"hugo":     {"layouts/_default/baseof.html", "themes/theme/layouts/_default/baseof.html"},
+		"jekyll":   {"_layouts/default.html", "_includes/head.html"},
+		"gatsby":   {"src/components/layout.js", "src/components/layout.tsx", "src/templates/page.js"},
+		"eleventy": {"_includes/layout.njk", "_includes/base.njk", "_includes/layout.liquid"},
+		"astro":    {"src/layouts/Layout.astro", "src/layouts/BaseLayout.astro"},
+
+		// Headless CMS (frontend usually in Next.js, etc.)
+		"strapi":     {"src/admin/app.js"},
+		"sanity":     {"schemas/schema.js"},
+		"contentful": {"src/templates/page.js"},
+		"prismic":    {"src/components/Layout.js"},
 	}
 
 	if paths, ok := layouts[stack]; ok {
@@ -259,6 +280,8 @@ func formatServiceName(svc string) string {
 		// Analytics
 		"plausible":        "Plausible Analytics",
 		"fathom":           "Fathom Analytics",
+		"fullres":          "Fullres",
+		"datafast":         "Datafast",
 		"google_analytics": "Google Analytics",
 		"mixpanel":         "Mixpanel",
 		"amplitude":        "Amplitude",
