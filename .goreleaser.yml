@@ -19,16 +19,18 @@ builds:
       - -s -w -X github.com/phillips-jon/preflight/cmd.version={{.Version}}
 
 archives:
-  - format: tar.gz
+  - formats:
+      - tar.gz
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
-        format: zip
+        formats:
+          - zip
 
 checksum:
   name_template: "checksums.txt"
 
-brews:
+homebrew:
   - name: preflight
     repository:
       owner: phillips-jon
