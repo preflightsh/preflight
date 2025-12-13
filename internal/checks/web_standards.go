@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -612,18 +613,6 @@ func (c IndexNowCheck) Run(ctx Context) (CheckResult, error) {
 	}
 
 	key := ctx.Config.Checks.IndexNow.Key
-	if key == "" {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityWarn,
-			Passed:   false,
-			Message:  "IndexNow enabled but no key configured",
-			Suggestions: []string{
-				"Add your IndexNow key to preflight.yml",
-			},
-		}, nil
-	}
 
 	// Common web root directories across frameworks
 	webRoots := []string{
@@ -638,19 +627,60 @@ func (c IndexNowCheck) Run(ctx Context) (CheckResult, error) {
 		"",        // Root directory
 	}
 
-	// Check for key file in root or .well-known
-	for _, root := range webRoots {
-		var paths []string
-		if root == "" {
-			paths = []string{key + ".txt", ".well-known/" + key + ".txt"}
-		} else {
-			paths = []string{root + "/" + key + ".txt", root + "/.well-known/" + key + ".txt"}
+	// If we have a configured key, check for that specific file first
+	if key != "" {
+		for _, root := range webRoots {
+			var paths []string
+			if root == "" {
+				paths = []string{key + ".txt", ".well-known/" + key + ".txt"}
+			} else {
+				paths = []string{root + "/" + key + ".txt", root + "/.well-known/" + key + ".txt"}
+			}
+			for _, path := range paths {
+				fullPath := filepath.Join(ctx.RootDir, path)
+				if content, err := os.ReadFile(fullPath); err == nil {
+					contentStr := strings.TrimSpace(string(content))
+					if contentStr == key {
+						return CheckResult{
+							ID:       c.ID(),
+							Title:    c.Title(),
+							Severity: SeverityInfo,
+							Passed:   true,
+							Message:  "IndexNow key file found at " + path,
+						}, nil
+					}
+				}
+			}
 		}
-		for _, path := range paths {
-			fullPath := filepath.Join(ctx.RootDir, path)
-			if content, err := os.ReadFile(fullPath); err == nil {
-				contentStr := strings.TrimSpace(string(content))
-				if contentStr == key {
+	}
+
+	// Also look for any valid IndexNow key file (32-char hex filename)
+	hexPattern := regexp.MustCompile(`^[a-f0-9]{32}\.txt$`)
+	for _, root := range webRoots {
+		dir := filepath.Join(ctx.RootDir, root)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() && hexPattern.MatchString(entry.Name()) {
+				foundKey := strings.TrimSuffix(entry.Name(), ".txt")
+				content, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+				if err == nil && strings.TrimSpace(string(content)) == foundKey {
+					path := entry.Name()
+					if root != "" {
+						path = root + "/" + path
+					}
+					// If config key doesn't match, warn but pass
+					if key != "" && key != foundKey {
+						return CheckResult{
+							ID:       c.ID(),
+							Title:    c.Title(),
+							Severity: SeverityInfo,
+							Passed:   true,
+							Message:  fmt.Sprintf("IndexNow key file found at %s (update preflight.yml key to: %s)", path, foundKey),
+						}, nil
+					}
 					return CheckResult{
 						ID:       c.ID(),
 						Title:    c.Title(),
@@ -658,20 +688,22 @@ func (c IndexNowCheck) Run(ctx Context) (CheckResult, error) {
 						Passed:   true,
 						Message:  "IndexNow key file found at " + path,
 					}, nil
-				} else if len(contentStr) > 0 {
-					return CheckResult{
-						ID:       c.ID(),
-						Title:    c.Title(),
-						Severity: SeverityWarn,
-						Passed:   false,
-						Message:  "IndexNow key file content doesn't match configured key",
-						Suggestions: []string{
-							fmt.Sprintf("Update %s to contain: %s", path, key),
-						},
-					}, nil
 				}
 			}
 		}
+	}
+
+	if key == "" {
+		return CheckResult{
+			ID:       c.ID(),
+			Title:    c.Title(),
+			Severity: SeverityWarn,
+			Passed:   false,
+			Message:  "IndexNow enabled but no key file found",
+			Suggestions: []string{
+				"Create a 32-character hex key file (e.g., abc123...def.txt) in your web root",
+			},
+		}, nil
 	}
 
 	return CheckResult{

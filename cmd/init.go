@@ -461,6 +461,11 @@ func formatStackName(stack string) string {
 		"rails":   "Ruby on Rails",
 		"next":    "Next.js",
 		"node":    "Node.js",
+		"react":   "React",
+		"vue":     "Vue.js",
+		"vite":    "Vite",
+		"svelte":  "Svelte",
+		"angular": "Angular",
 		"laravel": "Laravel",
 		"django":  "Django",
 		"python":  "Python",
@@ -629,6 +634,7 @@ func generateIndexNowKey() string {
 }
 
 func detectIndexNowKey(cwd string) string {
+	// First check .env files
 	envFiles := []string{".env", ".env.example", ".env.local", ".env.development"}
 	keyPatterns := []string{"INDEXNOW_API_KEY=", "INDEXNOW_KEY=", "INDEX_NOW_KEY="}
 
@@ -658,6 +664,30 @@ func detectIndexNowKey(cwd string) string {
 			}
 		}
 	}
+
+	// Also check for existing key files in web root (32-char hex filename.txt)
+	webRoots := []string{"public", "web", "static", "_site", "dist", ""}
+	hexPattern := regexp.MustCompile(`^[a-f0-9]{32}\.txt$`)
+
+	for _, root := range webRoots {
+		dir := filepath.Join(cwd, root)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() && hexPattern.MatchString(entry.Name()) {
+				// Found a key file, extract the key from filename
+				key := strings.TrimSuffix(entry.Name(), ".txt")
+				// Verify file content matches the key
+				content, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+				if err == nil && strings.TrimSpace(string(content)) == key {
+					return key
+				}
+			}
+		}
+	}
+
 	return ""
 }
 

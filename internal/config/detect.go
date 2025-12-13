@@ -124,8 +124,34 @@ func DetectStack(rootDir string) string {
 		return "rust"
 	}
 
-	// Check for Node.js
+	// Check for Node.js frameworks
 	if fileExists(rootDir, "package.json") {
+		// Check for Vite
+		if fileExists(rootDir, "vite.config.js") || fileExists(rootDir, "vite.config.ts") || fileExists(rootDir, "vite.config.mjs") {
+			return "vite"
+		}
+
+		// Check for specific frameworks in package.json
+		if pkgJSON, err := os.ReadFile(filepath.Join(rootDir, "package.json")); err == nil {
+			content := string(pkgJSON)
+			// Check for React
+			if strings.Contains(content, "\"react\"") {
+				return "react"
+			}
+			// Check for Vue
+			if strings.Contains(content, "\"vue\"") {
+				return "vue"
+			}
+			// Check for Svelte
+			if strings.Contains(content, "\"svelte\"") {
+				return "svelte"
+			}
+			// Check for Angular
+			if strings.Contains(content, "\"@angular/core\"") {
+				return "angular"
+			}
+		}
+
 		return "node"
 	}
 
