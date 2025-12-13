@@ -16,16 +16,10 @@ func (c SecurityHeadersCheck) Title() string {
 }
 
 func (c SecurityHeadersCheck) Run(ctx Context) (CheckResult, error) {
-	// Prefer production URL for security headers (HSTS matters there)
-	// Fall back to staging if no production URL
-	checkURL := ctx.Config.URLs.Production
-	urlType := "production"
-	if checkURL == "" {
-		checkURL = ctx.Config.URLs.Staging
-		urlType = "staging"
-	}
+	prodURL := ctx.Config.URLs.Production
+	stagingURL := ctx.Config.URLs.Staging
 
-	if checkURL == "" {
+	if prodURL == "" && stagingURL == "" {
 		return CheckResult{
 			ID:       c.ID(),
 			Title:    c.Title(),
@@ -35,18 +29,87 @@ func (c SecurityHeadersCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	resp, actualURL, err := tryURL(ctx.Client, checkURL)
-	if err != nil {
+	// Check both environments
+	var results []string
+	var allMissing []string
+	var suggestions []string
+	hasFailure := false
+
+	// Check production if configured
+	if prodURL != "" {
+		missing, err := c.checkURL(ctx, prodURL, true)
+		if err != nil {
+			results = append(results, fmt.Sprintf("prod: unreachable"))
+			hasFailure = true
+		} else if len(missing) > 0 {
+			results = append(results, fmt.Sprintf("prod missing: %s", strings.Join(missing, ", ")))
+			allMissing = append(allMissing, missing...)
+			hasFailure = true
+		} else {
+			results = append(results, "prod: ✓")
+		}
+	}
+
+	// Check staging if configured
+	if stagingURL != "" {
+		missing, err := c.checkURL(ctx, stagingURL, false)
+		if err != nil {
+			results = append(results, fmt.Sprintf("staging: unreachable"))
+			hasFailure = true
+		} else if len(missing) > 0 {
+			results = append(results, fmt.Sprintf("staging missing: %s", strings.Join(missing, ", ")))
+			allMissing = append(allMissing, missing...)
+			hasFailure = true
+		} else {
+			results = append(results, "staging: ✓")
+		}
+	}
+
+	if !hasFailure {
 		return CheckResult{
 			ID:       c.ID(),
 			Title:    c.Title(),
-			Severity: SeverityWarn,
-			Passed:   false,
-			Message:  fmt.Sprintf("Could not reach %s URL: %v", urlType, err),
-			Suggestions: []string{
-				fmt.Sprintf("Ensure %s URL is accessible", urlType),
-			},
+			Severity: SeverityInfo,
+			Passed:   true,
+			Message:  strings.Join(results, " | "),
 		}, nil
+	}
+
+	// Build suggestions based on missing headers
+	suggestions = append(suggestions, "Add missing security headers to your server configuration")
+	seen := make(map[string]bool)
+	for _, header := range allMissing {
+		if seen[header] {
+			continue
+		}
+		seen[header] = true
+		switch header {
+		case "Strict-Transport-Security":
+			suggestions = append(suggestions, "HSTS: Strict-Transport-Security: max-age=31536000; includeSubDomains")
+		case "X-Content-Type-Options":
+			suggestions = append(suggestions, "X-Content-Type-Options: nosniff")
+		case "Referrer-Policy":
+			suggestions = append(suggestions, "Referrer-Policy: strict-origin-when-cross-origin")
+		case "Content-Security-Policy":
+			suggestions = append(suggestions, "Consider adding a Content-Security-Policy header")
+		}
+	}
+
+	return CheckResult{
+		ID:          c.ID(),
+		Title:       c.Title(),
+		Severity:    SeverityWarn,
+		Passed:      false,
+		Message:     strings.Join(results, " | "),
+		Suggestions: suggestions,
+	}, nil
+}
+
+// checkURL checks security headers for a single URL and returns missing headers
+func (c SecurityHeadersCheck) checkURL(ctx Context, url string, isProd bool) ([]string, error) {
+	resp, actualURL, err := tryURL(ctx.Client, url)
+	if err != nil {
+		return nil, err
 	}
 	defer resp.Body.Close()
 
@@ -66,50 +129,11 @@ func (c SecurityHeadersCheck) Run(ctx Context) (CheckResult, error) {
 	}
 
 	var missing []string
-	var present []string
-
 	for _, header := range requiredHeaders {
 		if resp.Header.Get(header) == "" {
 			missing = append(missing, header)
-		} else {
-			present = append(present, header)
 		}
 	}
 
-	if len(missing) == 0 {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  "All recommended security headers present",
-		}, nil
-	}
-
-	suggestions := []string{
-		"Add missing security headers to your server configuration",
-	}
-
-	// Add specific suggestions for common missing headers
-	for _, header := range missing {
-		switch header {
-		case "Strict-Transport-Security":
-			suggestions = append(suggestions, "HSTS: Strict-Transport-Security: max-age=31536000; includeSubDomains")
-		case "X-Content-Type-Options":
-			suggestions = append(suggestions, "X-Content-Type-Options: nosniff")
-		case "Referrer-Policy":
-			suggestions = append(suggestions, "Referrer-Policy: strict-origin-when-cross-origin")
-		case "Content-Security-Policy":
-			suggestions = append(suggestions, "Consider adding a Content-Security-Policy header")
-		}
-	}
-
-	return CheckResult{
-		ID:       c.ID(),
-		Title:    c.Title(),
-		Severity: SeverityWarn,
-		Passed:   false,
-		Message:  fmt.Sprintf("Missing security headers: %s (present: %s)", strings.Join(missing, ", "), strings.Join(present, ", ")),
-		Suggestions: suggestions,
-	}, nil
+	return missing, nil
 }
