@@ -319,7 +319,8 @@ func detectServicesFromContent(content string, services map[string]bool, lang st
 	if strings.Contains(content, "mailgun") {
 		services["mailgun"] = true
 	}
-	if strings.Contains(content, "aws-sdk-ses") || strings.Contains(content, "@aws-sdk/client-ses") {
+	if strings.Contains(content, "aws-sdk-ses") || strings.Contains(content, "@aws-sdk/client-ses") ||
+		strings.Contains(content, "craft-amazon-ses") || strings.Contains(content, "amazon-ses") {
 		services["aws_ses"] = true
 	}
 	if strings.Contains(content, "resend") && !strings.Contains(content, "resend(") {
@@ -562,71 +563,206 @@ func detectServicesFromEnv(rootDir string, services map[string]bool) map[string]
 }
 
 func detectAnalyticsScripts(rootDir string, services map[string]bool) {
-	// Patterns for detecting services in HTML or script content
+	// Patterns for detecting services in code/template content
 	patterns := map[string]*regexp.Regexp{
-		"plausible":        regexp.MustCompile(`plausible\.io/js/|plausible`),
-		"fathom":           regexp.MustCompile(`(usefathom\.com|cdn\.usefathom\.com|fathom)`),
-		"fullres":          regexp.MustCompile(`fullres`),
-		"datafast":         regexp.MustCompile(`datafa\.st|datafast`),
-		"google_analytics": regexp.MustCompile(`(googletagmanager\.com|google-analytics\.com|gtag\(|ga\()`),
-		"hotjar":           regexp.MustCompile(`hotjar\.com|hotjar`),
-		"intercom":         regexp.MustCompile(`intercom`),
-		"crisp":            regexp.MustCompile(`crisp\.chat|crisp`),
-		"mixpanel":         regexp.MustCompile(`mixpanel`),
-		"segment":          regexp.MustCompile(`segment\.com|analytics\.js`),
+		// Analytics
+		"plausible":        regexp.MustCompile(`(?i)plausible\.io|plausible`),
+		"fathom":           regexp.MustCompile(`(?i)usefathom\.com|cdn\.usefathom\.com|fathom`),
+		"fullres":          regexp.MustCompile(`(?i)fullres`),
+		"datafast":         regexp.MustCompile(`(?i)datafa\.st|datafast`),
+		"google_analytics": regexp.MustCompile(`(?i)googletagmanager\.com|google-analytics\.com|gtag\(|ga\(|monsterinsights`),
+		"hotjar":           regexp.MustCompile(`(?i)hotjar\.com|hotjar`),
+		"mixpanel":         regexp.MustCompile(`(?i)mixpanel`),
+		"segment":          regexp.MustCompile(`(?i)segment\.com|analytics\.js`),
+		"amplitude":        regexp.MustCompile(`(?i)amplitude\.com|amplitude`),
+
+		// Communication
+		"intercom": regexp.MustCompile(`(?i)intercom`),
+		"crisp":    regexp.MustCompile(`(?i)crisp\.chat|crisp`),
+
+		// Payments
+		"stripe":       regexp.MustCompile(`(?i)stripe\.com|stripe`),
+		"paypal":       regexp.MustCompile(`(?i)paypal\.com|paypal`),
+		"paddle":       regexp.MustCompile(`(?i)paddle\.com|paddle`),
+		"lemonsqueezy": regexp.MustCompile(`(?i)lemonsqueezy|lemon-squeezy`),
+
+		// Error tracking
+		"sentry":      regexp.MustCompile(`(?i)sentry\.io|@sentry|sentry`),
+		"bugsnag":     regexp.MustCompile(`(?i)bugsnag`),
+		"rollbar":     regexp.MustCompile(`(?i)rollbar`),
+		"honeybadger": regexp.MustCompile(`(?i)honeybadger`),
+		"datadog":     regexp.MustCompile(`(?i)datadoghq\.com|datadog`),
+		"newrelic":    regexp.MustCompile(`(?i)newrelic|new-relic`),
+		"logrocket":   regexp.MustCompile(`(?i)logrocket`),
+
+		// Email
+		"postmark":   regexp.MustCompile(`(?i)postmarkapp\.com|postmark`),
+		"sendgrid":   regexp.MustCompile(`(?i)sendgrid`),
+		"mailgun":    regexp.MustCompile(`(?i)mailgun`),
+		"aws_ses":    regexp.MustCompile(`(?i)aws.ses|amazon.ses|ses\.amazonaws`),
+		"resend":     regexp.MustCompile(`(?i)resend\.com`),
+		"mailchimp":  regexp.MustCompile(`(?i)mailchimp`),
+		"convertkit": regexp.MustCompile(`(?i)convertkit|kit\.com`),
+
+		// Auth
+		"auth0":    regexp.MustCompile(`(?i)auth0`),
+		"clerk":    regexp.MustCompile(`(?i)clerk\.com|@clerk`),
+		"firebase": regexp.MustCompile(`(?i)firebase`),
+		"supabase": regexp.MustCompile(`(?i)supabase`),
+
+		// Infrastructure
+		"redis":         regexp.MustCompile(`(?i)redis`),
+		"sidekiq":       regexp.MustCompile(`(?i)sidekiq`),
+		"rabbitmq":      regexp.MustCompile(`(?i)rabbitmq|amqp`),
+		"elasticsearch": regexp.MustCompile(`(?i)elasticsearch|elastic\.co`),
+
+		// Storage/CDN
+		"aws_s3":     regexp.MustCompile(`(?i)s3\.amazonaws|aws.s3`),
+		"cloudinary": regexp.MustCompile(`(?i)cloudinary`),
+		"cloudflare": regexp.MustCompile(`(?i)cloudflare`),
+
+		// Search
+		"algolia": regexp.MustCompile(`(?i)algolia`),
+
+		// AI
+		"openai":      regexp.MustCompile(`(?i)openai`),
+		"anthropic":   regexp.MustCompile(`(?i)anthropic|claude`),
+		"google_ai":   regexp.MustCompile(`(?i)generativeai|gemini`),
+		"mistral":     regexp.MustCompile(`(?i)mistral`),
+		"cohere":      regexp.MustCompile(`(?i)cohere`),
+		"replicate":   regexp.MustCompile(`(?i)replicate`),
+		"huggingface": regexp.MustCompile(`(?i)huggingface|hugging.face`),
+
+		// SEO
+		"indexnow": regexp.MustCompile(`(?i)indexnow`),
 	}
 
 	// Regex to find script src URLs
 	scriptSrcRe := regexp.MustCompile(`<script[^>]+src=["']([^"']+)["']`)
 
-	htmlFiles := []string{
-		"index.html",
-		"public/index.html",
-		"app/views/layouts/application.html.erb",
-		"resources/views/layouts/app.blade.php",
-		"templates/_layout.twig",
-		"templates/_layout.html",
-		"app/layout.tsx",
-		"app/layout.js",
-		"pages/_app.tsx",
-		"pages/_app.js",
-		"pages/_document.tsx",
-		"pages/_document.js",
+	// File extensions to scan
+	codeExts := map[string]bool{
+		// Templates
+		".html":   true,
+		".htm":    true,
+		".erb":    true,
+		".twig":   true,
+		".blade":  true,
+		".vue":    true,
+		".svelte": true,
+		".astro":  true,
+		// Code
+		".php":  true,
+		".tsx":  true,
+		".ts":   true,
+		".jsx":  true,
+		".js":   true,
+		".rb":   true,
+		".py":   true,
+		".go":   true,
+		".rs":   true,
+		".java": true,
+		".cs":   true,
+		// Config
+		".yaml": true,
+		".yml":  true,
+		".toml": true,
+	}
+
+	// Directories to skip
+	skipDirs := map[string]bool{
+		"node_modules": true,
+		"vendor":       true,
+		".git":         true,
+		"dist":         true,
+		"build":        true,
+		".next":        true,
+		".nuxt":        true,
+		"coverage":     true,
+		"__pycache__":  true,
+		".cache":       true,
+		"tmp":          true,
+		"log":          true,
+		"logs":         true,
 	}
 
 	// Collect external script URLs to fetch
 	var externalScripts []string
 
-	for _, htmlFile := range htmlFiles {
-		path := filepath.Join(rootDir, htmlFile)
-		content, err := os.ReadFile(path)
+	// Walk the entire project directory
+	filepath.WalkDir(rootDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			continue
+			return nil // Skip files/dirs we can't access
 		}
 
-		// Check HTML content directly for known patterns
+		// Skip ignored directories
+		if d.IsDir() {
+			if skipDirs[d.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Check file extension
+		ext := strings.ToLower(filepath.Ext(path))
+		if !codeExts[ext] {
+			return nil
+		}
+
+		// Skip files larger than 1MB to avoid slowdown
+		info, err := d.Info()
+		if err != nil || info.Size() > 1024*1024 {
+			return nil
+		}
+
+		// Read file content
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+
+		// Check content for known patterns
 		for service, pattern := range patterns {
 			if pattern.Match(content) {
 				services[service] = true
 			}
 		}
 
-		// Extract external script URLs
-		matches := scriptSrcRe.FindAllSubmatch(content, -1)
-		for _, match := range matches {
-			if len(match) > 1 {
-				src := string(match[1])
-				// Only fetch http/https URLs (not relative paths)
-				if strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://") {
-					externalScripts = append(externalScripts, src)
+		// Extract external script URLs from HTML-like files
+		if ext == ".html" || ext == ".htm" || ext == ".erb" || ext == ".twig" ||
+			ext == ".php" || ext == ".vue" || ext == ".svelte" || ext == ".astro" ||
+			ext == ".tsx" || ext == ".jsx" {
+			matches := scriptSrcRe.FindAllSubmatch(content, -1)
+			for _, match := range matches {
+				if len(match) > 1 {
+					src := string(match[1])
+					// Only fetch http/https URLs (not relative paths)
+					if strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://") {
+						externalScripts = append(externalScripts, src)
+					}
 				}
 			}
 		}
-	}
+
+		return nil
+	})
 
 	// Fetch and check external scripts (limit to avoid slowdown)
 	if len(externalScripts) > 0 {
-		detectServicesFromExternalScripts(externalScripts, services, patterns)
+		// Use a subset of patterns for external scripts (mainly analytics)
+		analyticsPatterns := map[string]*regexp.Regexp{
+			"plausible":        patterns["plausible"],
+			"fathom":           patterns["fathom"],
+			"fullres":          patterns["fullres"],
+			"datafast":         patterns["datafast"],
+			"google_analytics": patterns["google_analytics"],
+			"hotjar":           patterns["hotjar"],
+			"mixpanel":         patterns["mixpanel"],
+			"segment":          patterns["segment"],
+			"intercom":         patterns["intercom"],
+			"crisp":            patterns["crisp"],
+		}
+		detectServicesFromExternalScripts(externalScripts, services, analyticsPatterns)
 	}
 }
 
