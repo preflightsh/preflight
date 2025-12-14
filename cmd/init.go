@@ -322,12 +322,13 @@ func buildDefaultChecks(cwd, stack string, services map[string]config.ServiceCon
 }
 
 func detectMainLayout(cwd, stack string) string {
-	layouts := map[string][]string{
+	// Stack-specific layouts (checked first)
+	stackLayouts := map[string][]string{
 		// Frameworks
 		"rails":   {"app/views/layouts/application.html.erb"},
 		"next":    {"app/layout.tsx", "app/layout.js", "pages/_document.tsx", "pages/_document.js"},
 		"node":    {"views/layout.ejs", "views/layout.pug", "views/layout.hbs"},
-		"laravel": {"resources/views/layouts/app.blade.php"},
+		"laravel": {"resources/views/layouts/app.blade.php", "resources/views/layout.blade.php"},
 		"django":  {"templates/base.html", "templates/layout.html"},
 		"static":  {"index.html"},
 
@@ -351,13 +352,99 @@ func detectMainLayout(cwd, stack string) string {
 		"prismic":    {"src/components/Layout.js"},
 	}
 
-	if paths, ok := layouts[stack]; ok {
+	// Check stack-specific paths first
+	if paths, ok := stackLayouts[stack]; ok {
 		for _, path := range paths {
-			if _, err := os.Stat(cwd + "/" + path); err == nil {
+			if _, err := os.Stat(filepath.Join(cwd, path)); err == nil {
 				return path
 			}
 		}
 	}
+
+	// Universal layout patterns (checked for all stacks)
+	// These cover common conventions across frameworks
+	universalLayouts := []string{
+		// PHP common patterns
+		"partials/header.php",
+		"includes/header.php",
+		"inc/header.php",
+		"templates/header.php",
+		"views/partials/header.php",
+		"views/includes/header.php",
+		"app/views/header.php",
+		"resources/views/partials/header.php",
+		"public/index.php",
+		"index.php",
+
+		// HTML/Static
+		"index.html",
+		"public/index.html",
+		"src/index.html",
+
+		// Node/Express
+		"views/layout.ejs",
+		"views/layout.pug",
+		"views/layout.hbs",
+		"views/layouts/main.hbs",
+		"views/layouts/main.ejs",
+
+		// React/Vue/Svelte
+		"src/App.tsx",
+		"src/App.jsx",
+		"src/App.js",
+		"src/App.vue",
+		"src/App.svelte",
+		"src/main.tsx",
+		"src/main.jsx",
+		"src/main.js",
+		"app/layout.tsx",
+		"app/layout.jsx",
+		"app/layout.js",
+		"pages/_app.tsx",
+		"pages/_app.jsx",
+		"pages/_app.js",
+		"pages/_document.tsx",
+		"pages/_document.jsx",
+		"pages/_document.js",
+
+		// Twig (Symfony, Craft, etc.)
+		"templates/base.twig",
+		"templates/_layout.twig",
+		"templates/layout.twig",
+		"templates/base.html.twig",
+
+		// Blade (Laravel)
+		"resources/views/layouts/app.blade.php",
+		"resources/views/layout.blade.php",
+		"resources/views/layouts/main.blade.php",
+
+		// Ruby/Rails
+		"app/views/layouts/application.html.erb",
+
+		// Python/Django/Flask
+		"templates/base.html",
+		"templates/layout.html",
+
+		// Go
+		"templates/base.html",
+		"templates/layout.html",
+		"views/base.html",
+		"views/layout.html",
+
+		// Static site generators
+		"_layouts/default.html",
+		"_includes/head.html",
+		"layouts/_default/baseof.html",
+		"src/layouts/Layout.astro",
+		"_includes/layout.njk",
+	}
+
+	for _, path := range universalLayouts {
+		if _, err := os.Stat(filepath.Join(cwd, path)); err == nil {
+			return path
+		}
+	}
+
 	return ""
 }
 
