@@ -68,7 +68,7 @@ preflight scan --ci --format json
 | **IndexNow** | Verifies IndexNow key file for faster search indexing (opt-in) |
 | **LICENSE** | Checks for license file (opt-in, for open source projects) |
 
-## Supported Services (48)
+## Supported Services (66)
 
 Preflight auto-detects and validates configuration for these services:
 
@@ -78,20 +78,20 @@ Preflight auto-detects and validates configuration for these services:
 **Error Tracking & Monitoring**
 - Sentry, Bugsnag, Rollbar, Honeybadger, Datadog, New Relic, LogRocket
 
-**Email**
-- Postmark, SendGrid, Mailgun, AWS SES, Resend, Mailchimp, Kit
+**Email & Newsletters**
+- Postmark, SendGrid, Mailgun, AWS SES, Resend, Mailchimp, Kit, Beehiiv, AWeber, ActiveCampaign, Campaign Monitor, Drip, Klaviyo, Buttondown
 
 **Analytics**
-- Plausible, Fathom, Fullres Analytics, Datafa.st Analytics, Google Analytics, Mixpanel, Amplitude, Segment, Hotjar
+- Plausible, Fathom, Fullres Analytics, Datafa.st Analytics, Google Analytics, PostHog, Mixpanel, Amplitude, Segment, Hotjar
 
 **Auth**
-- Auth0, Clerk, Firebase, Supabase
+- Auth0, Clerk, WorkOS, Firebase, Supabase
 
 **Communication**
 - Twilio, Slack, Discord, Intercom, Crisp
 
 **Infrastructure**
-- Redis, Sidekiq, RabbitMQ, Elasticsearch
+- Redis, Sidekiq, RabbitMQ, Elasticsearch, Convex
 
 **Storage & CDN**
 - AWS S3, Cloudinary, Cloudflare

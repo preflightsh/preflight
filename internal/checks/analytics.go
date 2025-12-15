@@ -15,7 +15,7 @@ func (c FathomCheck) ID() string {
 }
 
 func (c FathomCheck) Title() string {
-	return "Fathom Analytics script is present"
+	return "Fathom Analytics"
 }
 
 func (c FathomCheck) Run(ctx Context) (CheckResult, error) {
@@ -70,7 +70,7 @@ func (c GoogleAnalyticsCheck) ID() string {
 }
 
 func (c GoogleAnalyticsCheck) Title() string {
-	return "Google Analytics is configured"
+	return "Google Analytics"
 }
 
 func (c GoogleAnalyticsCheck) Run(ctx Context) (CheckResult, error) {
@@ -128,7 +128,7 @@ func (c RedisCheck) ID() string {
 }
 
 func (c RedisCheck) Title() string {
-	return "Redis is configured"
+	return "Redis"
 }
 
 func (c RedisCheck) Run(ctx Context) (CheckResult, error) {
@@ -151,6 +151,8 @@ func (c RedisCheck) Run(ctx Context) (CheckResult, error) {
 		regexp.MustCompile(`createClient.*redis`),
 		regexp.MustCompile(`new Redis\(`),
 		regexp.MustCompile(`ioredis`),
+		regexp.MustCompile(`@upstash/redis`),
+		regexp.MustCompile(`Upstash`),
 	}
 
 	configFiles := []string{
@@ -161,7 +163,32 @@ func (c RedisCheck) Run(ctx Context) (CheckResult, error) {
 		"config/initializers/sidekiq.rb",
 		"src/config/redis.ts",
 		"src/lib/redis.ts",
+		"src/redis.ts",
 		"lib/redis.js",
+		"lib/redis.ts",
+	}
+
+	// Also check monorepo structures
+	monorepoRoots := []string{"apps", "packages", "services"}
+	for _, monoRoot := range monorepoRoots {
+		monoDir := filepath.Join(ctx.RootDir, monoRoot)
+		entries, err := os.ReadDir(monoDir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			// Add monorepo paths
+			configFiles = append(configFiles,
+				filepath.Join(monoRoot, entry.Name(), "src", "redis.ts"),
+				filepath.Join(monoRoot, entry.Name(), "src", "lib", "redis.ts"),
+				filepath.Join(monoRoot, entry.Name(), "src", "config", "redis.ts"),
+				filepath.Join(monoRoot, entry.Name(), "lib", "redis.ts"),
+				filepath.Join(monoRoot, entry.Name(), "lib", "redis.js"),
+			)
+		}
 	}
 
 	for _, file := range configFiles {
@@ -205,7 +232,7 @@ func (c SidekiqCheck) ID() string {
 }
 
 func (c SidekiqCheck) Title() string {
-	return "Sidekiq is configured"
+	return "Sidekiq"
 }
 
 func (c SidekiqCheck) Run(ctx Context) (CheckResult, error) {

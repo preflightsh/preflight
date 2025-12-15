@@ -12,7 +12,7 @@ func (c HealthCheck) ID() string {
 }
 
 func (c HealthCheck) Title() string {
-	return "Health endpoint is reachable"
+	return "Health endpoint"
 }
 
 func (c HealthCheck) Run(ctx Context) (CheckResult, error) {

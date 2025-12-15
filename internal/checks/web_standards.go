@@ -16,7 +16,7 @@ func (c RobotsTxtCheck) ID() string {
 }
 
 func (c RobotsTxtCheck) Title() string {
-	return "robots.txt is present"
+	return "robots.txt"
 }
 
 func (c RobotsTxtCheck) Run(ctx Context) (CheckResult, error) {
@@ -56,10 +56,30 @@ func (c RobotsTxtCheck) Run(ctx Context) (CheckResult, error) {
 		}
 	}
 
-	// Also check for Next.js robots.ts/js
+	// Check monorepo public directories for static robots.txt
+	monorepoStaticPaths := findMonorepoPublicFiles(ctx.RootDir, "robots.txt")
+	for _, path := range monorepoStaticPaths {
+		if content, err := os.ReadFile(path); err == nil {
+			contentStr := strings.TrimSpace(string(content))
+			if len(contentStr) > 0 {
+				relPath, _ := filepath.Rel(ctx.RootDir, path)
+				return CheckResult{
+					ID:       c.ID(),
+					Title:    c.Title(),
+					Severity: SeverityInfo,
+					Passed:   true,
+					Message:  "robots.txt found at " + relPath,
+				}, nil
+			}
+		}
+	}
+
+	// Also check for Next.js robots.ts/js (standard and src/app patterns)
 	nextRobotsPaths := []string{
 		"app/robots.ts",
 		"app/robots.js",
+		"src/app/robots.ts",
+		"src/app/robots.js",
 	}
 
 	for _, path := range nextRobotsPaths {
@@ -71,6 +91,21 @@ func (c RobotsTxtCheck) Run(ctx Context) (CheckResult, error) {
 				Severity: SeverityInfo,
 				Passed:   true,
 				Message:  "robots.txt generated via " + path,
+			}, nil
+		}
+	}
+
+	// Check monorepo structures for Next.js App Router robots
+	monorepoRobotsPaths := findMonorepoNextFiles(ctx.RootDir, []string{"robots.ts", "robots.js"})
+	for _, path := range monorepoRobotsPaths {
+		if _, err := os.Stat(path); err == nil {
+			relPath, _ := filepath.Rel(ctx.RootDir, path)
+			return CheckResult{
+				ID:       c.ID(),
+				Title:    c.Title(),
+				Severity: SeverityInfo,
+				Passed:   true,
+				Message:  "robots.txt generated via " + relPath,
 			}, nil
 		}
 	}
@@ -96,7 +131,7 @@ func (c SitemapCheck) ID() string {
 }
 
 func (c SitemapCheck) Title() string {
-	return "sitemap.xml is present"
+	return "sitemap.xml"
 }
 
 func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
@@ -136,11 +171,32 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 		}
 	}
 
-	// Check for Next.js sitemap generator
+	// Check monorepo public directories for static sitemap.xml
+	monorepoStaticPaths := findMonorepoPublicFiles(ctx.RootDir, "sitemap.xml")
+	for _, path := range monorepoStaticPaths {
+		if content, err := os.ReadFile(path); err == nil {
+			contentStr := strings.TrimSpace(string(content))
+			if len(contentStr) > 0 {
+				relPath, _ := filepath.Rel(ctx.RootDir, path)
+				return CheckResult{
+					ID:       c.ID(),
+					Title:    c.Title(),
+					Severity: SeverityInfo,
+					Passed:   true,
+					Message:  "sitemap.xml found at " + relPath,
+				}, nil
+			}
+		}
+	}
+
+	// Check for Next.js sitemap generator (standard and src/app patterns)
 	nextSitemapPaths := []string{
 		"app/sitemap.ts",
 		"app/sitemap.js",
 		"app/sitemap.xml/route.ts",
+		"src/app/sitemap.ts",
+		"src/app/sitemap.js",
+		"src/app/sitemap.xml/route.ts",
 	}
 
 	for _, path := range nextSitemapPaths {
@@ -152,6 +208,21 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 				Severity: SeverityInfo,
 				Passed:   true,
 				Message:  "sitemap.xml generated via " + path,
+			}, nil
+		}
+	}
+
+	// Check monorepo structures for Next.js App Router sitemap
+	monorepoSitemapPaths := findMonorepoNextFiles(ctx.RootDir, []string{"sitemap.ts", "sitemap.js"})
+	for _, path := range monorepoSitemapPaths {
+		if _, err := os.Stat(path); err == nil {
+			relPath, _ := filepath.Rel(ctx.RootDir, path)
+			return CheckResult{
+				ID:       c.ID(),
+				Title:    c.Title(),
+				Severity: SeverityInfo,
+				Passed:   true,
+				Message:  "sitemap.xml generated via " + relPath,
 			}, nil
 		}
 	}
@@ -460,7 +531,7 @@ func (c LLMsTxtCheck) ID() string {
 }
 
 func (c LLMsTxtCheck) Title() string {
-	return "llms.txt is present"
+	return "llms.txt"
 }
 
 func (c LLMsTxtCheck) Run(ctx Context) (CheckResult, error) {
@@ -503,6 +574,24 @@ func (c LLMsTxtCheck) Run(ctx Context) (CheckResult, error) {
 		}
 	}
 
+	// Check monorepo public directories
+	monorepoPublicPaths := findMonorepoPublicFiles(ctx.RootDir, "llms.txt")
+	for _, path := range monorepoPublicPaths {
+		if content, err := os.ReadFile(path); err == nil {
+			contentStr := strings.TrimSpace(string(content))
+			if len(contentStr) > 0 {
+				relPath, _ := filepath.Rel(ctx.RootDir, path)
+				return CheckResult{
+					ID:       c.ID(),
+					Title:    c.Title(),
+					Severity: SeverityInfo,
+					Passed:   true,
+					Message:  "llms.txt found at " + relPath,
+				}, nil
+			}
+		}
+	}
+
 	return CheckResult{
 		ID:       c.ID(),
 		Title:    c.Title(),
@@ -524,7 +613,7 @@ func (c AdsTxtCheck) ID() string {
 }
 
 func (c AdsTxtCheck) Title() string {
-	return "ads.txt is present"
+	return "ads.txt"
 }
 
 func (c AdsTxtCheck) Run(ctx Context) (CheckResult, error) {
@@ -597,7 +686,7 @@ func (c IndexNowCheck) ID() string {
 }
 
 func (c IndexNowCheck) Title() string {
-	return "IndexNow key file is present"
+	return "IndexNow key file"
 }
 
 func (c IndexNowCheck) Run(ctx Context) (CheckResult, error) {
@@ -717,4 +806,73 @@ func (c IndexNowCheck) Run(ctx Context) (CheckResult, error) {
 			"Or place it at .well-known/" + key + ".txt",
 		},
 	}, nil
+}
+
+// findMonorepoNextFiles searches for files in monorepo structures with Next.js App Router
+// convention (apps/*/src/app/, packages/*/src/app/, apps/*/app/)
+func findMonorepoNextFiles(rootDir string, filenames []string) []string {
+	var paths []string
+
+	monorepoRoots := []string{"apps", "packages", "services"}
+
+	for _, monoRoot := range monorepoRoots {
+		monoDir := filepath.Join(rootDir, monoRoot)
+		entries, err := os.ReadDir(monoDir)
+		if err != nil {
+			continue
+		}
+
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+
+			for _, filename := range filenames {
+				// Check src/app/ pattern (standard Next.js App Router)
+				srcAppPath := filepath.Join(monoDir, entry.Name(), "src", "app", filename)
+				paths = append(paths, srcAppPath)
+
+				// Check app/ pattern (alternative)
+				appPath := filepath.Join(monoDir, entry.Name(), "app", filename)
+				paths = append(paths, appPath)
+			}
+		}
+	}
+
+	return paths
+}
+
+// findMonorepoPublicFiles searches for static files in monorepo public directories
+// (apps/*/public/, packages/*/public/, etc.)
+func findMonorepoPublicFiles(rootDir, filename string) []string {
+	var paths []string
+
+	monorepoRoots := []string{"apps", "packages", "services"}
+	publicDirs := []string{"public", "static", "web"}
+
+	for _, monoRoot := range monorepoRoots {
+		monoDir := filepath.Join(rootDir, monoRoot)
+		entries, err := os.ReadDir(monoDir)
+		if err != nil {
+			continue
+		}
+
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+
+			for _, pubDir := range publicDirs {
+				// Check public directory
+				pubPath := filepath.Join(monoDir, entry.Name(), pubDir, filename)
+				paths = append(paths, pubPath)
+
+				// Also check .well-known subdirectory
+				wellKnownPath := filepath.Join(monoDir, entry.Name(), pubDir, ".well-known", filename)
+				paths = append(paths, wellKnownPath)
+			}
+		}
+	}
+
+	return paths
 }

@@ -19,8 +19,12 @@ func DetectStack(rootDir string) string {
 		return "rails"
 	}
 
-	// Check for Next.js
+	// Check for Next.js (including monorepo structures)
 	if fileExists(rootDir, "next.config.js") || fileExists(rootDir, "next.config.mjs") || fileExists(rootDir, "next.config.ts") {
+		return "next"
+	}
+	// Check monorepo structures for Next.js
+	if hasMonorepoFramework(rootDir, []string{"next.config.js", "next.config.mjs", "next.config.ts"}) {
 		return "next"
 	}
 
@@ -173,6 +177,29 @@ func fileContains(rootDir, relativePath, search string) bool {
 	return strings.Contains(string(content), search)
 }
 
+// hasMonorepoFramework checks if any monorepo subdirectory contains the specified files
+func hasMonorepoFramework(rootDir string, files []string) bool {
+	monorepoRoots := []string{"apps", "packages", "services"}
+	for _, monoRoot := range monorepoRoots {
+		monoDir := filepath.Join(rootDir, monoRoot)
+		entries, err := os.ReadDir(monoDir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			for _, file := range files {
+				if fileExists(filepath.Join(monoDir, entry.Name()), file) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // AllServices returns the list of all supported services
 var AllServices = []string{
 	// Payments
@@ -199,6 +226,13 @@ var AllServices = []string{
 	"resend",
 	"mailchimp",
 	"convertkit",
+	"beehiiv",
+	"aweber",
+	"activecampaign",
+	"campaignmonitor",
+	"drip",
+	"klaviyo",
+	"buttondown",
 
 	// Analytics
 	"plausible",
@@ -206,6 +240,7 @@ var AllServices = []string{
 	"fullres",
 	"datafast",
 	"google_analytics",
+	"posthog",
 	"mixpanel",
 	"amplitude",
 	"segment",
@@ -214,6 +249,7 @@ var AllServices = []string{
 	// Auth
 	"auth0",
 	"clerk",
+	"workos",
 	"firebase",
 	"supabase",
 
@@ -229,6 +265,7 @@ var AllServices = []string{
 	"sidekiq",
 	"rabbitmq",
 	"elasticsearch",
+	"convex",
 
 	// Storage & CDN
 	"aws_s3",
@@ -261,10 +298,30 @@ func DetectServices(rootDir string) map[string]bool {
 		services[svc] = false
 	}
 
-	// Check package.json
+	// Check package.json at root
 	if pkgJSON, err := os.ReadFile(filepath.Join(rootDir, "package.json")); err == nil {
 		content := strings.ToLower(string(pkgJSON))
 		detectServicesFromContent(content, services, "node")
+	}
+
+	// Check monorepo package.json files (apps/*, packages/*)
+	monorepoRoots := []string{"apps", "packages", "services"}
+	for _, monoRoot := range monorepoRoots {
+		monoDir := filepath.Join(rootDir, monoRoot)
+		entries, err := os.ReadDir(monoDir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			pkgPath := filepath.Join(monoDir, entry.Name(), "package.json")
+			if pkgJSON, err := os.ReadFile(pkgPath); err == nil {
+				content := strings.ToLower(string(pkgJSON))
+				detectServicesFromContent(content, services, "node")
+			}
+		}
 	}
 
 	// Check Gemfile
@@ -308,7 +365,7 @@ func detectServicesFromContent(content string, services map[string]bool, lang st
 	if strings.Contains(content, "paddle") || strings.Contains(content, "@paddle") {
 		services["paddle"] = true
 	}
-	if strings.Contains(content, "lemonsqueezy") || strings.Contains(content, "lemon-squeezy") {
+	if strings.Contains(content, "@lemonsqueezy") || strings.Contains(content, "lemonsqueezy/") {
 		services["lemonsqueezy"] = true
 	}
 
@@ -355,8 +412,29 @@ func detectServicesFromContent(content string, services map[string]bool, lang st
 	if strings.Contains(content, "mailchimp") || strings.Contains(content, "@mailchimp") {
 		services["mailchimp"] = true
 	}
-	if strings.Contains(content, "convertkit") {
+	if strings.Contains(content, "convertkit") || strings.Contains(content, "app.kit.com") {
 		services["convertkit"] = true
+	}
+	if strings.Contains(content, "beehiiv") {
+		services["beehiiv"] = true
+	}
+	if strings.Contains(content, "aweber") {
+		services["aweber"] = true
+	}
+	if strings.Contains(content, "activecampaign") {
+		services["activecampaign"] = true
+	}
+	if strings.Contains(content, "campaignmonitor") || strings.Contains(content, "campaign-monitor") || strings.Contains(content, "createsend") {
+		services["campaignmonitor"] = true
+	}
+	if strings.Contains(content, "getdrip") || strings.Contains(content, "drip.com") {
+		services["drip"] = true
+	}
+	if strings.Contains(content, "klaviyo") {
+		services["klaviyo"] = true
+	}
+	if strings.Contains(content, "buttondown") {
+		services["buttondown"] = true
 	}
 
 	// Analytics
@@ -384,6 +462,9 @@ func detectServicesFromContent(content string, services map[string]bool, lang st
 	if strings.Contains(content, "react-ga") || strings.Contains(content, "vue-gtag") {
 		services["google_analytics"] = true
 	}
+	if strings.Contains(content, "posthog") {
+		services["posthog"] = true
+	}
 
 	// Auth
 	if strings.Contains(content, "auth0") || strings.Contains(content, "@auth0") {
@@ -391,6 +472,9 @@ func detectServicesFromContent(content string, services map[string]bool, lang st
 	}
 	if strings.Contains(content, "@clerk") || strings.Contains(content, "clerk-sdk") {
 		services["clerk"] = true
+	}
+	if strings.Contains(content, "workos") || strings.Contains(content, "@workos") {
+		services["workos"] = true
 	}
 	if strings.Contains(content, "firebase") {
 		services["firebase"] = true
@@ -428,6 +512,9 @@ func detectServicesFromContent(content string, services map[string]bool, lang st
 	}
 	if strings.Contains(content, "elasticsearch") || strings.Contains(content, "@elastic") {
 		services["elasticsearch"] = true
+	}
+	if strings.Contains(content, "convex") {
+		services["convex"] = true
 	}
 
 	// Storage & CDN
@@ -475,8 +562,9 @@ func detectServicesFromContent(content string, services map[string]bool, lang st
 		services["together_ai"] = true
 	}
 
-	// SEO
-	if strings.Contains(content, "indexnow") {
+	// SEO - only detect if using IndexNow SDK/package, not just mentioning it
+	if strings.Contains(content, "indexnow-js") || strings.Contains(content, "indexnow-sdk") ||
+		strings.Contains(content, "\"indexnow\":") || strings.Contains(content, "'indexnow':") {
 		services["indexnow"] = true
 	}
 }
@@ -508,7 +596,14 @@ func detectServicesFromEnv(rootDir string, services map[string]bool) map[string]
 		"aws_ses":    {"AWS_SES_", "SES_REGION"},
 		"resend":     {"RESEND_"},
 		"mailchimp":  {"MAILCHIMP_"},
-		"convertkit": {"CONVERTKIT_"},
+		"convertkit":      {"CONVERTKIT_", "KIT_API", "KIT_FORM"},
+		"beehiiv":         {"BEEHIIV_"},
+		"aweber":          {"AWEBER_"},
+		"activecampaign":  {"ACTIVECAMPAIGN_", "AC_API"},
+		"campaignmonitor": {"CAMPAIGNMONITOR_", "CAMPAIGN_MONITOR_", "CREATESEND_"},
+		"drip":            {"DRIP_"},
+		"klaviyo":         {"KLAVIYO_"},
+		"buttondown":      {"BUTTONDOWN_"},
 
 		// Analytics
 		"plausible":        {"PLAUSIBLE_", "NEXT_PUBLIC_PLAUSIBLE"},
@@ -516,6 +611,7 @@ func detectServicesFromEnv(rootDir string, services map[string]bool) map[string]
 		"fullres":          {"FULLRES_", "NEXT_PUBLIC_FULLRES"},
 		"datafast":         {"DATAFAST_", "NEXT_PUBLIC_DATAFAST"},
 		"google_analytics": {"GA_TRACKING_ID", "GOOGLE_ANALYTICS", "NEXT_PUBLIC_GA", "GA_MEASUREMENT_ID", "GTM_"},
+		"posthog":          {"POSTHOG_", "NEXT_PUBLIC_POSTHOG"},
 		"mixpanel":         {"MIXPANEL_"},
 		"amplitude":        {"AMPLITUDE_"},
 		"segment":          {"SEGMENT_"},
@@ -524,6 +620,7 @@ func detectServicesFromEnv(rootDir string, services map[string]bool) map[string]
 		// Auth
 		"auth0":    {"AUTH0_"},
 		"clerk":    {"CLERK_", "NEXT_PUBLIC_CLERK"},
+		"workos":   {"WORKOS_"},
 		"firebase": {"FIREBASE_", "NEXT_PUBLIC_FIREBASE"},
 		"supabase": {"SUPABASE_", "NEXT_PUBLIC_SUPABASE"},
 
@@ -535,10 +632,11 @@ func detectServicesFromEnv(rootDir string, services map[string]bool) map[string]
 		"crisp":    {"CRISP_"},
 
 		// Infrastructure
-		"redis":         {"REDIS_URL", "REDIS_HOST", "REDISCLOUD_URL"},
+		"redis":         {"REDIS_URL", "REDIS_HOST", "REDISCLOUD_URL", "UPSTASH_REDIS"},
 		"sidekiq":       {"SIDEKIQ_"},
 		"rabbitmq":      {"RABBITMQ_", "AMQP_URL", "CLOUDAMQP_URL"},
 		"elasticsearch": {"ELASTICSEARCH_", "ELASTIC_"},
+		"convex":        {"CONVEX_", "NEXT_PUBLIC_CONVEX"},
 
 		// Storage & CDN
 		"aws_s3":     {"AWS_S3_", "S3_BUCKET", "AWS_BUCKET"},
@@ -564,28 +662,52 @@ func detectServicesFromEnv(rootDir string, services map[string]bool) map[string]
 		"indexnow": {"INDEXNOW_", "INDEX_NOW_"},
 	}
 
+	// Check env files at root
 	for _, envFile := range envFiles {
 		path := filepath.Join(rootDir, envFile)
-		file, err := os.Open(path)
+		scanEnvFile(path, envPatterns, services)
+	}
+
+	// Check env files in monorepo subdirectories
+	monorepoRoots := []string{"apps", "packages", "services"}
+	for _, monoRoot := range monorepoRoots {
+		monoDir := filepath.Join(rootDir, monoRoot)
+		entries, err := os.ReadDir(monoDir)
 		if err != nil {
 			continue
 		}
-		defer file.Close()
-
-		scanner := bufio.NewScanner(file)
-		for scanner.Scan() {
-			line := strings.ToUpper(scanner.Text())
-			for service, patterns := range envPatterns {
-				for _, pattern := range patterns {
-					if strings.HasPrefix(line, pattern) {
-						services[service] = true
-					}
-				}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			for _, envFile := range envFiles {
+				path := filepath.Join(monoDir, entry.Name(), envFile)
+				scanEnvFile(path, envPatterns, services)
 			}
 		}
 	}
 
 	return services
+}
+
+func scanEnvFile(path string, envPatterns map[string][]string, services map[string]bool) {
+	file, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.ToUpper(scanner.Text())
+		for service, patterns := range envPatterns {
+			for _, pattern := range patterns {
+				if strings.HasPrefix(line, pattern) {
+					services[service] = true
+				}
+			}
+		}
+	}
 }
 
 func detectAnalyticsScripts(rootDir string, services map[string]bool) {
@@ -598,6 +720,7 @@ func detectAnalyticsScripts(rootDir string, services map[string]bool) {
 		"fullres":          regexp.MustCompile(`(?i)window\.fullres|var fullres|fullres\.events`),
 		"datafast":         regexp.MustCompile(`(?i)datafa\.st/js/`),
 		"google_analytics": regexp.MustCompile(`(?i)googletagmanager\.com|google-analytics\.com/|gtag\(['"]|monsterinsights`),
+		"posthog":          regexp.MustCompile(`(?i)posthog\.com|us\.i\.posthog\.com|eu\.i\.posthog\.com|posthog\.init`),
 		"hotjar":           regexp.MustCompile(`(?i)static\.hotjar\.com|hotjar\.com/`),
 		"mixpanel":         regexp.MustCompile(`(?i)cdn\.mxpnl\.com|mixpanel\.com/|mixpanel\.init`),
 		"segment":          regexp.MustCompile(`(?i)cdn\.segment\.com|analytics\.load\(`),
@@ -629,11 +752,19 @@ func detectAnalyticsScripts(rootDir string, services map[string]bool) {
 		"aws_ses":    regexp.MustCompile(`(?i)ses\.amazonaws\.com|@aws-sdk/client-ses|aws-sdk-ses|craft-amazon-ses`),
 		"resend":     regexp.MustCompile(`(?i)api\.resend\.com|@resend/`),
 		"mailchimp":  regexp.MustCompile(`(?i)mailchimp\.com/|@mailchimp/`),
-		"convertkit": regexp.MustCompile(`(?i)convertkit\.com/|@convertkit/`),
+		"convertkit":      regexp.MustCompile(`(?i)convertkit\.com|@convertkit/|app\.kit\.com`),
+		"beehiiv":         regexp.MustCompile(`(?i)beehiiv\.com|embeds\.beehiiv\.com`),
+		"aweber":          regexp.MustCompile(`(?i)aweber\.com|forms\.aweber\.com`),
+		"activecampaign":  regexp.MustCompile(`(?i)activecampaign\.com|trackcmp\.net`),
+		"campaignmonitor": regexp.MustCompile(`(?i)campaignmonitor\.com|createsend\.com`),
+		"drip":            regexp.MustCompile(`(?i)getdrip\.com|api\.getdrip\.com`),
+		"klaviyo":         regexp.MustCompile(`(?i)klaviyo\.com|static\.klaviyo\.com`),
+		"buttondown":      regexp.MustCompile(`(?i)buttondown\.email|buttondown\.com`),
 
 		// Auth - require SDK patterns
 		"auth0":    regexp.MustCompile(`(?i)@auth0/|auth0\.com/`),
 		"clerk":    regexp.MustCompile(`(?i)@clerk/|clerk\.com/`),
+		"workos":   regexp.MustCompile(`(?i)@workos/|workos\.com/|api\.workos\.com`),
 		"firebase": regexp.MustCompile(`(?i)firebase\.google\.com|firebaseapp\.com|@firebase/`),
 		"supabase": regexp.MustCompile(`(?i)supabase\.co|@supabase/`),
 
@@ -642,6 +773,7 @@ func detectAnalyticsScripts(rootDir string, services map[string]bool) {
 		"sidekiq":       regexp.MustCompile(`(?i)Sidekiq::Worker|include Sidekiq|sidekiq\.yml`),
 		"rabbitmq":      regexp.MustCompile(`(?i)amqp://|amqps://|rabbitmq\.com|@rabbitmq/`),
 		"elasticsearch": regexp.MustCompile(`(?i)@elastic/elasticsearch|elasticsearch\.org`),
+		"convex":        regexp.MustCompile(`(?i)convex\.dev|@convex/|convex/_generated`),
 
 		// Storage/CDN - require API URLs
 		"aws_s3":     regexp.MustCompile(`(?i)s3\.amazonaws\.com|@aws-sdk/client-s3`),
@@ -660,8 +792,8 @@ func detectAnalyticsScripts(rootDir string, services map[string]bool) {
 		"replicate":   regexp.MustCompile(`(?i)api\.replicate\.com|replicate\.run`),
 		"huggingface": regexp.MustCompile(`(?i)huggingface\.co/|@huggingface/`),
 
-		// SEO
-		"indexnow": regexp.MustCompile(`(?i)api\.indexnow\.org|indexnow\.org/|IndexNow`),
+		// SEO - require actual API usage, not just the word
+		"indexnow": regexp.MustCompile(`(?i)api\.indexnow\.org|indexnow\.org/key|indexnow-js|indexnow-sdk`),
 	}
 
 	// Regex to find script src URLs
@@ -787,6 +919,7 @@ func detectAnalyticsScripts(rootDir string, services map[string]bool) {
 			"fullres":          patterns["fullres"],
 			"datafast":         patterns["datafast"],
 			"google_analytics": patterns["google_analytics"],
+			"posthog":          patterns["posthog"],
 			"hotjar":           patterns["hotjar"],
 			"mixpanel":         patterns["mixpanel"],
 			"segment":          patterns["segment"],

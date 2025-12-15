@@ -13,7 +13,7 @@ func (c FaviconCheck) ID() string {
 }
 
 func (c FaviconCheck) Title() string {
-	return "Favicon and app icons present"
+	return "Favicon and app icons"
 }
 
 func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
@@ -22,17 +22,24 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 
 	// Common web root directories across frameworks
 	webRoots := []string{
-		"public",  // Laravel, Rails, many Node.js
-		"static",  // Hugo, some SSGs
-		"web",     // Craft CMS, Symfony
-		"www",     // Some PHP apps
-		"dist",    // Built static sites
-		"build",   // Build outputs
-		"_site",   // Jekyll
-		"out",     // Next.js static export
-		"app",     // Next.js App Router
-		"",        // Root directory
+		"public",     // Laravel, Rails, many Node.js
+		"static",     // Hugo, some SSGs
+		"web",        // Craft CMS, Symfony
+		"www",        // Some PHP apps
+		"dist",       // Built static sites
+		"build",      // Build outputs
+		"_site",      // Jekyll
+		"out",        // Next.js static export
+		"app",        // Next.js App Router (pages)
+		"src/app",    // Next.js App Router (standard)
+		"",           // Root directory
 	}
+
+	// Also check monorepo structures for Next.js App Router
+	monorepoFaviconPaths := findMonorepoAppRouterPaths(ctx.RootDir, "favicon.ico")
+	monorepoFaviconPaths = append(monorepoFaviconPaths, findMonorepoAppRouterPaths(ctx.RootDir, "favicon.png")...)
+	monorepoFaviconPaths = append(monorepoFaviconPaths, findMonorepoAppRouterPaths(ctx.RootDir, "icon.png")...)
+	monorepoFaviconPaths = append(monorepoFaviconPaths, findMonorepoAppRouterPaths(ctx.RootDir, "icon.svg")...)
 
 	// Check for common favicon locations
 	faviconFiles := []string{"favicon.ico", "favicon.png", "favicon.svg", "favicon.webp", "icon.png", "icon.svg"}
@@ -59,6 +66,19 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 			hasFavicon = true
 			found = append(found, path)
 			break
+		}
+	}
+
+	// Check monorepo paths if not found
+	if !hasFavicon {
+		for _, path := range monorepoFaviconPaths {
+			if _, err := os.Stat(path); err == nil {
+				hasFavicon = true
+				// Make path relative for display
+				relPath, _ := filepath.Rel(ctx.RootDir, path)
+				found = append(found, relPath)
+				break
+			}
 		}
 	}
 
@@ -137,6 +157,37 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 				}
 			}
 		}
+
+		// Check Next.js App Router layout.tsx for metadata icons API
+		if !hasAppleIcon {
+			nextLayoutPaths := []string{
+				"app/layout.tsx",
+				"app/layout.js",
+				"src/app/layout.tsx",
+				"src/app/layout.js",
+			}
+			// Also check monorepo paths
+			monorepoLayoutPaths := findMonorepoAppRouterPaths(ctx.RootDir, "layout.tsx")
+			monorepoLayoutPaths = append(monorepoLayoutPaths, findMonorepoAppRouterPaths(ctx.RootDir, "layout.js")...)
+
+			allLayoutPaths := nextLayoutPaths
+			for _, path := range monorepoLayoutPaths {
+				relPath, _ := filepath.Rel(ctx.RootDir, path)
+				allLayoutPaths = append(allLayoutPaths, relPath)
+			}
+
+			for _, layoutPath := range allLayoutPaths {
+				fullPath := filepath.Join(ctx.RootDir, layoutPath)
+				if content, err := os.ReadFile(fullPath); err == nil {
+					// Check for Next.js metadata icons with apple property
+					if regexp.MustCompile(`(?i)icons\s*[:=]\s*\{[^}]*apple\s*:`).Match(content) {
+						hasAppleIcon = true
+						found = append(found, "apple-touch-icon (in Next.js metadata)")
+						break
+					}
+				}
+			}
+		}
 	}
 
 	if !hasAppleIcon {
@@ -158,6 +209,15 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 		}
 	}
 
+	// Add Next.js App Router manifest locations
+	nextManifestPaths := []string{
+		"app/manifest.ts",
+		"app/manifest.js",
+		"src/app/manifest.ts",
+		"src/app/manifest.js",
+	}
+	manifestPaths = append(manifestPaths, nextManifestPaths...)
+
 	hasManifest := false
 	for _, path := range manifestPaths {
 		fullPath := filepath.Join(ctx.RootDir, path)
@@ -165,6 +225,20 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 			hasManifest = true
 			found = append(found, path)
 			break
+		}
+	}
+
+	// Check monorepo paths for manifest
+	if !hasManifest {
+		monorepoManifestPaths := findMonorepoAppRouterPaths(ctx.RootDir, "manifest.ts")
+		monorepoManifestPaths = append(monorepoManifestPaths, findMonorepoAppRouterPaths(ctx.RootDir, "manifest.js")...)
+		for _, path := range monorepoManifestPaths {
+			if _, err := os.Stat(path); err == nil {
+				hasManifest = true
+				relPath, _ := filepath.Rel(ctx.RootDir, path)
+				found = append(found, relPath)
+				break
+			}
 		}
 	}
 
@@ -220,4 +294,37 @@ func joinStrings(strs []string, sep string) string {
 		result += sep + strs[i]
 	}
 	return result
+}
+
+// findMonorepoAppRouterPaths searches for a file in common monorepo structures
+// with Next.js App Router convention (apps/*/src/app/, packages/*/src/app/)
+func findMonorepoAppRouterPaths(rootDir, filename string) []string {
+	var paths []string
+
+	// Common monorepo directory names
+	monorepoRoots := []string{"apps", "packages", "services"}
+
+	for _, monoRoot := range monorepoRoots {
+		monoDir := filepath.Join(rootDir, monoRoot)
+		entries, err := os.ReadDir(monoDir)
+		if err != nil {
+			continue
+		}
+
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+
+			// Check src/app/ pattern (standard Next.js App Router)
+			srcAppPath := filepath.Join(monoDir, entry.Name(), "src", "app", filename)
+			paths = append(paths, srcAppPath)
+
+			// Check app/ pattern (alternative)
+			appPath := filepath.Join(monoDir, entry.Name(), "app", filename)
+			paths = append(paths, appPath)
+		}
+	}
+
+	return paths
 }

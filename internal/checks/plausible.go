@@ -14,7 +14,7 @@ func (c PlausibleCheck) ID() string {
 }
 
 func (c PlausibleCheck) Title() string {
-	return "Plausible analytics script is present"
+	return "Plausible Analytics"
 }
 
 func (c PlausibleCheck) Run(ctx Context) (CheckResult, error) {

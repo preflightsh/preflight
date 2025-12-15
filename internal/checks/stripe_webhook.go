@@ -15,7 +15,7 @@ func (c StripeWebhookCheck) ID() string {
 }
 
 func (c StripeWebhookCheck) Title() string {
-	return "Stripe is configured"
+	return "Stripe"
 }
 
 func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {

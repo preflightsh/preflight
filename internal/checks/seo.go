@@ -14,7 +14,7 @@ func (c SEOMetadataCheck) ID() string {
 }
 
 func (c SEOMetadataCheck) Title() string {
-	return "SEO metadata is present"
+	return "SEO metadata"
 }
 
 func (c SEOMetadataCheck) Run(ctx Context) (CheckResult, error) {

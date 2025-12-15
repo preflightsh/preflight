@@ -12,7 +12,7 @@ func (c SecurityHeadersCheck) ID() string {
 }
 
 func (c SecurityHeadersCheck) Title() string {
-	return "Security headers are present"
+	return "Security headers"
 }
 
 func (c SecurityHeadersCheck) Run(ctx Context) (CheckResult, error) {

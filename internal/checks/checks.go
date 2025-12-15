@@ -72,20 +72,30 @@ func isLocalURL(url string) bool {
 		strings.HasSuffix(url, ".ddev.site")
 }
 
+// doGet performs an HTTP GET with a User-Agent header
+func doGet(client *http.Client, url string) (*http.Response, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "Preflight/1.0")
+	return client.Do(req)
+}
+
 // tryURL attempts to reach a URL, trying both protocols for local URLs
 func tryURL(client *http.Client, url string) (*http.Response, string, error) {
 	// If it's a local URL without protocol, try both
 	if isLocalURL(url) && !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 		// Try https first (for ddev, etc.)
 		httpsURL := "https://" + url
-		resp, err := client.Get(httpsURL)
+		resp, err := doGet(client, httpsURL)
 		if err == nil {
 			return resp, httpsURL, nil
 		}
 
 		// Fall back to http
 		httpURL := "http://" + url
-		resp, err = client.Get(httpURL)
+		resp, err = doGet(client, httpURL)
 		if err == nil {
 			return resp, httpURL, nil
 		}
@@ -95,7 +105,7 @@ func tryURL(client *http.Client, url string) (*http.Response, string, error) {
 	// If it already has a protocol, or it's a local URL with protocol, just try it
 	// But for local URLs, also try the alternate protocol
 	if isLocalURL(url) {
-		resp, err := client.Get(url)
+		resp, err := doGet(client, url)
 		if err == nil {
 			return resp, url, nil
 		}
@@ -109,7 +119,7 @@ func tryURL(client *http.Client, url string) (*http.Response, string, error) {
 		}
 
 		if altURL != "" {
-			resp, err = client.Get(altURL)
+			resp, err = doGet(client, altURL)
 			if err == nil {
 				return resp, altURL, nil
 			}
@@ -118,6 +128,6 @@ func tryURL(client *http.Client, url string) (*http.Response, string, error) {
 	}
 
 	// Non-local URL, just try it directly
-	resp, err := client.Get(url)
+	resp, err := doGet(client, url)
 	return resp, url, err
 }

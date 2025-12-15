@@ -15,7 +15,7 @@ func (c SSLCheck) ID() string {
 }
 
 func (c SSLCheck) Title() string {
-	return "SSL certificate is valid"
+	return "SSL certificate"
 }
 
 func (c SSLCheck) Run(ctx Context) (CheckResult, error) {

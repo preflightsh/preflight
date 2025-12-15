@@ -15,7 +15,7 @@ func (c SecretScanCheck) ID() string {
 }
 
 func (c SecretScanCheck) Title() string {
-	return "No secrets in tracked files"
+	return "Secrets scan"
 }
 
 func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {

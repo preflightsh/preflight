@@ -89,11 +89,17 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	// Ask about additional services not detected
 	fmt.Println()
-	fmt.Println("Any other services? (y/n for each):")
-	for _, svc := range config.AllServices {
-		if _, exists := confirmedServices[svc]; !exists {
-			if promptYesNo(reader, fmt.Sprintf("  Use %s?", formatServiceName(svc)), false) {
-				confirmedServices[svc] = config.ServiceConfig{Declared: true}
+	fmt.Println("Any other services to check for?")
+	fmt.Println("  1. Skip (use only detected services)")
+	fmt.Println("  2. Go through full list (recommended for first setup)")
+	choice := promptWithDefault(reader, "  Choose", "1")
+	if choice == "2" {
+		fmt.Println()
+		for _, svc := range config.AllServices {
+			if _, exists := confirmedServices[svc]; !exists {
+				if promptYesNo(reader, fmt.Sprintf("  Use %s?", formatServiceName(svc)), false) {
+					confirmedServices[svc] = config.ServiceConfig{Declared: true}
+				}
 			}
 		}
 	}
@@ -475,13 +481,20 @@ func formatServiceName(svc string) string {
 		"logrocket":   "LogRocket",
 
 		// Email
-		"postmark":   "Postmark",
-		"sendgrid":   "SendGrid",
-		"mailgun":    "Mailgun",
-		"aws_ses":    "AWS SES",
-		"resend":     "Resend",
-		"mailchimp":  "Mailchimp",
-		"convertkit": "Kit",
+		"postmark":        "Postmark",
+		"sendgrid":        "SendGrid",
+		"mailgun":         "Mailgun",
+		"aws_ses":         "AWS SES",
+		"resend":          "Resend",
+		"mailchimp":       "Mailchimp",
+		"convertkit":      "Kit",
+		"beehiiv":         "Beehiiv",
+		"aweber":          "AWeber",
+		"activecampaign":  "ActiveCampaign",
+		"campaignmonitor": "Campaign Monitor",
+		"drip":            "Drip",
+		"klaviyo":         "Klaviyo",
+		"buttondown":      "Buttondown",
 
 		// Analytics
 		"plausible":        "Plausible Analytics",
@@ -489,6 +502,7 @@ func formatServiceName(svc string) string {
 		"fullres":          "Fullres Analytics",
 		"datafast":         "Datafa.st Analytics",
 		"google_analytics": "Google Analytics",
+		"posthog":          "PostHog",
 		"mixpanel":         "Mixpanel",
 		"amplitude":        "Amplitude",
 		"segment":          "Segment",
@@ -497,6 +511,7 @@ func formatServiceName(svc string) string {
 		// Auth
 		"auth0":    "Auth0",
 		"clerk":    "Clerk",
+		"workos":   "WorkOS",
 		"firebase": "Firebase",
 		"supabase": "Supabase",
 
@@ -512,6 +527,7 @@ func formatServiceName(svc string) string {
 		"sidekiq":       "Sidekiq",
 		"rabbitmq":      "RabbitMQ",
 		"elasticsearch": "Elasticsearch",
+		"convex":        "Convex",
 
 		// Storage & CDN
 		"aws_s3":     "AWS S3",

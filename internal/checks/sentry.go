@@ -14,7 +14,7 @@ func (c SentryCheck) ID() string {
 }
 
 func (c SentryCheck) Title() string {
-	return "Sentry is initialized"
+	return "Sentry"
 }
 
 func (c SentryCheck) Run(ctx Context) (CheckResult, error) {
@@ -42,6 +42,56 @@ func (c SentryCheck) Run(ctx Context) (CheckResult, error) {
 		regexp.MustCompile(`\bsentry-laravel\b`),     // Laravel
 	}
 
+	// Check for Next.js Sentry config files at root first
+	nextjsSentryFiles := []string{
+		"sentry.client.config.ts",
+		"sentry.client.config.js",
+		"sentry.server.config.ts",
+		"sentry.server.config.js",
+		"sentry.edge.config.ts",
+		"sentry.edge.config.js",
+	}
+
+	for _, file := range nextjsSentryFiles {
+		path := filepath.Join(ctx.RootDir, file)
+		if _, err := os.Stat(path); err == nil {
+			return CheckResult{
+				ID:       c.ID(),
+				Title:    c.Title(),
+				Severity: SeverityInfo,
+				Passed:   true,
+				Message:  "Sentry initialization found",
+			}, nil
+		}
+	}
+
+	// Check monorepo structures for Sentry config
+	monorepoRoots := []string{"apps", "packages", "services"}
+	for _, monoRoot := range monorepoRoots {
+		monoDir := filepath.Join(ctx.RootDir, monoRoot)
+		entries, err := os.ReadDir(monoDir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			for _, file := range nextjsSentryFiles {
+				path := filepath.Join(monoDir, entry.Name(), file)
+				if _, err := os.Stat(path); err == nil {
+					return CheckResult{
+						ID:       c.ID(),
+						Title:    c.Title(),
+						Severity: SeverityInfo,
+						Passed:   true,
+						Message:  "Sentry initialization found",
+					}, nil
+				}
+			}
+		}
+	}
+
 	// Directories to search
 	searchDirs := []string{
 		"src",
@@ -49,6 +99,25 @@ func (c SentryCheck) Run(ctx Context) (CheckResult, error) {
 		"lib",
 		"config",
 		"config/initializers",
+	}
+
+	// Also add monorepo src directories
+	for _, monoRoot := range monorepoRoots {
+		monoDir := filepath.Join(ctx.RootDir, monoRoot)
+		entries, err := os.ReadDir(monoDir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			searchDirs = append(searchDirs,
+				filepath.Join(monoRoot, entry.Name(), "src"),
+				filepath.Join(monoRoot, entry.Name(), "app"),
+				filepath.Join(monoRoot, entry.Name(), "lib"),
+			)
+		}
 	}
 
 	// File extensions to check

@@ -15,7 +15,7 @@ func (c EnvParityCheck) ID() string {
 }
 
 func (c EnvParityCheck) Title() string {
-	return "Environment variables are in sync"
+	return "Environment variables"
 }
 
 func (c EnvParityCheck) Run(ctx Context) (CheckResult, error) {

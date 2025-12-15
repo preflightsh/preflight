@@ -130,8 +130,13 @@ func (h HumanOutputter) Output(projectName string, results []checks.CheckResult)
 
 		fmt.Printf("  %s %s%-45s%s %s\n", categoryLabel, colorReset, r.Title, colorReset, status)
 
-		if !r.Passed && r.Message != "" {
-			fmt.Printf("  %s                  └─ %s%s\n", colorGray, r.Message, colorReset)
+		// Show message for failed checks, or for passed checks with useful info
+		if r.Message != "" {
+			if !r.Passed {
+				fmt.Printf("  %s                  └─ %s%s\n", colorGray, r.Message, colorReset)
+			} else if hasUsefulPassedMessage(r.Message) {
+				fmt.Printf("  %s                  └─ %s%s\n", colorGray, r.Message, colorReset)
+			}
 		}
 	}
 
@@ -161,6 +166,25 @@ func (h HumanOutputter) Output(projectName string, results []checks.CheckResult)
 		fmt.Printf("  %s%s✓ Ready for launch!%s\n", colorBold, colorGreen, colorReset)
 	}
 	fmt.Println()
+}
+
+// hasUsefulPassedMessage returns true if the message contains info worth showing
+// even when the check passed (e.g., license type, version info)
+func hasUsefulPassedMessage(msg string) bool {
+	// Show messages that identify specific types/versions
+	usefulPatterns := []string{
+		"license found",  // License type detection
+		"MIT", "Apache", "GPL", "AGPL", "BSD", "ISC", "MPL",
+		"(at ", // Location info for files found in parent dirs
+	}
+
+	msgLower := strings.ToLower(msg)
+	for _, pattern := range usefulPatterns {
+		if strings.Contains(msgLower, strings.ToLower(pattern)) {
+			return true
+		}
+	}
+	return false
 }
 
 func formatStatus(r checks.CheckResult) string {
