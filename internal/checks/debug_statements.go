@@ -359,8 +359,10 @@ func scanForDebugStatements(rootDir string) []string {
 				}
 
 				if p.pattern.MatchString(line) {
-					relPath, _ := filepath.Rel(rootDir, path)
-					findings = append(findings, fmt.Sprintf("%s:%d - %s", relPath, lineNum+1, p.description))
+					if !isDevGuarded(lines, lineNum) {
+						relPath, _ := filepath.Rel(rootDir, path)
+						findings = append(findings, fmt.Sprintf("%s:%d - %s", relPath, lineNum+1, p.description))
+					}
 				}
 			}
 		}
@@ -369,4 +371,51 @@ func scanForDebugStatements(rootDir string) []string {
 	})
 
 	return findings
+}
+
+func isDevGuarded(lines []string, lineNum int) bool {
+	devPatterns := []string{
+		"process.env.NODE_ENV",
+		"import.meta.env.DEV",
+		"import.meta.env.MODE",
+		"__DEV__",
+		"isDev",
+		"isDevelopment",
+		"isDebug",
+		"config('app.debug')",
+		"config('app.env')",
+		"APP_DEBUG",
+		"app()->isLocal()",
+		"App::isLocal()",
+		"app.debug",
+		"Rails.env.development",
+		"Rails.env.local",
+		"Rails.env.test",
+		"settings.DEBUG",
+		"DEBUG =",
+		"os.environ",
+		"os.getenv",
+		"devMode",
+		"craft.app.config.general.devMode",
+		"development",
+		"!production",
+		"!== 'production'",
+		"!= 'production'",
+	}
+
+	start := lineNum - 3
+	if start < 0 {
+		start = 0
+	}
+
+	for i := start; i <= lineNum; i++ {
+		lineLower := strings.ToLower(lines[i])
+		for _, pattern := range devPatterns {
+			if strings.Contains(lineLower, strings.ToLower(pattern)) {
+				return true
+			}
+		}
+	}
+
+	return false
 }
