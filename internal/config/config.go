@@ -37,6 +37,7 @@ type ChecksConfig struct {
 	AdsTxt         *AdsTxtConfig         `yaml:"adsTxt,omitempty"`
 	License        *LicenseConfig        `yaml:"license,omitempty"`
 	IndexNow       *IndexNowConfig       `yaml:"indexNow,omitempty"`
+	EmailAuth      *EmailAuthConfig      `yaml:"emailAuth,omitempty"`
 }
 
 type EnvParityConfig struct {
@@ -87,6 +88,10 @@ type LicenseConfig struct {
 type IndexNowConfig struct {
 	Enabled bool   `yaml:"enabled"`
 	Key     string `yaml:"key"`
+}
+
+type EmailAuthConfig struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 // Load reads and parses the preflight.yml config file

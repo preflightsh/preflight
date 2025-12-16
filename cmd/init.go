@@ -113,6 +113,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// Ask about ads
 	hasAds := promptYesNo(reader, "Does this site serve ads or advertisements?", false)
 
+	// Ask about email authentication
+	checkEmailAuth := promptYesNo(reader, "Check email deliverability on prod (SPF/DMARC records)?", false)
+
 	// Handle IndexNow - user already confirmed/declined in services section
 	var indexNowKey string
 	indexNowConfirmed := confirmedServices["indexnow"].Declared
@@ -159,7 +162,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 			Production: productionURL,
 		},
 		Services: confirmedServices,
-		Checks:   buildDefaultChecks(cwd, stack, confirmedServices, productionURL, hasLicense, hasAds, indexNowKey),
+		Checks:   buildDefaultChecks(cwd, stack, confirmedServices, productionURL, hasLicense, hasAds, indexNowKey, checkEmailAuth),
 	}
 
 	// Write config file
@@ -274,7 +277,7 @@ func getDefaultProjectName(cwd string) string {
 	return "my-project"
 }
 
-func buildDefaultChecks(cwd, stack string, services map[string]config.ServiceConfig, productionURL string, hasLicense bool, hasAds bool, indexNowKey string) config.ChecksConfig {
+func buildDefaultChecks(cwd, stack string, services map[string]config.ServiceConfig, productionURL string, hasLicense bool, hasAds bool, indexNowKey string, checkEmailAuth bool) config.ChecksConfig {
 	checks := config.ChecksConfig{
 		EnvParity: &config.EnvParityConfig{
 			Enabled:     true,
@@ -306,6 +309,9 @@ func buildDefaultChecks(cwd, stack string, services map[string]config.ServiceCon
 		IndexNow: &config.IndexNowConfig{
 			Enabled: indexNowKey != "",
 			Key:     indexNowKey,
+		},
+		EmailAuth: &config.EmailAuthConfig{
+			Enabled: checkEmailAuth,
 		},
 	}
 

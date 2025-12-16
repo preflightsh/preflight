@@ -186,6 +186,11 @@ func buildEnabledChecks(cfg *config.PreflightConfig) []checks.Check {
 		enabledChecks = append(enabledChecks, checks.SSLCheck{})
 	}
 
+	// Email Auth Check - runs if enabled and production URL is set
+	if cfg.Checks.EmailAuth != nil && cfg.Checks.EmailAuth.Enabled && cfg.URLs.Production != "" {
+		enabledChecks = append(enabledChecks, checks.EmailAuthCheck{})
+	}
+
 	// Secrets Check
 	if cfg.Checks.Secrets != nil && cfg.Checks.Secrets.Enabled {
 		enabledChecks = append(enabledChecks, checks.SecretScanCheck{})

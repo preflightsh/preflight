@@ -123,6 +123,7 @@ func (h HumanOutputter) Output(projectName string, results []checks.CheckResult)
 		"debug_statements":  "DEBUG",
 		"structured_data":      "SEO",
 		"image_optimization":   "PERF",
+		"email_auth":           "EMAIL",
 	}
 
 	// Print results
