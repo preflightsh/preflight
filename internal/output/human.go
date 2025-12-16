@@ -123,7 +123,7 @@ func (h HumanOutputter) Output(projectName string, results []checks.CheckResult)
 	}
 
 	// Print results
-	for _, r := range results {
+	for i, r := range results {
 		category := categoryMap[r.ID]
 		if category == "" {
 			category = strings.ToUpper(r.ID)
@@ -146,6 +146,11 @@ func (h HumanOutputter) Output(projectName string, results []checks.CheckResult)
 			} else if hasUsefulPassedMessage(r.Message) {
 				fmt.Printf("  %s                  └─ %s%s\n", colorGray, r.Message, colorReset)
 			}
+		}
+
+		// Add subtle divider between checks (except after the last one)
+		if i < len(results)-1 {
+			fmt.Printf("  %s· · · · · · · · · · · · · · · · · · · · · · · · · · · ·%s\n", colorGray, colorReset)
 		}
 	}
 
