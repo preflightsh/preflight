@@ -161,6 +161,21 @@ func buildEnabledChecks(cfg *config.PreflightConfig) []checks.Check {
 		enabledChecks = append(enabledChecks, checks.OGTwitterCheck{})
 	}
 
+	// Canonical URL Check - runs if SEO Meta is configured
+	if cfg.Checks.SEOMeta != nil && cfg.Checks.SEOMeta.Enabled {
+		enabledChecks = append(enabledChecks, checks.CanonicalURLCheck{})
+	}
+
+	// Viewport Meta Check - runs if SEO Meta is configured
+	if cfg.Checks.SEOMeta != nil && cfg.Checks.SEOMeta.Enabled {
+		enabledChecks = append(enabledChecks, checks.ViewportCheck{})
+	}
+
+	// HTML Lang Attribute Check - runs if SEO Meta is configured
+	if cfg.Checks.SEOMeta != nil && cfg.Checks.SEOMeta.Enabled {
+		enabledChecks = append(enabledChecks, checks.LangAttributeCheck{})
+	}
+
 	// Security Headers Check
 	if cfg.Checks.Security != nil && cfg.Checks.Security.Enabled {
 		enabledChecks = append(enabledChecks, checks.SecurityHeadersCheck{})

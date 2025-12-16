@@ -60,6 +60,9 @@ var Registry = []Check{
 	AdsTxtCheck{},
 	LicenseCheck{},
 	ErrorPagesCheck{},
+	CanonicalURLCheck{},
+	ViewportCheck{},
+	LangAttributeCheck{},
 }
 
 // isLocalURL checks if a URL points to localhost or local IP
