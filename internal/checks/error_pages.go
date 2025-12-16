@@ -168,13 +168,13 @@ func getErrorPagePaths(stack string) (paths404 []string, paths500 []string) {
 			"404.php",
 			"wp-content/themes/theme/404.php",
 		}
-		// Also check for any theme's 404.php
-		paths500 = []string{} // WordPress handles 500 errors at server level
+		paths500 = []string{}
 
 	case "craft":
 		paths404 = []string{
 			"templates/404.twig",
 			"templates/404.html",
+			"templates/error.twig",
 			"templates/errors/404.twig",
 			"templates/errors/404.html",
 		}

@@ -126,16 +126,6 @@ func scanForDebugStatements(rootDir string) []string {
 			extensions:  []string{".php", ".blade.php"},
 		},
 		{
-			pattern:     regexp.MustCompile(`\bdie\s*\(`),
-			description: "die()",
-			extensions:  []string{".php", ".blade.php"},
-		},
-		{
-			pattern:     regexp.MustCompile(`\bexit\s*\(`),
-			description: "exit()",
-			extensions:  []string{".php", ".blade.php"},
-		},
-		{
 			pattern:     regexp.MustCompile(`\bray\s*\(`),
 			description: "ray() - Spatie Ray debugger",
 			extensions:  []string{".php", ".blade.php"},
@@ -249,13 +239,13 @@ func scanForDebugStatements(rootDir string) []string {
 		".turbo":         true,
 		".vercel":        true,
 		".netlify":       true,
-		"public":         true, // Usually compiled assets
+		"public":         true,
 		"static":         true,
 		"_site":          true,
 		"out":            true,
+		"assets":         true,
 	}
 
-	// Files/patterns to skip
 	skipFiles := []string{
 		".min.js",
 		".bundle.js",
@@ -274,6 +264,27 @@ func scanForDebugStatements(rootDir string) []string {
 		"_test.go",
 		"_test.rb",
 		"test_",
+		"alpine",
+		"jquery",
+		"lodash",
+		"underscore",
+		"react.",
+		"react-dom",
+		"vue.",
+		"angular",
+		"ember",
+		"backbone",
+		"moment",
+		"axios",
+		"d3.",
+		"chart.",
+		"three.",
+		"gsap",
+		"anime.",
+		"htmx",
+		"hyperscript",
+		"turbo",
+		"stimulus",
 	}
 
 	// Walk the project
