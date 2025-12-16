@@ -198,6 +198,7 @@ func buildEnabledChecks(cfg *config.PreflightConfig) []checks.Check {
 	enabledChecks = append(enabledChecks, checks.LLMsTxtCheck{})
 	enabledChecks = append(enabledChecks, checks.VulnerabilityCheck{})
 	enabledChecks = append(enabledChecks, checks.ErrorPagesCheck{})
+	enabledChecks = append(enabledChecks, checks.DebugStatementsCheck{})
 
 	// License Check - only if enabled (opt-in for open source projects)
 	if cfg.Checks.License != nil && cfg.Checks.License.Enabled {
