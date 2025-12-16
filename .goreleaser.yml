@@ -44,7 +44,39 @@ brews:
     install: |
       bin.install "preflight"
 
-dockers: []
+dockers:
+  - id: preflight-amd64
+    goos: linux
+    goarch: amd64
+    image_templates:
+      - "ghcr.io/preflightsh/preflight:{{ .Version }}-amd64"
+      - "ghcr.io/preflightsh/preflight:latest-amd64"
+    dockerfile: Dockerfile
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/amd64"
+
+  - id: preflight-arm64
+    goos: linux
+    goarch: arm64
+    image_templates:
+      - "ghcr.io/preflightsh/preflight:{{ .Version }}-arm64"
+      - "ghcr.io/preflightsh/preflight:latest-arm64"
+    dockerfile: Dockerfile
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/arm64"
+
+docker_manifests:
+  - name_template: "ghcr.io/preflightsh/preflight:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/preflightsh/preflight:{{ .Version }}-amd64"
+      - "ghcr.io/preflightsh/preflight:{{ .Version }}-arm64"
+
+  - name_template: "ghcr.io/preflightsh/preflight:latest"
+    image_templates:
+      - "ghcr.io/preflightsh/preflight:latest-amd64"
+      - "ghcr.io/preflightsh/preflight:latest-arm64"
 
 release:
   prerelease: false

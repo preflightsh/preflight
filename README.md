@@ -30,6 +30,12 @@ go install github.com/preflightsh/preflight@latest
 curl -sSL https://raw.githubusercontent.com/preflightsh/preflight/main/install.sh | sh
 ```
 
+### Docker
+
+```bash
+docker run -v $(pwd):/app ghcr.io/preflightsh/preflight scan
+```
+
 ### Manual Download
 
 Download the latest release from [GitHub Releases](https://github.com/preflightsh/preflight/releases).
@@ -183,11 +189,17 @@ checks:
 ## CI Integration
 
 ```yaml
-# GitHub Actions example
+# GitHub Actions example (curl)
 - name: Run Preflight
   run: |
     curl -sSL https://raw.githubusercontent.com/preflightsh/preflight/main/install.sh | sh
     preflight scan --ci --format json
+```
+
+```yaml
+# GitHub Actions example (Docker)
+- name: Run Preflight
+  run: docker run -v ${{ github.workspace }}:/app ghcr.io/preflightsh/preflight scan --ci --format json
 ```
 
 ## License
