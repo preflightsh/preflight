@@ -84,26 +84,21 @@ func getUpgradeCommand() string {
 
 	path := strings.ToLower(executable)
 
-	// Homebrew
 	if strings.Contains(path, "homebrew") || strings.Contains(path, "cellar") || strings.Contains(path, "/opt/homebrew") {
-		return "brew upgrade preflight"
+		return "brew upgrade preflightsh/preflight/preflight"
 	}
 
-	// npm global install
 	if strings.Contains(path, "node_modules") || strings.Contains(path, ".npm") {
 		return "npm update -g @preflightsh/preflight"
 	}
 
-	// Go install
 	if strings.Contains(path, "/go/bin") || strings.Contains(path, "gopath") {
 		return "go install github.com/preflightsh/preflight@latest"
 	}
 
-	// Docker - check for .dockerenv file
 	if _, err := os.Stat("/.dockerenv"); err == nil {
 		return "docker pull ghcr.io/preflightsh/preflight:latest"
 	}
 
-	// Default to curl
 	return "curl -sSL https://preflight.sh/install.sh | sh"
 }
