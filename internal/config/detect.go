@@ -128,6 +128,12 @@ func DetectStack(rootDir string) string {
 		return "rust"
 	}
 
+	// Check for basic PHP site (before Node.js, since PHP sites often use Node for build tools)
+	if fileExists(rootDir, "public/index.php") || fileExists(rootDir, "index.php") {
+		// Not a known PHP framework, just a plain PHP site
+		return "php"
+	}
+
 	// Check for Node.js frameworks
 	if fileExists(rootDir, "package.json") {
 		// Check for Vite
@@ -370,10 +376,21 @@ func detectServicesFromContent(content string, services map[string]bool, lang st
 	if strings.Contains(content, "paypal") || strings.Contains(content, "@paypal") {
 		services["paypal"] = true
 	}
-	if strings.Contains(content, "braintree") {
+	// Braintree Payments SDK patterns (not braintree.com AI company)
+	if strings.Contains(content, "braintree/braintree") || // composer package
+		strings.Contains(content, "Braintree\\Gateway") || // PHP namespace
+		strings.Contains(content, "Braintree::") || // Ruby module
+		strings.Contains(content, "braintree.BraintreeGateway") || // Node SDK
+		strings.Contains(content, "braintree.Environment") || // Python/Node SDK
+		strings.Contains(content, "braintreepayments") || // domain
+		strings.Contains(content, "BRAINTREE_MERCHANT_ID") ||
+		strings.Contains(content, "BRAINTREE_PUBLIC_KEY") ||
+		strings.Contains(content, "BRAINTREE_PRIVATE_KEY") {
 		services["braintree"] = true
 	}
-	if strings.Contains(content, "paddle") || strings.Contains(content, "@paddle") {
+	// Paddle - be specific to avoid matching sports/game paddle
+	if strings.Contains(content, "@paddle/") || strings.Contains(content, "paddle-node") ||
+		strings.Contains(content, "paddle.com") || strings.Contains(content, "\"paddle\":") {
 		services["paddle"] = true
 	}
 	if strings.Contains(content, "@lemonsqueezy") || strings.Contains(content, "lemonsqueezy/") {
@@ -381,7 +398,9 @@ func detectServicesFromContent(content string, services map[string]bool, lang st
 	}
 
 	// Error Tracking & Monitoring
-	if strings.Contains(content, "sentry") || strings.Contains(content, "@sentry") {
+	// Sentry - be specific to avoid matching the word "sentry" (guard)
+	if strings.Contains(content, "@sentry/") || strings.Contains(content, "sentry-") ||
+		strings.Contains(content, "sentry.io") || strings.Contains(content, "\"sentry\":") {
 		services["sentry"] = true
 	}
 	if strings.Contains(content, "bugsnag") {
@@ -404,7 +423,9 @@ func detectServicesFromContent(content string, services map[string]bool, lang st
 	}
 
 	// Email
-	if strings.Contains(content, "postmark") {
+	// Postmark - be specific to avoid matching "postmark" (stamp mark)
+	if strings.Contains(content, "postmarkapp") || strings.Contains(content, "postmark-") ||
+		strings.Contains(content, "\"postmark\":") || strings.Contains(content, "@wildbit/postmark") {
 		services["postmark"] = true
 	}
 	if strings.Contains(content, "sendgrid") || strings.Contains(content, "@sendgrid") {
@@ -417,7 +438,9 @@ func detectServicesFromContent(content string, services map[string]bool, lang st
 		strings.Contains(content, "craft-amazon-ses") || strings.Contains(content, "amazon-ses") {
 		services["aws_ses"] = true
 	}
-	if strings.Contains(content, "resend") && !strings.Contains(content, "resend(") {
+	// Resend - be specific to avoid matching the common word "resend"
+	if strings.Contains(content, "resend.com") || strings.Contains(content, "\"resend\":") ||
+		strings.Contains(content, "@resend/") || strings.Contains(content, "from resend") {
 		services["resend"] = true
 	}
 	if strings.Contains(content, "mailchimp") || strings.Contains(content, "@mailchimp") {
@@ -449,7 +472,13 @@ func detectServicesFromContent(content string, services map[string]bool, lang st
 	}
 
 	// Analytics
-	if strings.Contains(content, "fathom") {
+	// Plausible
+	if strings.Contains(content, "plausible-tracker") || strings.Contains(content, "plausible.io") {
+		services["plausible"] = true
+	}
+	// Fathom - be specific to avoid matching the common word "fathom" (understand/depth)
+	if strings.Contains(content, "usefathom") || strings.Contains(content, "fathom-client") ||
+		strings.Contains(content, "\"fathom\":") {
 		services["fathom"] = true
 	}
 	if strings.Contains(content, "fullres") {
@@ -461,10 +490,14 @@ func detectServicesFromContent(content string, services map[string]bool, lang st
 	if strings.Contains(content, "mixpanel") {
 		services["mixpanel"] = true
 	}
-	if strings.Contains(content, "amplitude") {
+	// Amplitude - be specific to avoid matching the physics/math term
+	if strings.Contains(content, "@amplitude/") || strings.Contains(content, "amplitude-js") ||
+		strings.Contains(content, "amplitude.com") || strings.Contains(content, "\"amplitude\":") {
 		services["amplitude"] = true
 	}
-	if strings.Contains(content, "segment") || strings.Contains(content, "@segment") {
+	// Segment - be specific to avoid matching the common word "segment"
+	if strings.Contains(content, "@segment/") || strings.Contains(content, "segment.com") ||
+		strings.Contains(content, "analytics-node") || strings.Contains(content, "\"@segment") {
 		services["segment"] = true
 	}
 	if strings.Contains(content, "hotjar") {
@@ -478,10 +511,12 @@ func detectServicesFromContent(content string, services map[string]bool, lang st
 	}
 
 	// Auth
-	if strings.Contains(content, "auth0") || strings.Contains(content, "@auth0") {
+	if strings.Contains(content, "auth0") || strings.Contains(content, "@auth0/") {
 		services["auth0"] = true
 	}
-	if strings.Contains(content, "@clerk") || strings.Contains(content, "clerk-sdk") {
+	// Clerk - be specific to avoid matching the common word "clerk" (office worker)
+	if strings.Contains(content, "@clerk/") || strings.Contains(content, "clerk-sdk") ||
+		strings.Contains(content, "clerk.com") || strings.Contains(content, "\"@clerk") {
 		services["clerk"] = true
 	}
 	if strings.Contains(content, "workos") || strings.Contains(content, "@workos") {
@@ -495,19 +530,29 @@ func detectServicesFromContent(content string, services map[string]bool, lang st
 	}
 
 	// Communication
-	if strings.Contains(content, "twilio") {
+	// Twilio - add more SDK patterns
+	if strings.Contains(content, "twilio") || strings.Contains(content, "@twilio/") {
 		services["twilio"] = true
 	}
-	if strings.Contains(content, "@slack/") || strings.Contains(content, "slack-ruby") {
+	// Slack - require SDK package patterns
+	if strings.Contains(content, "@slack/") || strings.Contains(content, "slack-ruby") ||
+		strings.Contains(content, "slack-notify") || strings.Contains(content, "\"slack\":") {
 		services["slack"] = true
 	}
-	if strings.Contains(content, "discord.js") || strings.Contains(content, "discordrb") {
+	// Discord - add Python SDK patterns
+	if strings.Contains(content, "discord.js") || strings.Contains(content, "discordrb") ||
+		strings.Contains(content, "discord.py") || strings.Contains(content, "disnake") ||
+		strings.Contains(content, "pycord") || strings.Contains(content, "\"discord\":") {
 		services["discord"] = true
 	}
-	if strings.Contains(content, "intercom") {
+	// Intercom - be specific to avoid matching building intercom systems
+	if strings.Contains(content, "intercom.io") || strings.Contains(content, "@intercom/") ||
+		strings.Contains(content, "intercom-client") || strings.Contains(content, "\"intercom\":") {
 		services["intercom"] = true
 	}
-	if strings.Contains(content, "crisp") {
+	// Crisp - be specific to avoid matching the common word "crisp" (food texture)
+	if strings.Contains(content, "crisp.chat") || strings.Contains(content, "crisp-sdk") ||
+		strings.Contains(content, "\"crisp\":") || strings.Contains(content, "crisp_website_id") {
 		services["crisp"] = true
 	}
 
@@ -521,10 +566,13 @@ func detectServicesFromContent(content string, services map[string]bool, lang st
 	if strings.Contains(content, "amqplib") || strings.Contains(content, "bunny") || strings.Contains(content, "rabbitmq") {
 		services["rabbitmq"] = true
 	}
-	if strings.Contains(content, "elasticsearch") || strings.Contains(content, "@elastic") {
+	// Elasticsearch - be specific with @elastic to avoid false positives
+	if strings.Contains(content, "elasticsearch") || strings.Contains(content, "@elastic/") {
 		services["elasticsearch"] = true
 	}
-	if strings.Contains(content, "convex") {
+	// Convex - be specific to avoid matching the math term "convex"
+	if strings.Contains(content, "@convex/") || strings.Contains(content, "convex.dev") ||
+		strings.Contains(content, "convex/_generated") || strings.Contains(content, "\"convex\":") {
 		services["convex"] = true
 	}
 
@@ -534,6 +582,10 @@ func detectServicesFromContent(content string, services map[string]bool, lang st
 	}
 	if strings.Contains(content, "cloudinary") {
 		services["cloudinary"] = true
+	}
+	if strings.Contains(content, "@cloudflare/") || strings.Contains(content, "cloudflare-workers") ||
+		strings.Contains(content, "wrangler") {
+		services["cloudflare"] = true
 	}
 
 	// Search
@@ -545,31 +597,46 @@ func detectServicesFromContent(content string, services map[string]bool, lang st
 	if strings.Contains(content, "openai") {
 		services["openai"] = true
 	}
-	if strings.Contains(content, "anthropic") || strings.Contains(content, "@anthropic") {
+	if strings.Contains(content, "anthropic") || strings.Contains(content, "@anthropic/") {
 		services["anthropic"] = true
 	}
-	if strings.Contains(content, "@google/generative-ai") || strings.Contains(content, "google-generativeai") || strings.Contains(content, "gemini") {
+	// Google AI - be specific to avoid matching "gemini" (zodiac sign)
+	if strings.Contains(content, "@google/generative-ai") || strings.Contains(content, "google-generativeai") ||
+		strings.Contains(content, "gemini-pro") || strings.Contains(content, "gemini-1.5") ||
+		strings.Contains(content, "generativelanguage.googleapis") {
 		services["google_ai"] = true
 	}
-	if strings.Contains(content, "mistralai") || strings.Contains(content, "@mistralai") {
+	if strings.Contains(content, "mistralai") || strings.Contains(content, "@mistralai/") {
 		services["mistral"] = true
 	}
-	if strings.Contains(content, "cohere") {
+	// Cohere - be specific to avoid matching the common word "cohere" (stick together)
+	if strings.Contains(content, "cohere-ai") || strings.Contains(content, "cohere.com") ||
+		strings.Contains(content, "cohere.ai") || strings.Contains(content, "\"cohere\":") {
 		services["cohere"] = true
 	}
-	if strings.Contains(content, "replicate") {
+	// Replicate - be specific to avoid matching the common word "replicate"
+	if strings.Contains(content, "replicate.com") || strings.Contains(content, "replicate/") ||
+		strings.Contains(content, "\"replicate\":") {
 		services["replicate"] = true
 	}
-	if strings.Contains(content, "huggingface") || strings.Contains(content, "@huggingface") || strings.Contains(content, "transformers") {
+	// HuggingFace - be specific with transformers to avoid false positives
+	if strings.Contains(content, "huggingface") || strings.Contains(content, "@huggingface/") ||
+		strings.Contains(content, "huggingface.co") {
 		services["huggingface"] = true
 	}
-	if strings.Contains(content, "grok") || strings.Contains(content, "x.ai") {
+	// Grok - be specific to avoid matching the tech slang "grok" (understand)
+	if strings.Contains(content, "xai/grok") || strings.Contains(content, "grok-beta") ||
+		strings.Contains(content, "api.x.ai") || strings.Contains(content, "\"grok\":") {
 		services["grok"] = true
 	}
-	if strings.Contains(content, "perplexity") {
+	// Perplexity - be specific to avoid matching the common word (confusion/ML metric)
+	if strings.Contains(content, "perplexity.ai") || strings.Contains(content, "pplx-api") ||
+		strings.Contains(content, "\"perplexity\":") {
 		services["perplexity"] = true
 	}
-	if strings.Contains(content, "together") && strings.Contains(content, "ai") {
+	// Together AI - be specific to avoid false positives
+	if strings.Contains(content, "together.ai") || strings.Contains(content, "@together-ai/") ||
+		strings.Contains(content, "together-ai") || strings.Contains(content, "\"together\":") {
 		services["together_ai"] = true
 	}
 
@@ -764,8 +831,11 @@ func detectAnalyticsScripts(rootDir string, services map[string]bool) {
 		"amplitude":        regexp.MustCompile(`(?i)cdn\.amplitude\.com|amplitude\.getInstance`),
 
 		// Communication - require specific URLs or SDK
-		"intercom": regexp.MustCompile(`(?i)widget\.intercom\.io|Intercom\(['"]`),
+		"intercom": regexp.MustCompile(`(?i)widget\.intercom\.io|Intercom\(['"]|intercom-client`),
 		"crisp":    regexp.MustCompile(`(?i)client\.crisp\.chat|CRISP_WEBSITE_ID`),
+		"twilio":   regexp.MustCompile(`(?i)twilio\.com|@twilio/|twilio-node`),
+		"slack":    regexp.MustCompile(`(?i)@slack/|slack-ruby|api\.slack\.com|hooks\.slack\.com`),
+		"discord":  regexp.MustCompile(`(?i)discord\.js|discordrb|discord\.py|disnake|discord\.com/api`),
 
 		// Payments - only match SDK imports or API URLs, not the word itself
 		"stripe":       regexp.MustCompile(`(?i)js\.stripe\.com|Stripe\(['"]|stripe/stripe-`),
@@ -788,14 +858,14 @@ func detectAnalyticsScripts(rootDir string, services map[string]bool) {
 		"mailgun":    regexp.MustCompile(`(?i)mailgun\.com/|mailgun-js|@mailgun/`),
 		"aws_ses":    regexp.MustCompile(`(?i)ses\.amazonaws\.com|@aws-sdk/client-ses|aws-sdk-ses|craft-amazon-ses`),
 		"resend":     regexp.MustCompile(`(?i)api\.resend\.com|@resend/`),
-		"mailchimp":  regexp.MustCompile(`(?i)mailchimp\.com/|@mailchimp/`),
+		"mailchimp":  regexp.MustCompile(`(?i)mailchimp\.com/|@mailchimp/|mailchimp-for-wp|mc4wp|list-manage\.com`),
 		"convertkit":      regexp.MustCompile(`(?i)convertkit\.com|@convertkit/|app\.kit\.com`),
 		"beehiiv":         regexp.MustCompile(`(?i)beehiiv\.com|embeds\.beehiiv\.com`),
 		"aweber":          regexp.MustCompile(`(?i)aweber\.com|forms\.aweber\.com`),
 		"activecampaign":  regexp.MustCompile(`(?i)activecampaign\.com|trackcmp\.net`),
 		"campaignmonitor": regexp.MustCompile(`(?i)campaignmonitor\.com|createsend\.com`),
-		"drip":            regexp.MustCompile(`(?i)getdrip\.com|api\.getdrip\.com`),
-		"klaviyo":         regexp.MustCompile(`(?i)klaviyo\.com|static\.klaviyo\.com`),
+		"drip":            regexp.MustCompile(`(?i)getdrip\.com|api\.getdrip\.com|tag\.getdrip\.com`),
+		"klaviyo":         regexp.MustCompile(`(?i)klaviyo\.com|static\.klaviyo\.com/onsite/js/klaviyo`),
 		"buttondown":      regexp.MustCompile(`(?i)buttondown\.email|buttondown\.com`),
 
 		// Auth - require SDK patterns
@@ -822,12 +892,15 @@ func detectAnalyticsScripts(rootDir string, services map[string]bool) {
 
 		// AI - require SDK or API patterns
 		"openai":      regexp.MustCompile(`(?i)api\.openai\.com|openai\.ChatCompletion|from openai|openai\.create`),
-		"anthropic":   regexp.MustCompile(`(?i)api\.anthropic\.com|anthropic\.Anthropic|from anthropic`),
-		"google_ai":   regexp.MustCompile(`(?i)@google/generative-ai|generativelanguage\.googleapis\.com`),
+		"anthropic":   regexp.MustCompile(`(?i)api\.anthropic\.com|anthropic\.Anthropic|from anthropic|@anthropic/`),
+		"google_ai":   regexp.MustCompile(`(?i)@google/generative-ai|generativelanguage\.googleapis\.com|gemini-pro|gemini-1\.5`),
 		"mistral":     regexp.MustCompile(`(?i)api\.mistral\.ai|@mistralai/`),
-		"cohere":      regexp.MustCompile(`(?i)api\.cohere\.ai|cohere\.Client`),
+		"cohere":      regexp.MustCompile(`(?i)api\.cohere\.ai|cohere\.Client|cohere-ai`),
 		"replicate":   regexp.MustCompile(`(?i)api\.replicate\.com|replicate\.run`),
 		"huggingface": regexp.MustCompile(`(?i)huggingface\.co/|@huggingface/`),
+		"grok":        regexp.MustCompile(`(?i)api\.x\.ai|xai/grok|grok-beta`),
+		"perplexity":  regexp.MustCompile(`(?i)perplexity\.ai|pplx-api`),
+		"together_ai": regexp.MustCompile(`(?i)together\.ai|@together-ai/|api\.together\.xyz`),
 
 		// SEO - require actual API usage, not just the word
 		"indexnow": regexp.MustCompile(`(?i)api\.indexnow\.org|indexnow\.org/key|indexnow-js|indexnow-sdk`),

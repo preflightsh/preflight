@@ -18,9 +18,10 @@ var (
 )
 
 var scanCmd = &cobra.Command{
-	Use:   "scan",
+	Use:   "scan [path]",
 	Short: "Scan your project for launch readiness",
 	Long: `Run all enabled checks against your project and report results.
+If path is provided, scans that directory. Otherwise scans current directory.
 Exits with code 0 for success, 1 for warnings only, 2 for errors.`,
 	RunE: runScan,
 }
@@ -36,14 +37,20 @@ func runScan(cmd *cobra.Command, args []string) error {
 		CheckForUpdates()
 	}
 
-	// Get current directory
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("failed to get current directory: %w", err)
+	// Use provided path or current directory
+	var projectDir string
+	if len(args) > 0 {
+		projectDir = args[0]
+	} else {
+		var err error
+		projectDir, err = os.Getwd()
+		if err != nil {
+			return fmt.Errorf("failed to get current directory: %w", err)
+		}
 	}
 
 	// Load config
-	cfg, err := config.Load(cwd)
+	cfg, err := config.Load(projectDir)
 	if err != nil {
 		if !ciMode {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -59,7 +66,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 	// Create check context
 	ctx := checks.Context{
-		RootDir: cwd,
+		RootDir: projectDir,
 		Config:  cfg,
 		Client:  httpClient,
 	}

@@ -45,7 +45,8 @@ func (h HumanOutputter) Output(projectName string, results []checks.CheckResult)
 		"AUTH":      "🔐",
 		"STORAGE":   "📦",
 		"SEARCH":    "🔎",
-		"COMM":      "💬",
+		"CHAT":      "💬",
+		"NOTIFY":    "🔔",
 		"SOCIAL":    "📱",
 		"ICONS":     "🎨",
 		"FILES":     "📄",
@@ -58,7 +59,7 @@ func (h HumanOutputter) Output(projectName string, results []checks.CheckResult)
 		"PAGES":     "📃",
 		"DEBUG":     "🐞",
 		"PERF":      "⚡",
-		"LEGAL":     "⚖️",
+		"LEGAL":     "⚖️ ",
 	}
 
 	// Map check IDs to display categories
@@ -93,8 +94,8 @@ func (h HumanOutputter) Output(projectName string, results []checks.CheckResult)
 		"google_ai":       "AI",
 		"auth0":           "AUTH",
 		"clerk":           "AUTH",
-		"firebase":        "AUTH",
-		"supabase":        "AUTH",
+		"firebase":        "INFRA",
+		"supabase":        "INFRA",
 		"postmark":        "EMAIL",
 		"sendgrid":        "EMAIL",
 		"mailgun":         "EMAIL",
@@ -104,11 +105,11 @@ func (h HumanOutputter) Output(projectName string, results []checks.CheckResult)
 		"cloudinary":      "STORAGE",
 		"algolia":         "SEARCH",
 		"elasticsearch":   "SEARCH",
-		"slack":           "COMM",
-		"discord":         "COMM",
-		"twilio":          "COMM",
-		"intercom":        "COMM",
-		"crisp":           "COMM",
+		"slack":           "NOTIFY",
+		"discord":         "NOTIFY",
+		"twilio":          "NOTIFY",
+		"intercom":        "CHAT",
+		"crisp":           "CHAT",
 		"favicon":         "ICONS",
 		"robotsTxt":       "FILES",
 		"sitemap":         "FILES",
@@ -144,7 +145,7 @@ func (h HumanOutputter) Output(projectName string, results []checks.CheckResult)
 		}
 
 		status := formatStatus(r)
-		categoryLabel := fmt.Sprintf("%s %-10s", icon, category)
+		categoryLabel := fmt.Sprintf("%s  %-10s", icon, category)
 
 		fmt.Printf("  %s %s%-45s%s %s\n", categoryLabel, colorReset, r.Title, colorReset, status)
 

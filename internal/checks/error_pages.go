@@ -46,26 +46,40 @@ func (c ErrorPagesCheck) Run(ctx Context) (CheckResult, error) {
 		}
 	}
 
-	// Check web roots for static 404.html/500.html if not found
+	// Check web roots for static error pages if not found
+	// Check both root level and errors/ subdirectory, with common extensions
+	errorSubdirs := []string{"", "errors"}
+	extensions := []string{".html", ".php", ".htm", ".twig", ".hbs", ".njk", ".liquid", ".erb"}
+
 	if !has404 {
+	outer404:
 		for _, root := range webRoots {
-			path := filepath.Join(root, "404.html")
-			fullPath := filepath.Join(ctx.RootDir, path)
-			if _, err := os.Stat(fullPath); err == nil {
-				has404 = true
-				found404 = path
-				break
+			for _, subdir := range errorSubdirs {
+				for _, ext := range extensions {
+					path := filepath.Join(root, subdir, "404"+ext)
+					fullPath := filepath.Join(ctx.RootDir, path)
+					if _, err := os.Stat(fullPath); err == nil {
+						has404 = true
+						found404 = path
+						break outer404
+					}
+				}
 			}
 		}
 	}
 
 	if !has500 {
+	outer500:
 		for _, root := range webRoots {
-			path := filepath.Join(root, "500.html")
-			fullPath := filepath.Join(ctx.RootDir, path)
-			if _, err := os.Stat(fullPath); err == nil {
-				has500 = true
-				break
+			for _, subdir := range errorSubdirs {
+				for _, ext := range extensions {
+					path := filepath.Join(root, subdir, "500"+ext)
+					fullPath := filepath.Join(ctx.RootDir, path)
+					if _, err := os.Stat(fullPath); err == nil {
+						has500 = true
+						break outer500
+					}
+				}
 			}
 		}
 	}
@@ -243,6 +257,17 @@ func getErrorPagePaths(stack string) (paths404 []string, paths500 []string) {
 		}
 		paths500 = []string{}
 
+	case "php":
+		// Basic PHP sites often put error pages in public/errors/ or just public/
+		paths404 = []string{
+			"public/errors/404.php", "public/404.php", "errors/404.php", "404.php",
+			"public/errors/404.html", "public/404.html", "public/errors/404.htm", "public/404.htm",
+		}
+		paths500 = []string{
+			"public/errors/500.php", "public/500.php", "errors/500.php", "500.php",
+			"public/errors/500.html", "public/500.html", "public/errors/500.htm", "public/500.htm",
+		}
+
 	case "go", "rust", "node", "python":
 		// These typically handle errors in code, check for static fallbacks
 		paths404 = []string{"public/404.html", "static/404.html", "templates/404.html"}
@@ -286,6 +311,9 @@ func getErrorPageSuggestions(stack string) []string {
 
 	case "craft":
 		return []string{"Create templates/404.twig for custom 404 page"}
+
+	case "php":
+		return []string{"Create public/errors/404.php or public/404.php"}
 
 	case "hugo":
 		return []string{"Create layouts/404.html for custom 404 page"}

@@ -112,13 +112,16 @@ Preflight auto-detects and validates configuration for these services:
 - Plausible, Fathom, Fullres Analytics, Datafa.st Analytics, Google Analytics, PostHog, Mixpanel, Amplitude, Segment, Hotjar
 
 **Auth**
-- Auth0, Clerk, WorkOS, Firebase, Supabase
+- Auth0, Clerk, WorkOS
 
-**Communication**
-- Twilio, Slack, Discord, Intercom, Crisp
+**Chat**
+- Intercom, Crisp
+
+**Notifications**
+- Slack, Discord, Twilio
 
 **Infrastructure**
-- Redis, Sidekiq, RabbitMQ, Elasticsearch, Convex
+- Firebase, Supabase, Redis, Sidekiq, RabbitMQ, Elasticsearch, Convex
 
 **Storage & CDN**
 - AWS S3, Cloudinary, Cloudflare
