@@ -72,6 +72,7 @@ var Registry = []Check{
 	HumansTxtCheck{},
 	WWWRedirectCheck{},
 	LegalPagesCheck{},
+	IndexNowCheck{},
 	// Cookie Consent checks
 	CookieConsentJSCheck{},
 	CookiebotCheck{},
@@ -79,6 +80,75 @@ var Registry = []Check{
 	TermlyCheck{},
 	CookieYesCheck{},
 	IubendaCheck{},
+	// Payment checks
+	PayPalCheck{},
+	BraintreeCheck{},
+	PaddleCheck{},
+	LemonSqueezyCheck{},
+	// Email Marketing checks
+	MailchimpCheck{},
+	ConvertKitCheck{},
+	BeehiivCheck{},
+	AWeberCheck{},
+	ActiveCampaignCheck{},
+	CampaignMonitorCheck{},
+	DripCheck{},
+	KlaviyoCheck{},
+	ButtondownCheck{},
+	// Transactional Email checks
+	PostmarkCheck{},
+	SendGridCheck{},
+	MailgunCheck{},
+	ResendCheck{},
+	AWSSESCheck{},
+	// Auth checks
+	Auth0Check{},
+	ClerkCheck{},
+	WorkOSCheck{},
+	FirebaseCheck{},
+	SupabaseCheck{},
+	// Communication checks
+	TwilioCheck{},
+	SlackCheck{},
+	DiscordCheck{},
+	IntercomCheck{},
+	CrispCheck{},
+	// Infrastructure checks
+	RabbitMQCheck{},
+	ElasticsearchCheck{},
+	ConvexCheck{},
+	// Storage & CDN checks
+	AWSS3Check{},
+	CloudinaryCheck{},
+	CloudflareCheck{},
+	// Search checks
+	AlgoliaCheck{},
+	// AI checks
+	OpenAICheck{},
+	AnthropicCheck{},
+	GoogleAICheck{},
+	MistralCheck{},
+	CohereCheck{},
+	ReplicateCheck{},
+	HuggingFaceCheck{},
+	GrokCheck{},
+	PerplexityCheck{},
+	TogetherAICheck{},
+	// Analytics (extended)
+	FullresCheck{},
+	DatafastCheck{},
+	PostHogCheck{},
+	MixpanelCheck{},
+	HotjarCheck{},
+	AmplitudeCheck{},
+	SegmentCheck{},
+	// Error Tracking (extended)
+	BugsnagCheck{},
+	RollbarCheck{},
+	HoneybadgerCheck{},
+	DatadogCheck{},
+	NewRelicCheck{},
+	LogRocketCheck{},
 }
 
 // isLocalURL checks if a URL points to localhost or local IP
