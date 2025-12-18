@@ -53,6 +53,10 @@ preflight scan
 # Scan a specific directory
 preflight scan /path/to/project
 
+# Run with verbose output (shows which files matched each check)
+preflight scan --verbose
+preflight scan -v  # short form
+
 # Run in CI mode with JSON output
 preflight scan --ci --format json
 
@@ -71,7 +75,7 @@ preflight checks
 | Check | Description |
 |-------|-------------|
 | **ENV Parity** | Compares `.env` and `.env.example` for missing variables |
-| **Health Endpoint** | Verifies `/health` is reachable on staging/production |
+| **Health Endpoint** | Verifies site is reachable; auto-detects `/health`, `/healthz`, `/api/health` or falls back to root |
 | **Vulnerability Scan** | Checks for dependency vulnerabilities (bundle audit, npm audit, etc.) |
 | **SEO Metadata** | Checks for title, description, and Open Graph tags |
 | **OG & Twitter Cards** | Validates og:image, twitter:card and social sharing metadata |
@@ -164,7 +168,7 @@ checks:
 
   healthEndpoint:
     enabled: true
-    path: "/health"
+    path: "/health"  # optional - auto-detects common paths if not set
 
   stripeWebhook:
     enabled: true

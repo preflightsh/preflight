@@ -13,8 +13,9 @@ import (
 )
 
 var (
-	ciMode     bool
-	formatFlag string
+	ciMode      bool
+	formatFlag  string
+	verboseFlag bool
 )
 
 var scanCmd = &cobra.Command{
@@ -30,6 +31,7 @@ func init() {
 	rootCmd.AddCommand(scanCmd)
 	scanCmd.Flags().BoolVar(&ciMode, "ci", false, "Run in CI mode (no interactivity)")
 	scanCmd.Flags().StringVar(&formatFlag, "format", "human", "Output format: human or json")
+	scanCmd.Flags().BoolVarP(&verboseFlag, "verbose", "v", false, "Show detailed information about each check")
 }
 
 func runScan(cmd *cobra.Command, args []string) error {
@@ -69,6 +71,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 		RootDir: projectDir,
 		Config:  cfg,
 		Client:  httpClient,
+		Verbose: verboseFlag,
 	}
 
 	// Build list of enabled checks
@@ -111,7 +114,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	if formatFlag == "json" {
 		outputter = output.JSONOutputter{}
 	} else {
-		outputter = output.HumanOutputter{}
+		outputter = output.HumanOutputter{Verbose: verboseFlag}
 	}
 
 	outputter.Output(cfg.ProjectName, results)
@@ -173,7 +176,9 @@ func buildEnabledChecks(cfg *config.PreflightConfig) []checks.Check {
 	if cfg.Checks.EnvParity != nil && cfg.Checks.EnvParity.Enabled {
 		enabledChecks = append(enabledChecks, checks.EnvParityCheck{})
 	}
-	if cfg.Checks.HealthEndpoint != nil && cfg.Checks.HealthEndpoint.Enabled {
+	// Health check runs if explicitly enabled OR if any URLs are configured
+	if (cfg.Checks.HealthEndpoint != nil && cfg.Checks.HealthEndpoint.Enabled) ||
+		cfg.URLs.Production != "" || cfg.URLs.Staging != "" {
 		enabledChecks = append(enabledChecks, checks.HealthCheck{})
 	}
 

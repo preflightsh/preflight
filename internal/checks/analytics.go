@@ -405,6 +405,148 @@ func searchForPatterns(rootDir, stack string, patterns []*regexp.Regexp) bool {
 	return false
 }
 
+// SearchMatch contains details about a pattern match
+type SearchMatch struct {
+	FilePath string
+	Pattern  string
+}
+
+// searchForPatternsWithDetails searches for patterns and returns details about the match
+func searchForPatternsWithDetails(rootDir, stack string, patterns []*regexp.Regexp) *SearchMatch {
+	layoutFiles := getLayoutFilesForStack(stack)
+
+	for _, file := range layoutFiles {
+		path := filepath.Join(rootDir, file)
+		content, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+
+		for _, pattern := range patterns {
+			if pattern.Match(content) {
+				relPath, _ := filepath.Rel(rootDir, path)
+				return &SearchMatch{
+					FilePath: relPath,
+					Pattern:  pattern.String(),
+				}
+			}
+		}
+	}
+
+	// Search in common directories across all stacks
+	searchDirs := []string{
+		".", // root directory
+		// Frontend
+		"src", "app", "components", "pages", "lib",
+		// Monorepo patterns
+		"apps", "packages",
+		// PHP
+		"includes", "partials", "inc",
+		// Templates
+		"templates", "views", "layouts", "_layouts", "_includes",
+		// Public/Static
+		"public", "web", "static", "dist", "www", "_site", "out",
+		// Rails
+		"app/views", "app/views/layouts",
+		// Laravel
+		"resources/views", "resources/views/layouts",
+		// WordPress
+		"wp-content/themes",
+		// Craft CMS
+		"templates/_partials",
+		// Hugo
+		"layouts/_default", "layouts/partials",
+		// SvelteKit
+		"src/routes",
+		// Gatsby
+		"gatsby-browser.js",
+	}
+	extensions := []string{
+		// JavaScript/TypeScript
+		".tsx", ".jsx", ".js", ".ts", ".mjs", ".cjs",
+		// PHP
+		".php",
+		// Template engines
+		".twig", ".blade.php", ".erb", ".haml", ".slim",
+		".ejs", ".pug", ".hbs", ".handlebars", ".mustache",
+		".njk", ".liquid",
+		// HTML
+		".html", ".htm",
+		// Frontend frameworks
+		".vue", ".svelte", ".astro",
+		// Python
+		".py",
+		// Ruby
+		".rb",
+		// Go
+		".go", ".tmpl", ".gohtml",
+	}
+
+	var result *SearchMatch
+	for _, dir := range searchDirs {
+		dirPath := filepath.Join(rootDir, dir)
+		if _, err := os.Stat(dirPath); os.IsNotExist(err) {
+			continue
+		}
+
+		filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+			if err != nil || result != nil {
+				return nil
+			}
+
+			// Skip common build/dependency directories
+			baseName := filepath.Base(path)
+			if info.IsDir() {
+				if baseName == "node_modules" || baseName == "vendor" ||
+					baseName == ".git" || baseName == "dist" ||
+					baseName == "build" || baseName == "cache" ||
+					baseName == ".next" || baseName == ".turbo" ||
+					baseName == "coverage" || baseName == "__pycache__" ||
+					baseName == "_generated" || baseName == ".convex" {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+
+			ext := filepath.Ext(path)
+			validExt := false
+			for _, e := range extensions {
+				if ext == e {
+					validExt = true
+					break
+				}
+			}
+			if !validExt {
+				return nil
+			}
+
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+
+			for _, pattern := range patterns {
+				if pattern.Match(content) {
+					relPath, _ := filepath.Rel(rootDir, path)
+					result = &SearchMatch{
+						FilePath: relPath,
+						Pattern:  pattern.String(),
+					}
+					return filepath.SkipAll
+				}
+			}
+
+			return nil
+		})
+
+		if result != nil {
+			return result
+		}
+	}
+
+	return nil
+}
+
 func getLayoutFilesForStack(stack string) []string {
 	layouts := map[string][]string{
 		// Backend Frameworks

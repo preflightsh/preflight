@@ -22,12 +22,14 @@ type CheckResult struct {
 	Passed      bool     `json:"passed"`
 	Message     string   `json:"message"`
 	Suggestions []string `json:"suggestions,omitempty"`
+	Details     []string `json:"details,omitempty"` // Verbose output details
 }
 
 type Context struct {
 	RootDir string
 	Config  *config.PreflightConfig
 	Client  *http.Client
+	Verbose bool
 }
 
 type Check interface {

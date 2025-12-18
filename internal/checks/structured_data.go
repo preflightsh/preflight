@@ -18,6 +18,7 @@ func (c StructuredDataCheck) Title() string {
 
 func (c StructuredDataCheck) Run(ctx Context) (CheckResult, error) {
 	cfg := ctx.Config.Checks.SEOMeta
+	var details []string
 
 	// Check main layout if configured
 	if cfg != nil && cfg.MainLayout != "" {
@@ -25,25 +26,33 @@ func (c StructuredDataCheck) Run(ctx Context) (CheckResult, error) {
 		content, err := os.ReadFile(layoutPath)
 		if err == nil {
 			if hasStructuredData(string(content), ctx.Config.Stack) {
+				if ctx.Verbose {
+					details = append(details, "Found in: "+cfg.MainLayout)
+				}
 				return CheckResult{
 					ID:       c.ID(),
 					Title:    c.Title(),
 					Severity: SeverityInfo,
 					Passed:   true,
 					Message:  "Schema.org structured data found",
+					Details:  details,
 				}, nil
 			}
 		}
 	}
 
 	// Check common partials
-	if checkStructuredDataPartials(ctx.RootDir, ctx.Config.Stack) {
+	if matchedPartial := checkStructuredDataPartialsWithDetails(ctx.RootDir, ctx.Config.Stack); matchedPartial != "" {
+		if ctx.Verbose {
+			details = append(details, "Found in: "+matchedPartial)
+		}
 		return CheckResult{
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
 			Passed:   true,
 			Message:  "Schema.org structured data found (in partial)",
+			Details:  details,
 		}, nil
 	}
 
@@ -54,13 +63,17 @@ func (c StructuredDataCheck) Run(ctx Context) (CheckResult, error) {
 		regexp.MustCompile(`["']@type["']\s*:\s*["'](Organization|WebSite|Article|Product|LocalBusiness|SoftwareApplication)`),
 	}
 
-	if searchForPatterns(ctx.RootDir, ctx.Config.Stack, patterns) {
+	if match := searchForPatternsWithDetails(ctx.RootDir, ctx.Config.Stack, patterns); match != nil {
+		if ctx.Verbose {
+			details = append(details, "Found in: "+match.FilePath)
+		}
 		return CheckResult{
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
 			Passed:   true,
 			Message:  "Schema.org structured data found",
+			Details:  details,
 		}, nil
 	}
 
@@ -128,6 +141,11 @@ func hasStructuredData(content, stack string) bool {
 }
 
 func checkStructuredDataPartials(rootDir, stack string) bool {
+	return checkStructuredDataPartialsWithDetails(rootDir, stack) != ""
+}
+
+// checkStructuredDataPartialsWithDetails returns the path of the matched partial, or empty string if none
+func checkStructuredDataPartialsWithDetails(rootDir, stack string) string {
 	partialPaths := []string{
 		"_includes/schema.html",
 		"_includes/structured-data.html",
@@ -171,6 +189,16 @@ func checkStructuredDataPartials(rootDir, stack string) bool {
 		"src/components/Schema.astro",
 		"src/components/JsonLd.astro",
 		"src/components/Head.astro",
+
+		// Additional lib paths for Next.js/React
+		"src/lib/structured-data.ts",
+		"src/lib/structured-data.tsx",
+		"src/lib/json-ld.ts",
+		"src/lib/json-ld.tsx",
+		"lib/structured-data.ts",
+		"lib/structured-data.tsx",
+		"lib/json-ld.ts",
+		"lib/json-ld.tsx",
 	}
 
 	for _, partialPath := range partialPaths {
@@ -180,11 +208,11 @@ func checkStructuredDataPartials(rootDir, stack string) bool {
 			continue
 		}
 		if hasStructuredData(string(content), stack) {
-			return true
+			return partialPath
 		}
 	}
 
-	return false
+	return ""
 }
 
 func getStructuredDataSuggestions(stack string) []string {

@@ -19,7 +19,9 @@ const (
 	colorBold   = "\033[1m"
 )
 
-type HumanOutputter struct{}
+type HumanOutputter struct {
+	Verbose bool
+}
 
 func (h HumanOutputter) Output(projectName string, results []checks.CheckResult) {
 	// Header
@@ -197,6 +199,13 @@ func (h HumanOutputter) Output(projectName string, results []checks.CheckResult)
 				fmt.Printf("  %s                  └─ %s%s\n", colorGray, r.Message, colorReset)
 			} else if hasUsefulPassedMessage(r.Message) {
 				fmt.Printf("  %s                  └─ %s%s\n", colorGray, r.Message, colorReset)
+			}
+		}
+
+		// Show verbose details if enabled
+		if h.Verbose && len(r.Details) > 0 {
+			for _, detail := range r.Details {
+				fmt.Printf("  %s                  │  %s%s\n", colorGray, detail, colorReset)
 			}
 		}
 
