@@ -257,7 +257,11 @@ func hasUsefulPassedMessage(msg string) bool {
 	usefulPatterns := []string{
 		"license found",  // License type detection
 		"MIT", "Apache", "GPL", "AGPL", "BSD", "ISC", "MPL",
-		"(at ", // Location info for files found in parent dirs
+		"(at ",           // Location info for files found in parent dirs
+		"not enabled",    // Check passed because it's disabled/not configured
+		"not configured", // Check passed because it's not configured
+		"skipped",        // Check was skipped
+		"not declared",   // Service not declared
 	}
 
 	msgLower := strings.ToLower(msg)

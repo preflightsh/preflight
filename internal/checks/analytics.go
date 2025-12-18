@@ -363,7 +363,8 @@ func searchForPatterns(rootDir, stack string, patterns []*regexp.Regexp) bool {
 					baseName == ".git" || baseName == "dist" ||
 					baseName == "build" || baseName == "cache" ||
 					baseName == ".next" || baseName == ".turbo" ||
-					baseName == "coverage" || baseName == "__pycache__" {
+					baseName == "coverage" || baseName == "__pycache__" ||
+					baseName == "_generated" || baseName == ".convex" {
 					return filepath.SkipDir
 				}
 				return nil
