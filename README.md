@@ -1,6 +1,6 @@
 # Preflight.sh
 
-A command-line tool that scans your codebase for launch readiness. Identifies missing configuration, integration issues, security concerns, SEO metadata gaps, and other common mistakes before you deploy to production.
+[Preflight.sh](https://preflight.sh/) is a command-line tool that scans your codebase for launch readiness. Identifies missing configuration, integration issues, security concerns, SEO metadata gaps, and other common mistakes before you deploy to production.
 
 Don’t embarrass yourself in production. Just run the command.
 
@@ -33,7 +33,7 @@ docker pull ghcr.io/preflightsh/preflight
 ### Shell Script
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/preflightsh/preflight/main/install.sh | sh
+curl -sSL https://preflight.sh/install.sh | sh
 ```
 
 ### Manual Download
