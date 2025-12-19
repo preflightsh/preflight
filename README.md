@@ -284,7 +284,7 @@ These services are auto-detected but don't have validation checks yet:
 - Ruby on Rails, Laravel, Go, Python/Django, Rust, Node.js
 
 **Frontend Frameworks**
-- Next.js, React, Vue.js, Vite, Svelte, Angular
+- Next.js, Nuxt, Remix, React, Vue.js, Vite, Svelte, Angular
 
 **Traditional CMS**
 - WordPress, Craft CMS, Drupal, Ghost
