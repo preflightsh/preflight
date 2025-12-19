@@ -281,7 +281,7 @@ These services are auto-detected but don't have validation checks yet:
 ## Supported Stacks
 
 **Backend Frameworks**
-- Ruby on Rails, Laravel, Go, Python/Django, Rust, Node.js
+- Ruby on Rails, Laravel, PHP, Go, Python/Django, Rust, Node.js
 
 **Frontend Frameworks**
 - Next.js, Nuxt, Remix, React, Vue.js, Vite, Svelte, Angular
