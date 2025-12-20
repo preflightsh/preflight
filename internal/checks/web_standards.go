@@ -121,6 +121,57 @@ func (c RobotsTxtCheck) Run(ctx Context) (CheckResult, error) {
 		}
 	}
 
+	// Flexible search: walk app/ and src/app/ for robots files in any location
+	// This catches route groups like app/(marketing)/robots.ts
+	robotsFound := false
+	var robotsFoundPath string
+	flexRobotsDirs := []string{"app", "src/app"}
+	for _, dir := range flexRobotsDirs {
+		if robotsFound {
+			break
+		}
+		dirPath := filepath.Join(ctx.RootDir, dir)
+		if _, err := os.Stat(dirPath); err != nil {
+			continue
+		}
+		filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+			if err != nil || robotsFound {
+				return nil
+			}
+			if info.IsDir() {
+				name := info.Name()
+				if name == "node_modules" || name == ".git" {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			nameLower := strings.ToLower(info.Name())
+			// Match robots.ts, robots.tsx, robots.js, robots.jsx
+			if nameLower == "robots.ts" || nameLower == "robots.tsx" || nameLower == "robots.js" || nameLower == "robots.jsx" {
+				robotsFound = true
+				robotsFoundPath, _ = filepath.Rel(ctx.RootDir, path)
+				return nil
+			}
+			// Match route.ts/js in robots.txt/ or robots/ directory
+			parentDir := strings.ToLower(filepath.Base(filepath.Dir(path)))
+			if (parentDir == "robots.txt" || parentDir == "robots") && strings.HasPrefix(nameLower, "route.") {
+				robotsFound = true
+				robotsFoundPath, _ = filepath.Rel(ctx.RootDir, path)
+				return nil
+			}
+			return nil
+		})
+	}
+	if robotsFound {
+		return CheckResult{
+			ID:       c.ID(),
+			Title:    c.Title(),
+			Severity: SeverityInfo,
+			Passed:   true,
+			Message:  "robots.txt generated via " + robotsFoundPath,
+		}, nil
+	}
+
 	return CheckResult{
 		ID:       c.ID(),
 		Title:    c.Title(),
@@ -248,6 +299,57 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 				Message:  "sitemap.xml generated via " + relPath,
 			}, nil
 		}
+	}
+
+	// Flexible search: walk app/ and src/app/ for sitemap files in any location
+	// This catches route groups like app/(marketing)/sitemap.ts
+	sitemapFound := false
+	var sitemapFoundPath string
+	flexSitemapDirs := []string{"app", "src/app"}
+	for _, dir := range flexSitemapDirs {
+		if sitemapFound {
+			break
+		}
+		dirPath := filepath.Join(ctx.RootDir, dir)
+		if _, err := os.Stat(dirPath); err != nil {
+			continue
+		}
+		filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+			if err != nil || sitemapFound {
+				return nil
+			}
+			if info.IsDir() {
+				name := info.Name()
+				if name == "node_modules" || name == ".git" {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			nameLower := strings.ToLower(info.Name())
+			// Match sitemap.ts, sitemap.tsx, sitemap.js, sitemap.jsx
+			if nameLower == "sitemap.ts" || nameLower == "sitemap.tsx" || nameLower == "sitemap.js" || nameLower == "sitemap.jsx" {
+				sitemapFound = true
+				sitemapFoundPath, _ = filepath.Rel(ctx.RootDir, path)
+				return nil
+			}
+			// Match route.ts/js in sitemap.xml/ or sitemap/ directory
+			parentDir := strings.ToLower(filepath.Base(filepath.Dir(path)))
+			if (parentDir == "sitemap.xml" || parentDir == "sitemap") && strings.HasPrefix(nameLower, "route.") {
+				sitemapFound = true
+				sitemapFoundPath, _ = filepath.Rel(ctx.RootDir, path)
+				return nil
+			}
+			return nil
+		})
+	}
+	if sitemapFound {
+		return CheckResult{
+			ID:       c.ID(),
+			Title:    c.Title(),
+			Severity: SeverityInfo,
+			Passed:   true,
+			Message:  "sitemap.xml generated via " + sitemapFoundPath,
+		}, nil
 	}
 
 	// Check for dynamic sitemap generation across backend frameworks
