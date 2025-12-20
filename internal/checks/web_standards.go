@@ -125,7 +125,7 @@ func (c RobotsTxtCheck) Run(ctx Context) (CheckResult, error) {
 	// This catches route groups like app/(marketing)/robots.ts
 	robotsFound := false
 	var robotsFoundPath string
-	flexRobotsDirs := []string{"app", "src/app"}
+	flexRobotsDirs := []string{"app", "src/app", "pages/api", "src/routes", "server/routes"}
 	for _, dir := range flexRobotsDirs {
 		if robotsFound {
 			break
@@ -305,7 +305,7 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 	// This catches route groups like app/(marketing)/sitemap.ts
 	sitemapFound := false
 	var sitemapFoundPath string
-	flexSitemapDirs := []string{"app", "src/app"}
+	flexSitemapDirs := []string{"app", "src/app", "pages/api", "src/routes", "server/routes"}
 	for _, dir := range flexSitemapDirs {
 		if sitemapFound {
 			break
@@ -853,6 +853,56 @@ func (c LLMsTxtCheck) Run(ctx Context) (CheckResult, error) {
 				Message:  "llms.txt generated via " + path,
 			}, nil
 		}
+	}
+
+	// Flexible search: walk common directories for llms.txt route files
+	llmsFound := false
+	var llmsFoundPath string
+	flexLLMsDirs := []string{"app", "src/app", "pages/api", "src/routes", "server/routes"}
+	for _, dir := range flexLLMsDirs {
+		if llmsFound {
+			break
+		}
+		dirPath := filepath.Join(ctx.RootDir, dir)
+		if _, err := os.Stat(dirPath); err != nil {
+			continue
+		}
+		filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+			if err != nil || llmsFound {
+				return nil
+			}
+			if info.IsDir() {
+				name := info.Name()
+				if name == "node_modules" || name == ".git" {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			nameLower := strings.ToLower(info.Name())
+			parentDir := strings.ToLower(filepath.Base(filepath.Dir(path)))
+			// Match route.ts/js in llms.txt/ or llms/ directory
+			if (parentDir == "llms.txt" || parentDir == "llms") && strings.HasPrefix(nameLower, "route.") {
+				llmsFound = true
+				llmsFoundPath, _ = filepath.Rel(ctx.RootDir, path)
+				return nil
+			}
+			// Match +server.ts/js in llms.txt directory (SvelteKit)
+			if parentDir == "llms.txt" && strings.HasPrefix(nameLower, "+server.") {
+				llmsFound = true
+				llmsFoundPath, _ = filepath.Rel(ctx.RootDir, path)
+				return nil
+			}
+			return nil
+		})
+	}
+	if llmsFound {
+		return CheckResult{
+			ID:       c.ID(),
+			Title:    c.Title(),
+			Severity: SeverityInfo,
+			Passed:   true,
+			Message:  "llms.txt generated via " + llmsFoundPath,
+		}, nil
 	}
 
 	return CheckResult{

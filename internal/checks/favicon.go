@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 )
 
 type FaviconCheck struct{}
@@ -79,6 +80,42 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 				found = append(found, relPath)
 				break
 			}
+		}
+	}
+
+	// Flexible search: walk app directories for dynamic icon files (Next.js icon.tsx, etc.)
+	if !hasFavicon {
+		flexIconDirs := []string{"app", "src/app"}
+		for _, dir := range flexIconDirs {
+			if hasFavicon {
+				break
+			}
+			dirPath := filepath.Join(ctx.RootDir, dir)
+			if _, err := os.Stat(dirPath); err != nil {
+				continue
+			}
+			filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+				if err != nil || hasFavicon {
+					return nil
+				}
+				if info.IsDir() {
+					name := info.Name()
+					if name == "node_modules" || name == ".git" {
+						return filepath.SkipDir
+					}
+					return nil
+				}
+				nameLower := strings.ToLower(info.Name())
+				// Match icon.tsx, icon.ts, icon.jsx, icon.js, favicon.tsx, etc.
+				if nameLower == "icon.tsx" || nameLower == "icon.ts" || nameLower == "icon.jsx" || nameLower == "icon.js" ||
+					nameLower == "favicon.tsx" || nameLower == "favicon.ts" || nameLower == "favicon.jsx" || nameLower == "favicon.js" {
+					hasFavicon = true
+					relPath, _ := filepath.Rel(ctx.RootDir, path)
+					found = append(found, relPath)
+					return nil
+				}
+				return nil
+			})
 		}
 	}
 
@@ -190,6 +227,41 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 		}
 	}
 
+	// Flexible search: walk app directories for dynamic apple-icon files
+	if !hasAppleIcon {
+		flexAppleDirs := []string{"app", "src/app"}
+		for _, dir := range flexAppleDirs {
+			if hasAppleIcon {
+				break
+			}
+			dirPath := filepath.Join(ctx.RootDir, dir)
+			if _, err := os.Stat(dirPath); err != nil {
+				continue
+			}
+			filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+				if err != nil || hasAppleIcon {
+					return nil
+				}
+				if info.IsDir() {
+					name := info.Name()
+					if name == "node_modules" || name == ".git" {
+						return filepath.SkipDir
+					}
+					return nil
+				}
+				nameLower := strings.ToLower(info.Name())
+				// Match apple-icon.tsx, apple-icon.ts, etc.
+				if strings.HasPrefix(nameLower, "apple-icon.") && (strings.HasSuffix(nameLower, ".tsx") || strings.HasSuffix(nameLower, ".ts") || strings.HasSuffix(nameLower, ".jsx") || strings.HasSuffix(nameLower, ".js")) {
+					hasAppleIcon = true
+					relPath, _ := filepath.Rel(ctx.RootDir, path)
+					found = append(found, relPath)
+					return nil
+				}
+				return nil
+			})
+		}
+	}
+
 	if !hasAppleIcon {
 		missing = append(missing, "apple-touch-icon")
 	}
@@ -239,6 +311,41 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 				found = append(found, relPath)
 				break
 			}
+		}
+	}
+
+	// Flexible search: walk app directories for dynamic manifest files
+	if !hasManifest {
+		flexManifestDirs := []string{"app", "src/app"}
+		for _, dir := range flexManifestDirs {
+			if hasManifest {
+				break
+			}
+			dirPath := filepath.Join(ctx.RootDir, dir)
+			if _, err := os.Stat(dirPath); err != nil {
+				continue
+			}
+			filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+				if err != nil || hasManifest {
+					return nil
+				}
+				if info.IsDir() {
+					name := info.Name()
+					if name == "node_modules" || name == ".git" {
+						return filepath.SkipDir
+					}
+					return nil
+				}
+				nameLower := strings.ToLower(info.Name())
+				// Match manifest.ts, manifest.tsx, manifest.js, manifest.jsx, webmanifest files
+				if nameLower == "manifest.ts" || nameLower == "manifest.tsx" || nameLower == "manifest.js" || nameLower == "manifest.jsx" {
+					hasManifest = true
+					relPath, _ := filepath.Rel(ctx.RootDir, path)
+					found = append(found, relPath)
+					return nil
+				}
+				return nil
+			})
 		}
 	}
 
