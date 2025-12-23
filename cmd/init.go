@@ -232,6 +232,12 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Println("  2. Run 'preflight scan' to check your project")
 	fmt.Println()
 
+	// Show star message on first init
+	if isFirstRun("init_done") {
+		showStarMessage()
+		markFirstRunComplete("init_done")
+	}
+
 	return nil
 }
 

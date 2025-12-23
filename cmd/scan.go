@@ -119,6 +119,13 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 	outputter.Output(cfg.ProjectName, results)
 
+	// Show star message on first scan (only in human format, not JSON)
+	if formatFlag != "json" && isFirstRun("scan_done") {
+		fmt.Println()
+		showStarMessage()
+		markFirstRunComplete("scan_done")
+	}
+
 	// Determine exit code
 	exitCode := determineExitCode(results)
 	if exitCode != 0 {
