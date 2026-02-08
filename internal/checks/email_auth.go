@@ -39,8 +39,30 @@ func (c EmailAuthCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	hasSPF, spfRecord := checkSPF(domain)
-	hasDMARC, dmarcRecord := checkDMARC(domain)
+	hasSPF, spfRecord, spfErr := checkSPF(domain)
+	hasDMARC, dmarcRecord, dmarcErr := checkDMARC(domain)
+
+	// If DNS lookups failed, report the error instead of claiming records are missing
+	if spfErr != nil || dmarcErr != nil {
+		var errParts []string
+		if spfErr != nil {
+			errParts = append(errParts, fmt.Sprintf("SPF lookup failed: %v", spfErr))
+		}
+		if dmarcErr != nil {
+			errParts = append(errParts, fmt.Sprintf("DMARC lookup failed: %v", dmarcErr))
+		}
+		return CheckResult{
+			ID:       c.ID(),
+			Title:    c.Title(),
+			Severity: SeverityWarn,
+			Passed:   false,
+			Message:  fmt.Sprintf("DNS lookup error for %s: %s", domain, strings.Join(errParts, "; ")),
+			Suggestions: []string{
+				"Check your network connection and DNS resolver",
+				"Verify the domain is correct in your production URL",
+			},
+		}, nil
+	}
 
 	var missing []string
 	if !hasSPF {
@@ -93,32 +115,38 @@ func extractDomain(rawURL string) (string, error) {
 	return parsed.Hostname(), nil
 }
 
-func checkSPF(domain string) (bool, string) {
+func checkSPF(domain string) (bool, string, error) {
 	records, err := net.LookupTXT(domain)
 	if err != nil {
-		return false, ""
+		if dnsErr, ok := err.(*net.DNSError); ok && dnsErr.IsNotFound {
+			return false, "", nil
+		}
+		return false, "", err
 	}
 
 	for _, record := range records {
 		if strings.HasPrefix(strings.ToLower(record), "v=spf1") {
-			return true, record
+			return true, record, nil
 		}
 	}
-	return false, ""
+	return false, "", nil
 }
 
-func checkDMARC(domain string) (bool, string) {
+func checkDMARC(domain string) (bool, string, error) {
 	records, err := net.LookupTXT("_dmarc." + domain)
 	if err != nil {
-		return false, ""
+		if dnsErr, ok := err.(*net.DNSError); ok && dnsErr.IsNotFound {
+			return false, "", nil
+		}
+		return false, "", err
 	}
 
 	for _, record := range records {
 		if strings.HasPrefix(strings.ToLower(record), "v=dmarc1") {
-			return true, record
+			return true, record, nil
 		}
 	}
-	return false, ""
+	return false, "", nil
 }
 
 func truncate(s string, max int) string {

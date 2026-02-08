@@ -62,7 +62,7 @@ func (c RobotsTxtCheck) Run(ctx Context) (CheckResult, error) {
 		if content, err := os.ReadFile(path); err == nil {
 			contentStr := strings.TrimSpace(string(content))
 			if len(contentStr) > 0 {
-				relPath, _ := filepath.Rel(ctx.RootDir, path)
+				relPath := relPath(ctx.RootDir, path)
 				return CheckResult{
 					ID:       c.ID(),
 					Title:    c.Title(),
@@ -110,7 +110,7 @@ func (c RobotsTxtCheck) Run(ctx Context) (CheckResult, error) {
 	monorepoRobotsPaths := findMonorepoNextFiles(ctx.RootDir, []string{"robots.ts", "robots.tsx", "robots.js", "robots.jsx"})
 	for _, path := range monorepoRobotsPaths {
 		if _, err := os.Stat(path); err == nil {
-			relPath, _ := filepath.Rel(ctx.RootDir, path)
+			relPath := relPath(ctx.RootDir, path)
 			return CheckResult{
 				ID:       c.ID(),
 				Title:    c.Title(),
@@ -239,7 +239,7 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 		if content, err := os.ReadFile(path); err == nil {
 			contentStr := strings.TrimSpace(string(content))
 			if len(contentStr) > 0 {
-				relPath, _ := filepath.Rel(ctx.RootDir, path)
+				relPath := relPath(ctx.RootDir, path)
 				return CheckResult{
 					ID:       c.ID(),
 					Title:    c.Title(),
@@ -290,7 +290,7 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 	monorepoSitemapPaths := findMonorepoNextFiles(ctx.RootDir, []string{"sitemap.ts", "sitemap.tsx", "sitemap.js", "sitemap.jsx"})
 	for _, path := range monorepoSitemapPaths {
 		if _, err := os.Stat(path); err == nil {
-			relPath, _ := filepath.Rel(ctx.RootDir, path)
+			relPath := relPath(ctx.RootDir, path)
 			return CheckResult{
 				ID:       c.ID(),
 				Title:    c.Title(),
@@ -762,7 +762,7 @@ func (c LLMsTxtCheck) Run(ctx Context) (CheckResult, error) {
 		if content, err := os.ReadFile(path); err == nil {
 			contentStr := strings.TrimSpace(string(content))
 			if len(contentStr) > 0 {
-				relPath, _ := filepath.Rel(ctx.RootDir, path)
+				relPath := relPath(ctx.RootDir, path)
 				return CheckResult{
 					ID:       c.ID(),
 					Title:    c.Title(),
@@ -815,7 +815,7 @@ func (c LLMsTxtCheck) Run(ctx Context) (CheckResult, error) {
 	})
 	for _, path := range monorepoLLMsPaths {
 		if _, err := os.Stat(path); err == nil {
-			relPath, _ := filepath.Rel(ctx.RootDir, path)
+			relPath := relPath(ctx.RootDir, path)
 			return CheckResult{
 				ID:       c.ID(),
 				Title:    c.Title(),

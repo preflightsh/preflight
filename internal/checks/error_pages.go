@@ -89,7 +89,7 @@ func (c ErrorPagesCheck) Run(ctx Context) (CheckResult, error) {
 		monorepo404 := findMonorepoErrorPages(ctx.RootDir, "404")
 		if len(monorepo404) > 0 {
 			has404 = true
-			relPath, _ := filepath.Rel(ctx.RootDir, monorepo404[0])
+			relPath := relPath(ctx.RootDir, monorepo404[0])
 			found404 = relPath
 		}
 	}

@@ -63,7 +63,7 @@ func (c SEOMetadataCheck) Run(ctx Context) (CheckResult, error) {
 		generateMetadataPattern := regexp.MustCompile(`(?s)export\s+(async\s+)?function\s+generateMetadata`)
 		metadataExportPattern := regexp.MustCompile(`(?s)export\s+(const|let|var)\s+metadata\s*[=:]`)
 
-		filepath.Walk(appDir, func(path string, info os.FileInfo, err error) error {
+		_ = filepath.Walk(appDir, func(path string, info os.FileInfo, err error) error {
 			if err != nil || hasMetadataInApp {
 				return nil
 			}

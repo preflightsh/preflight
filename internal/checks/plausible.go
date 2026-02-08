@@ -83,7 +83,7 @@ func (c PlausibleCheck) Run(ctx Context) (CheckResult, error) {
 				continue
 			}
 
-			filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+			_ = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 				if err != nil || info.IsDir() || found {
 					return nil
 				}

@@ -70,7 +70,6 @@ func (c HealthCheck) checkPath(ctx Context, baseURLs []string, path string, conf
 			lastErr = err
 			continue
 		}
-		defer resp.Body.Close()
 
 		// For root URL checks, accept 2xx and 3xx status codes
 		isSuccess := resp.StatusCode == http.StatusOK
@@ -79,6 +78,7 @@ func (c HealthCheck) checkPath(ctx Context, baseURLs []string, path string, conf
 		}
 
 		if isSuccess {
+			resp.Body.Close()
 			msg := fmt.Sprintf("Site reachable at %s (%d)", actualURL, resp.StatusCode)
 			if path != "/" {
 				msg = fmt.Sprintf("Health endpoint at %s returned %d", actualURL, resp.StatusCode)
@@ -96,6 +96,7 @@ func (c HealthCheck) checkPath(ctx Context, baseURLs []string, path string, conf
 				Details:  details,
 			}, nil
 		}
+		resp.Body.Close()
 		lastErr = fmt.Errorf("returned status %d", resp.StatusCode)
 	}
 

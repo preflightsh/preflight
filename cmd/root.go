@@ -66,7 +66,7 @@ func markFirstRunComplete(marker string) {
 		return
 	}
 	markerPath := filepath.Join(stateDir, marker)
-	os.WriteFile(markerPath, []byte{}, 0644)
+	_ = os.WriteFile(markerPath, []byte{}, 0644)
 }
 
 // showStarMessage displays the GitHub star prompt

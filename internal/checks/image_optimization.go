@@ -100,7 +100,7 @@ func findLargeImages(rootDir string, threshold int64) []largeImage {
 			}
 
 			if info.Size() > threshold {
-				relPath, _ := filepath.Rel(rootDir, path)
+				relPath := relPath(rootDir, path)
 				images = append(images, largeImage{path: relPath, size: info.Size()})
 			}
 

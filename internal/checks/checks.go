@@ -2,11 +2,20 @@ package checks
 
 import (
 	"net/http"
+	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/preflightsh/preflight/internal/config"
 )
+
+func relPath(base, target string) string {
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return target
+	}
+	return rel
+}
 
 type Severity string
 

@@ -360,7 +360,7 @@ func scanForDebugStatements(rootDir string) []string {
 
 				if p.pattern.MatchString(line) {
 					if !isDevGuarded(lines, lineNum) && !isInCodeExample(lines, lineNum) {
-						relPath, _ := filepath.Rel(rootDir, path)
+						relPath := relPath(rootDir, path)
 						findings = append(findings, fmt.Sprintf("%s:%d - %s", relPath, lineNum+1, p.description))
 					}
 				}

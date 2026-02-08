@@ -46,7 +46,6 @@ func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {
 		if err != nil {
 			continue
 		}
-		defer file.Close()
 
 		scanner := bufio.NewScanner(file)
 		for scanner.Scan() {
@@ -57,6 +56,7 @@ func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {
 				}
 			}
 		}
+		file.Close()
 	}
 
 	// Check required keys
@@ -92,7 +92,7 @@ func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {
 			continue
 		}
 
-		filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		_ = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 			if err != nil || info.IsDir() || initFound {
 				return nil
 			}

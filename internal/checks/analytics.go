@@ -404,11 +404,11 @@ func searchForPatternsWithDetails(rootDir, stack string, patterns []*regexp.Rege
 		}
 
 		// Strip comments to avoid false positives on commented-out code
-		contentStr := stripCommentsForSearch(string(content))
+		contentStr := stripComments(string(content))
 
 		for _, pattern := range patterns {
 			if pattern.MatchString(contentStr) {
-				relPath, _ := filepath.Rel(rootDir, path)
+				relPath := relPath(rootDir, path)
 				return &SearchMatch{
 					FilePath: relPath,
 					Pattern:  pattern.String(),
@@ -510,11 +510,11 @@ func searchForPatternsWithDetails(rootDir, stack string, patterns []*regexp.Rege
 			}
 
 			// Strip comments to avoid false positives on commented-out code
-			contentStr := stripCommentsForSearch(string(content))
+			contentStr := stripComments(string(content))
 
 			for _, pattern := range patterns {
 				if pattern.MatchString(contentStr) {
-					relPath, _ := filepath.Rel(rootDir, path)
+					relPath := relPath(rootDir, path)
 					result = &SearchMatch{
 						FilePath: relPath,
 						Pattern:  pattern.String(),
@@ -585,27 +585,3 @@ func getLayoutFilesForStack(stack string) []string {
 	return []string{"index.html", "public/index.html"}
 }
 
-// stripCommentsForSearch removes comments from code to avoid false positives
-func stripCommentsForSearch(content string) string {
-	// Remove single-line comments (// ...)
-	singleLine := regexp.MustCompile(`//[^\n]*`)
-	content = singleLine.ReplaceAllString(content, "")
-
-	// Remove multi-line comments (/* ... */) including JSX comments ({/* ... */})
-	multiLine := regexp.MustCompile(`(?s)/\*.*?\*/`)
-	content = multiLine.ReplaceAllString(content, "")
-
-	// Remove HTML comments (<!-- ... -->)
-	htmlComments := regexp.MustCompile(`(?s)<!--.*?-->`)
-	content = htmlComments.ReplaceAllString(content, "")
-
-	// Remove Twig/Jinja comments ({# ... #})
-	twigComments := regexp.MustCompile(`(?s)\{#.*?#\}`)
-	content = twigComments.ReplaceAllString(content, "")
-
-	// Remove ERB comments (<%# ... %>)
-	erbComments := regexp.MustCompile(`(?s)<%#.*?%>`)
-	content = erbComments.ReplaceAllString(content, "")
-
-	return content
-}

@@ -206,7 +206,10 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 
 	var displayMessages []string
 	for _, f := range displayFindings {
-		relPath, _ := filepath.Rel(ctx.RootDir, f.file)
+		relPath, err := filepath.Rel(ctx.RootDir, f.file)
+		if err != nil {
+			relPath = f.file
+		}
 		displayMessages = append(displayMessages, fmt.Sprintf("%s:%d (%s)", relPath, f.line, f.secretType))
 	}
 
@@ -262,6 +265,10 @@ func scanFileForSecrets(path string, patterns []secretPattern) []secretFinding {
 				break // Only report one finding per line
 			}
 		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return findings
 	}
 
 	return findings

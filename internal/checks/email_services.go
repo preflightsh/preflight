@@ -342,14 +342,19 @@ func hasEnvVar(rootDir, prefix string) bool {
 		if err != nil {
 			continue
 		}
-		defer file.Close()
 
 		scanner := bufio.NewScanner(file)
+		found := false
 		for scanner.Scan() {
 			line := strings.ToUpper(scanner.Text())
 			if strings.HasPrefix(line, prefix) {
-				return true
+				found = true
+				break
 			}
+		}
+		file.Close()
+		if found {
+			return true
 		}
 	}
 

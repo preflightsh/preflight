@@ -11,7 +11,7 @@ var helpCmd = &cobra.Command{
 	Short: "Show help and examples",
 	Long:  "Display detailed help information with examples for all commands.",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println(`
+		fmt.Print(`
 Preflight CLI - Launch readiness checker for your codebase
 
 USAGE:

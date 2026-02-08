@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -109,16 +110,25 @@ func fetchLatestVersion() (string, error) {
 
 // isNewerVersion returns true if latest is newer than current
 func isNewerVersion(latest, current string) bool {
-	// Simple string comparison works for semver if both have same format
-	// For more robust comparison, could use a semver library
 	latestParts := strings.Split(latest, ".")
 	currentParts := strings.Split(current, ".")
 
 	for i := 0; i < len(latestParts) && i < len(currentParts); i++ {
-		if latestParts[i] > currentParts[i] {
+		l, err1 := strconv.Atoi(latestParts[i])
+		c, err2 := strconv.Atoi(currentParts[i])
+		if err1 != nil || err2 != nil {
+			if latestParts[i] > currentParts[i] {
+				return true
+			}
+			if latestParts[i] < currentParts[i] {
+				return false
+			}
+			continue
+		}
+		if l > c {
 			return true
 		}
-		if latestParts[i] < currentParts[i] {
+		if l < c {
 			return false
 		}
 	}

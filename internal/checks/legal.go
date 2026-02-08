@@ -225,7 +225,7 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 				}
 
 				nameLower := strings.ToLower(info.Name())
-				relPath, _ := filepath.Rel(ctx.RootDir, path)
+				relPath := relPath(ctx.RootDir, path)
 				parentDir := strings.ToLower(filepath.Base(filepath.Dir(path)))
 
 				// For Next.js app router: page.tsx in a privacy/terms directory

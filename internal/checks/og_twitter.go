@@ -237,7 +237,7 @@ func (c OGTwitterCheck) Run(ctx Context) (CheckResult, error) {
 				return nil
 			}
 			nameLower := strings.ToLower(info.Name())
-			relPath, _ := filepath.Rel(ctx.RootDir, path)
+			relPath := relPath(ctx.RootDir, path)
 
 			// Check for opengraph-image files (static or dynamic)
 			if strings.HasPrefix(nameLower, "opengraph-image.") {

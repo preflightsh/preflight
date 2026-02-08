@@ -45,7 +45,7 @@ func (c LicenseCheck) Run(ctx Context) (CheckResult, error) {
 					}
 					// Show location if not in root dir
 					if dir != ctx.RootDir {
-						relPath, _ := filepath.Rel(ctx.RootDir, fullPath)
+						relPath := relPath(ctx.RootDir, fullPath)
 						message += " (at " + relPath + ")"
 					}
 					return CheckResult{

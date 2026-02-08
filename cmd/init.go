@@ -142,13 +142,14 @@ func runInit(cmd *cobra.Command, args []string) error {
 				// Create the key file in the web root
 				webRoot := detectWebRoot(cwd, stack)
 				keyFilePath := filepath.Join(cwd, webRoot, indexNowKey+".txt")
-				if err := os.MkdirAll(filepath.Dir(keyFilePath), 0755); err == nil {
-					if err := os.WriteFile(keyFilePath, []byte(indexNowKey+"\n"), 0644); err == nil {
-						fmt.Printf("  ✅ Created %s/%s.txt\n", webRoot, indexNowKey)
-					} else {
-						fmt.Printf("  ⚠️  Could not create key file: %v\n", err)
-						fmt.Printf("     Create %s/%s.txt containing: %s\n", webRoot, indexNowKey, indexNowKey)
-					}
+				if err := os.MkdirAll(filepath.Dir(keyFilePath), 0755); err != nil {
+					fmt.Printf("  ⚠️  Could not create directory: %v\n", err)
+					fmt.Printf("     Create %s/%s.txt containing: %s\n", webRoot, indexNowKey, indexNowKey)
+				} else if err := os.WriteFile(keyFilePath, []byte(indexNowKey+"\n"), 0644); err == nil {
+					fmt.Printf("  ✅ Created %s/%s.txt\n", webRoot, indexNowKey)
+				} else {
+					fmt.Printf("  ⚠️  Could not create key file: %v\n", err)
+					fmt.Printf("     Create %s/%s.txt containing: %s\n", webRoot, indexNowKey, indexNowKey)
 				}
 			}
 		}
@@ -200,23 +201,38 @@ func runInit(cmd *cobra.Command, args []string) error {
 				// Append to .gitignore
 				f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_WRONLY, 0644)
 				if err == nil {
-					// Add newline if file doesn't end with one
+					writeErr := false
 					if len(content) > 0 && content[len(content)-1] != '\n' {
-						f.WriteString("\n")
+						if _, err := f.WriteString("\n"); err != nil {
+							writeErr = true
+						}
 					}
-					f.WriteString("preflight.yml\n")
-					f.Close()
-					gitignoreUpdated = true
-					fmt.Println("✅ Added preflight.yml to .gitignore")
+					if !writeErr {
+						if _, err := f.WriteString("preflight.yml\n"); err != nil {
+							writeErr = true
+						}
+					}
+					if err := f.Close(); err != nil {
+						writeErr = true
+					}
+					if writeErr {
+						fmt.Fprintln(os.Stderr, "⚠️  Could not update .gitignore")
+					} else {
+						gitignoreUpdated = true
+						fmt.Println("✅ Added preflight.yml to .gitignore")
+					}
 				}
 			}
 		}
 	} else if os.IsNotExist(err) {
 		// No .gitignore exists, offer to create one
 		if promptYesNo(reader, "Create .gitignore with preflight.yml?", true) {
-			os.WriteFile(gitignorePath, []byte("preflight.yml\n"), 0644)
-			gitignoreUpdated = true
-			fmt.Println("✅ Created .gitignore with preflight.yml")
+			if err := os.WriteFile(gitignorePath, []byte("preflight.yml\n"), 0644); err != nil {
+				fmt.Fprintf(os.Stderr, "⚠️  Could not create .gitignore: %v\n", err)
+			} else {
+				gitignoreUpdated = true
+				fmt.Println("✅ Created .gitignore with preflight.yml")
+			}
 		}
 	}
 
@@ -243,7 +259,10 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 func promptWithDefault(reader *bufio.Reader, prompt, defaultVal string) string {
 	fmt.Printf("%s [%s]: ", prompt, defaultVal)
-	input, _ := reader.ReadString('\n')
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return defaultVal
+	}
 	input = strings.TrimSpace(input)
 	if input == "" {
 		return defaultVal
@@ -253,7 +272,10 @@ func promptWithDefault(reader *bufio.Reader, prompt, defaultVal string) string {
 
 func promptOptional(reader *bufio.Reader, prompt string) string {
 	fmt.Printf("%s: ", prompt)
-	input, _ := reader.ReadString('\n')
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return ""
+	}
 	return strings.TrimSpace(input)
 }
 
@@ -282,7 +304,10 @@ func promptYesNo(reader *bufio.Reader, prompt string, defaultYes bool) bool {
 		defaultStr = "y/N"
 	}
 	fmt.Printf("%s [%s]: ", prompt, defaultStr)
-	input, _ := reader.ReadString('\n')
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return defaultYes
+	}
 	input = strings.ToLower(strings.TrimSpace(input))
 
 	if input == "" {
@@ -765,9 +790,11 @@ func detectGemVersion(cwd, gem string) string {
 }
 
 func generateIndexNowKey() string {
-	// Generate a 32-character hex string (16 bytes)
 	bytes := make([]byte, 16)
-	rand.Read(bytes)
+	if _, err := rand.Read(bytes); err != nil {
+		fmt.Fprintf(os.Stderr, "⚠️  Could not generate random key: %v\n", err)
+		return ""
+	}
 	return hex.EncodeToString(bytes)
 }
 

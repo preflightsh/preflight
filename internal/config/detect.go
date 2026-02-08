@@ -810,6 +810,7 @@ func scanEnvFile(path string, envPatterns map[string][]string, services map[stri
 			}
 		}
 	}
+	_ = scanner.Err()
 }
 
 func detectAnalyticsScripts(rootDir string, services map[string]bool) {
@@ -969,7 +970,7 @@ func detectAnalyticsScripts(rootDir string, services map[string]bool) {
 	var externalScripts []string
 
 	// Walk the entire project directory
-	filepath.WalkDir(rootDir, func(path string, d os.DirEntry, err error) error {
+	_ = filepath.WalkDir(rootDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil // Skip files/dirs we can't access
 		}
@@ -1073,11 +1074,12 @@ func detectServicesFromExternalScripts(urls []string, services map[string]bool, 
 
 		resp, err := client.Get(url)
 		if err != nil {
-			// Check if it was a timeout
 			if strings.Contains(err.Error(), "timeout") || strings.Contains(err.Error(), "deadline") {
-				// Extract domain for cleaner message
 				domain := extractDomain(url)
 				fmt.Printf("\n  ⚠️  %s timed out", domain)
+			}
+			if resp != nil {
+				resp.Body.Close()
 			}
 			continue
 		}

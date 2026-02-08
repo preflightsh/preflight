@@ -82,7 +82,7 @@ install() {
     trap "rm -rf ${TMP_DIR}" EXIT
 
     # Download
-    curl -sSL "${DOWNLOAD_URL}" -o "${TMP_DIR}/${FILENAME}"
+    curl -fsSL "${DOWNLOAD_URL}" -o "${TMP_DIR}/${FILENAME}"
 
     # Extract
     cd "${TMP_DIR}"

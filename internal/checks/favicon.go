@@ -76,7 +76,7 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 			if _, err := os.Stat(path); err == nil {
 				hasFavicon = true
 				// Make path relative for display
-				relPath, _ := filepath.Rel(ctx.RootDir, path)
+				relPath := relPath(ctx.RootDir, path)
 				found = append(found, relPath)
 				break
 			}
@@ -110,7 +110,7 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 				if nameLower == "icon.tsx" || nameLower == "icon.ts" || nameLower == "icon.jsx" || nameLower == "icon.js" ||
 					nameLower == "favicon.tsx" || nameLower == "favicon.ts" || nameLower == "favicon.jsx" || nameLower == "favicon.js" {
 					hasFavicon = true
-					relPath, _ := filepath.Rel(ctx.RootDir, path)
+					relPath := relPath(ctx.RootDir, path)
 					found = append(found, relPath)
 					return nil
 				}
@@ -209,7 +209,7 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 
 			allLayoutPaths := nextLayoutPaths
 			for _, path := range monorepoLayoutPaths {
-				relPath, _ := filepath.Rel(ctx.RootDir, path)
+				relPath := relPath(ctx.RootDir, path)
 				allLayoutPaths = append(allLayoutPaths, relPath)
 			}
 
@@ -253,7 +253,7 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 				// Match apple-icon.tsx, apple-icon.ts, etc.
 				if strings.HasPrefix(nameLower, "apple-icon.") && (strings.HasSuffix(nameLower, ".tsx") || strings.HasSuffix(nameLower, ".ts") || strings.HasSuffix(nameLower, ".jsx") || strings.HasSuffix(nameLower, ".js")) {
 					hasAppleIcon = true
-					relPath, _ := filepath.Rel(ctx.RootDir, path)
+					relPath := relPath(ctx.RootDir, path)
 					found = append(found, relPath)
 					return nil
 				}
@@ -307,7 +307,7 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 		for _, path := range monorepoManifestPaths {
 			if _, err := os.Stat(path); err == nil {
 				hasManifest = true
-				relPath, _ := filepath.Rel(ctx.RootDir, path)
+				relPath := relPath(ctx.RootDir, path)
 				found = append(found, relPath)
 				break
 			}
@@ -340,7 +340,7 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 				// Match manifest.ts, manifest.tsx, manifest.js, manifest.jsx, webmanifest files
 				if nameLower == "manifest.ts" || nameLower == "manifest.tsx" || nameLower == "manifest.js" || nameLower == "manifest.jsx" {
 					hasManifest = true
-					relPath, _ := filepath.Rel(ctx.RootDir, path)
+					relPath := relPath(ctx.RootDir, path)
 					found = append(found, relPath)
 					return nil
 				}

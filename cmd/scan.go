@@ -54,8 +54,8 @@ func runScan(cmd *cobra.Command, args []string) error {
 	// Load config
 	cfg, err := config.Load(projectDir)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		if !ciMode {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			fmt.Fprintln(os.Stderr, "Run 'preflight init' to create a configuration file.")
 		}
 		os.Exit(2)
