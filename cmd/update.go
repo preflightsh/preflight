@@ -7,19 +7,27 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 )
 
+const updateCheckInterval = 24 * time.Hour
+
 type githubRelease struct {
 	TagName string `json:"tag_name"`
 }
 
-// CheckForUpdates checks if a newer version is available and prompts user to upgrade
+// CheckForUpdates checks if a newer version is available and prompts user to upgrade.
+// Only checks once every 24 hours to avoid nagging the user.
 func CheckForUpdates() {
 	// Skip in CI mode or if version is dev
 	if version == "dev" {
+		return
+	}
+
+	if !shouldCheckForUpdate() {
 		return
 	}
 
@@ -28,6 +36,9 @@ func CheckForUpdates() {
 		// Silently fail - don't interrupt user workflow for update check failures
 		return
 	}
+
+	// Record the check time regardless of whether an update is available
+	markUpdateChecked()
 
 	if isNewerVersion(latest, version) {
 		fmt.Println()
@@ -50,6 +61,40 @@ func CheckForUpdates() {
 		}
 		fmt.Println()
 	}
+}
+
+// shouldCheckForUpdate returns true if enough time has passed since the last check
+func shouldCheckForUpdate() bool {
+	stateDir := getPreflightStateDir()
+	if stateDir == "" {
+		return true
+	}
+
+	checkFile := filepath.Join(stateDir, "last_update_check")
+	data, err := os.ReadFile(checkFile)
+	if err != nil {
+		return true
+	}
+
+	lastCheck, err := time.Parse(time.RFC3339, strings.TrimSpace(string(data)))
+	if err != nil {
+		return true
+	}
+
+	return time.Since(lastCheck) >= updateCheckInterval
+}
+
+// markUpdateChecked records the current time as the last update check
+func markUpdateChecked() {
+	stateDir := getPreflightStateDir()
+	if stateDir == "" {
+		return
+	}
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		return
+	}
+	checkFile := filepath.Join(stateDir, "last_update_check")
+	_ = os.WriteFile(checkFile, []byte(time.Now().UTC().Format(time.RFC3339)), 0644)
 }
 
 // runUpgrade executes the appropriate upgrade command
