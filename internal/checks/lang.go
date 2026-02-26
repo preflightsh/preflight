@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 )
 
 type LangAttributeCheck struct{}
@@ -59,6 +60,23 @@ func (c LangAttributeCheck) Run(ctx Context) (CheckResult, error) {
 			Passed:   true,
 			Message:  "HTML lang attribute set",
 		}, nil
+	}
+
+	// Check included template files
+	for _, includePath := range resolveTemplateIncludes(contentStr, ctx.RootDir, ctx.Config.Stack) {
+		includeContent, err := os.ReadFile(includePath)
+		if err != nil {
+			continue
+		}
+		if hasLangAttribute(string(includeContent), ctx.Config.Stack) {
+			return CheckResult{
+				ID:       c.ID(),
+				Title:    c.Title(),
+				Severity: SeverityInfo,
+				Passed:   true,
+				Message:  "HTML lang attribute set (in included template)",
+			}, nil
+		}
 	}
 
 	// Check common layout partials
@@ -246,9 +264,11 @@ func getLangSuggestions(stack string) []string {
 
 // stripCommentsLang removes comments from code to avoid false positives
 func stripCommentsLang(content string) string {
-	// Remove single-line comments (// ...)
+	// Remove single-line comments (// ...) but protect URL protocols (e.g. http://)
+	content = strings.ReplaceAll(content, "://", "\x00PROTO\x00")
 	singleLine := regexp.MustCompile(`//[^\n]*`)
 	content = singleLine.ReplaceAllString(content, "")
+	content = strings.ReplaceAll(content, "\x00PROTO\x00", "://")
 
 	// Remove multi-line comments (/* ... */) including JSX inline comments
 	multiLine := regexp.MustCompile(`(?s)/\*.*?\*/`)

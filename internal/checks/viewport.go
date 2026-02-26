@@ -72,6 +72,23 @@ func (c ViewportCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
+	// Check included template files
+	for _, includePath := range resolveTemplateIncludes(contentStr, ctx.RootDir, ctx.Config.Stack) {
+		includeContent, err := os.ReadFile(includePath)
+		if err != nil {
+			continue
+		}
+		if hasViewportMeta(string(includeContent), ctx.Config.Stack) {
+			return CheckResult{
+				ID:       c.ID(),
+				Title:    c.Title(),
+				Severity: SeverityInfo,
+				Passed:   true,
+				Message:  "Viewport meta tag configured (in included template)",
+			}, nil
+		}
+	}
+
 	// Also check common head partials
 	if checkViewportPartials(ctx.RootDir, ctx.Config.Stack) {
 		return CheckResult{

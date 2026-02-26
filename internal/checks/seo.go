@@ -383,3 +383,89 @@ func extractNestedBlockSEO(content, key string) string {
 	}
 	return extractBraceBlockSEO(content, loc[1]-1)
 }
+
+// resolveTemplateIncludes extracts template include/extends paths from content,
+// resolves them relative to the template root, and returns absolute paths that exist on disk.
+func resolveTemplateIncludes(content, rootDir, stack string) []string {
+	var paths []string
+	seen := make(map[string]bool)
+
+	templateRoots := getTemplateRoots(rootDir, stack)
+	rawPaths := extractIncludePaths(content)
+
+	for _, raw := range rawPaths {
+		for _, root := range templateRoots {
+			fullPath := filepath.Join(root, raw)
+			if _, err := os.Stat(fullPath); err == nil {
+				if !seen[fullPath] {
+					seen[fullPath] = true
+					paths = append(paths, fullPath)
+				}
+			}
+		}
+	}
+
+	return paths
+}
+
+func getTemplateRoots(rootDir, stack string) []string {
+	switch stack {
+	case "craft":
+		return []string{filepath.Join(rootDir, "templates")}
+	case "laravel":
+		return []string{filepath.Join(rootDir, "resources", "views")}
+	case "rails":
+		return []string{filepath.Join(rootDir, "app", "views")}
+	case "hugo":
+		return []string{filepath.Join(rootDir, "layouts")}
+	case "jekyll":
+		return []string{
+			filepath.Join(rootDir, "_layouts"),
+			filepath.Join(rootDir, "_includes"),
+		}
+	default:
+		return []string{rootDir}
+	}
+}
+
+func extractIncludePaths(content string) []string {
+	var paths []string
+
+	// Twig: {% include '...' %} and {% extends '...' %}
+	twigPattern := regexp.MustCompile(`\{%[-\s]+(?:include|extends)\s+['"]([^'"]+)['"]`)
+	for _, match := range twigPattern.FindAllStringSubmatch(content, -1) {
+		path := match[1]
+		if idx := strings.Index(path, "|"); idx != -1 {
+			path = path[:idx]
+		}
+		paths = append(paths, path)
+	}
+
+	// Blade: @include('...') and @extends('...')
+	bladePattern := regexp.MustCompile(`@(?:include|extends)\s*\(\s*['"]([^'"]+)['"]`)
+	for _, match := range bladePattern.FindAllStringSubmatch(content, -1) {
+		path := strings.ReplaceAll(match[1], ".", "/") + ".blade.php"
+		paths = append(paths, path)
+	}
+
+	// ERB: <%= render partial: '...' %> and <%= render '...' %>
+	erbPattern := regexp.MustCompile(`<%=\s*render\s+(?:partial:\s*)?['"]([^'"]+)['"]`)
+	for _, match := range erbPattern.FindAllStringSubmatch(content, -1) {
+		path := match[1]
+		dir := filepath.Dir(path)
+		base := filepath.Base(path)
+		if !strings.HasPrefix(base, "_") {
+			base = "_" + base
+		}
+		if !strings.HasSuffix(base, ".html.erb") {
+			base = base + ".html.erb"
+		}
+		if dir == "." {
+			paths = append(paths, base)
+		} else {
+			paths = append(paths, filepath.Join(dir, base))
+		}
+	}
+
+	return paths
+}
