@@ -361,6 +361,13 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 		// Laravel
 		"app/Http/Controllers/SitemapController.php",
 		"routes/sitemap.php",
+		// PHP — direct sitemap.php file in common web root directories
+		"sitemap.php",
+		"web/sitemap.php",
+		"public/sitemap.php",
+		"public_html/sitemap.php",
+		"www/sitemap.php",
+		"htdocs/sitemap.php",
 		// Django
 		"sitemaps.py",
 		// Phoenix/Elixir
