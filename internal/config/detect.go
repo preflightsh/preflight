@@ -258,6 +258,7 @@ var AllServices = []string{
 	// Analytics
 	"plausible",
 	"fathom",
+	"umami",
 	"fullres",
 	"datafast",
 	"google_analytics",
@@ -496,6 +497,9 @@ func detectServicesFromContent(content string, services map[string]bool, lang st
 		strings.Contains(content, "\"fathom\":") {
 		services["fathom"] = true
 	}
+	if strings.Contains(content, "@umami/") || strings.Contains(content, "umami-analytics") {
+		services["umami"] = true
+	}
 	if strings.Contains(content, "fullres") {
 		services["fullres"] = true
 	}
@@ -704,6 +708,7 @@ func detectServicesFromEnv(rootDir string, services map[string]bool) map[string]
 		// Analytics
 		"plausible":        {"PLAUSIBLE_", "NEXT_PUBLIC_PLAUSIBLE"},
 		"fathom":           {"FATHOM_", "NEXT_PUBLIC_FATHOM"},
+		"umami":            {"UMAMI_", "NEXT_PUBLIC_UMAMI"},
 		"fullres":          {"FULLRES_", "NEXT_PUBLIC_FULLRES"},
 		"datafast":         {"DATAFAST_", "NEXT_PUBLIC_DATAFAST"},
 		"google_analytics": {"GA_TRACKING_ID", "GOOGLE_ANALYTICS", "NEXT_PUBLIC_GA", "GA_MEASUREMENT_ID", "GTM_"},
@@ -820,6 +825,7 @@ func detectAnalyticsScripts(rootDir string, services map[string]bool) {
 		// Analytics - look for script URLs or specific SDK patterns
 		"plausible":        regexp.MustCompile(`(?i)plausible\.io/js/|plausible\.io/api`),
 		"fathom":           regexp.MustCompile(`(?i)cdn\.usefathom\.com|script\.src.*fathom`),
+		"umami":            regexp.MustCompile(`(?i)cloud\.umami\.is|analytics\.umami\.is|data-website-id=|umami\.track\(`),
 		"fullres":          regexp.MustCompile(`(?i)window\.fullres|var fullres|fullres\.events|fullres\.src|fullres\.async`),
 		"datafast":         regexp.MustCompile(`(?i)datafa\.st/js/`),
 		"google_analytics": regexp.MustCompile(`(?i)googletagmanager\.com|google-analytics\.com/|gtag\(['"]|monsterinsights`),
@@ -1033,6 +1039,7 @@ func detectAnalyticsScripts(rootDir string, services map[string]bool) {
 		analyticsPatterns := map[string]*regexp.Regexp{
 			"plausible":        patterns["plausible"],
 			"fathom":           patterns["fathom"],
+			"umami":            patterns["umami"],
 			"fullres":          patterns["fullres"],
 			"datafast":         patterns["datafast"],
 			"google_analytics": patterns["google_analytics"],

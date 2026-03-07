@@ -116,7 +116,7 @@ Preflight auto-detects and validates configuration for these services:
 - Postmark, SendGrid, Mailgun, AWS SES, Resend, Mailchimp, Kit, Beehiiv, AWeber, ActiveCampaign, Campaign Monitor, Drip, Klaviyo, Buttondown
 
 **Analytics**
-- Plausible, Fathom, Fullres Analytics, Datafa.st Analytics, Google Analytics, PostHog, Mixpanel, Amplitude, Segment, Hotjar
+- Plausible, Fathom, Umami, Fullres Analytics, Datafa.st Analytics, Google Analytics, PostHog, Mixpanel, Amplitude, Segment, Hotjar
 
 **Auth**
 - Auth0, Clerk, WorkOS

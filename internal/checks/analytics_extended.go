@@ -4,6 +4,67 @@ import (
 	"regexp"
 )
 
+// UmamiCheck verifies Umami Analytics is properly set up
+type UmamiCheck struct{}
+
+func (c UmamiCheck) ID() string {
+	return "umami"
+}
+
+func (c UmamiCheck) Title() string {
+	return "Umami Analytics"
+}
+
+func (c UmamiCheck) Run(ctx Context) (CheckResult, error) {
+	service, declared := ctx.Config.Services["umami"]
+	if !declared || !service.Declared {
+		return CheckResult{
+			ID:       c.ID(),
+			Title:    c.Title(),
+			Severity: SeverityInfo,
+			Passed:   true,
+			Message:  "Umami not declared, skipping",
+		}, nil
+	}
+
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`data-website-id=`),            // Umami-specific script attribute
+		regexp.MustCompile(`(?i)cloud\.umami\.is`),        // Umami Cloud
+		regexp.MustCompile(`(?i)analytics\.umami\.is`),    // Umami Cloud (legacy)
+		regexp.MustCompile(`(?i)umami\.track\(`),          // umami.track() API
+		regexp.MustCompile(`(?i)umami\.identify\(`),       // umami.identify() API
+		regexp.MustCompile(`from\s+["']@umami/`),         // npm package import
+		regexp.MustCompile(`require\s*\(\s*["']@umami/`), // npm package require
+		regexp.MustCompile(`UMAMI_WEBSITE_ID`),            // env var pattern
+		regexp.MustCompile(`NEXT_PUBLIC_UMAMI`),           // Next.js env var
+	}
+
+	found := searchForPatterns(ctx.RootDir, ctx.Config.Stack, patterns)
+
+	if found {
+		return CheckResult{
+			ID:       c.ID(),
+			Title:    c.Title(),
+			Severity: SeverityInfo,
+			Passed:   true,
+			Message:  "Umami Analytics script found",
+		}, nil
+	}
+
+	return CheckResult{
+		ID:       c.ID(),
+		Title:    c.Title(),
+		Severity: SeverityWarn,
+		Passed:   false,
+		Message:  "Umami is declared but script not found in templates",
+		Suggestions: []string{
+			"Add the Umami script tag to your main layout",
+			"Example: <script defer src=\"https://your-umami-host/script.js\" data-website-id=\"YOUR-ID\"></script>",
+			"For self-hosted Umami, ensure data-website-id attribute is present on the script tag",
+		},
+	}, nil
+}
+
 // FullresCheck verifies Fullres Analytics is properly set up
 type FullresCheck struct{}
 

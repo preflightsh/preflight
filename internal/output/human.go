@@ -105,7 +105,7 @@ func (h HumanOutputter) Output(projectName string, results []checks.CheckResult)
 		"mailchimp": true, "convertkit": true, "beehiiv": true, "aweber": true, "activecampaign": true,
 		"campaignmonitor": true, "drip": true, "klaviyo": true, "buttondown": true,
 		// Analytics
-		"plausible": true, "fathom": true, "google_analytics": true, "fullres": true, "datafast": true,
+		"plausible": true, "fathom": true, "umami": true, "google_analytics": true, "fullres": true, "datafast": true,
 		"posthog": true, "mixpanel": true, "amplitude": true, "segment": true, "hotjar": true,
 		// Auth
 		"auth0": true, "clerk": true, "workos": true, "firebase": true, "supabase": true,
@@ -138,7 +138,7 @@ func (h HumanOutputter) Output(projectName string, results []checks.CheckResult)
 		"mailchimp": "EMAIL", "convertkit": "EMAIL", "beehiiv": "EMAIL", "aweber": "EMAIL",
 		"activecampaign": "EMAIL", "campaignmonitor": "EMAIL", "drip": "EMAIL", "klaviyo": "EMAIL", "buttondown": "EMAIL",
 		// Analytics
-		"plausible": "ANALYTICS", "fathom": "ANALYTICS", "google_analytics": "ANALYTICS", "fullres": "ANALYTICS", "datafast": "ANALYTICS",
+		"plausible": "ANALYTICS", "fathom": "ANALYTICS", "umami": "ANALYTICS", "google_analytics": "ANALYTICS", "fullres": "ANALYTICS", "datafast": "ANALYTICS",
 		"posthog": "ANALYTICS", "mixpanel": "ANALYTICS", "amplitude": "ANALYTICS", "segment": "ANALYTICS", "hotjar": "ANALYTICS",
 		// Auth
 		"auth0": "AUTH", "clerk": "AUTH", "workos": "AUTH", "firebase": "AUTH", "supabase": "AUTH",

@@ -145,6 +145,7 @@ var Registry = []Check{
 	PerplexityCheck{},
 	TogetherAICheck{},
 	// Analytics (extended)
+	UmamiCheck{},
 	FullresCheck{},
 	DatafastCheck{},
 	PostHogCheck{},

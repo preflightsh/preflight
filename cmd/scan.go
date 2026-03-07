@@ -294,6 +294,9 @@ func buildEnabledChecks(cfg *config.PreflightConfig, rootDir string) []checks.Ch
 	if cfg.Services["fathom"].Declared && !serviceIgnored("fathom") {
 		enabledChecks = append(enabledChecks, checks.FathomCheck{})
 	}
+	if cfg.Services["umami"].Declared && !serviceIgnored("umami") {
+		enabledChecks = append(enabledChecks, checks.UmamiCheck{})
+	}
 	if cfg.Services["google_analytics"].Declared && !serviceIgnored("google_analytics") {
 		enabledChecks = append(enabledChecks, checks.GoogleAnalyticsCheck{})
 	}
