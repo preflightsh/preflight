@@ -64,7 +64,13 @@ func (c SEOMetadataCheck) Run(ctx Context) (CheckResult, error) {
 		metadataExportPattern := regexp.MustCompile(`(?s)export\s+(const|let|var)\s+metadata\s*[=:]`)
 
 		_ = filepath.Walk(appDir, func(path string, info os.FileInfo, err error) error {
-			if err != nil || hasMetadataInApp {
+			if err != nil {
+				if info != nil && info.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if hasMetadataInApp {
 				return nil
 			}
 			if info.IsDir() {
@@ -376,7 +382,7 @@ func extractBraceBlockSEO(content string, pos int) string {
 
 // extractNestedBlockSEO extracts a nested object block like openGraph: { ... }
 func extractNestedBlockSEO(content, key string) string {
-	pattern := regexp.MustCompile(`(?s)` + key + `\s*:\s*\{`)
+	pattern := regexp.MustCompile(`(?s)` + regexp.QuoteMeta(key) + `\s*:\s*\{`)
 	loc := pattern.FindStringIndex(content)
 	if loc == nil {
 		return ""

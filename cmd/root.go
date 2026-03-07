@@ -27,6 +27,21 @@ func Execute() error {
 
 func init() {
 	rootCmd.SetVersionTemplate("preflight version {{.Version}}\n")
+	rootCmd.SilenceUsage = true
+	rootCmd.SilenceErrors = true
+}
+
+// ExitError is an error that carries a specific exit code
+type ExitError struct {
+	Code int
+	Err  error
+}
+
+func (e *ExitError) Error() string {
+	if e.Err != nil {
+		return e.Err.Error()
+	}
+	return fmt.Sprintf("exit code %d", e.Code)
 }
 
 func exitWithError(msg string) {

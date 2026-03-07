@@ -25,7 +25,7 @@ func CalculateSummary(results []checks.CheckResult) Summary {
 			case checks.SeverityWarn:
 				summary.Warn++
 			default:
-				summary.OK++
+				summary.Warn++
 			}
 		}
 	}

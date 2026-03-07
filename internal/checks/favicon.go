@@ -95,7 +95,13 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 				continue
 			}
 			filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
-				if err != nil || hasFavicon {
+				if err != nil {
+					if info != nil && info.IsDir() {
+						return filepath.SkipDir
+					}
+					return nil
+				}
+				if hasFavicon {
 					return nil
 				}
 				if info.IsDir() {
@@ -239,7 +245,13 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 				continue
 			}
 			filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
-				if err != nil || hasAppleIcon {
+				if err != nil {
+					if info != nil && info.IsDir() {
+						return filepath.SkipDir
+					}
+					return nil
+				}
+				if hasAppleIcon {
 					return nil
 				}
 				if info.IsDir() {
@@ -326,7 +338,13 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 				continue
 			}
 			filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
-				if err != nil || hasManifest {
+				if err != nil {
+					if info != nil && info.IsDir() {
+						return filepath.SkipDir
+					}
+					return nil
+				}
+				if hasManifest {
 					return nil
 				}
 				if info.IsDir() {

@@ -109,12 +109,34 @@ func runUpgrade() {
 		return
 	}
 
-	// Handle piped commands (curl ... | sh)
+	// Handle piped commands (curl ... | sh) safely without sh -c
 	if strings.Contains(upgradeCmd, "|") {
-		cmd := exec.Command("sh", "-c", upgradeCmd)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
+		pipeParts := strings.SplitN(upgradeCmd, "|", 2)
+		curlArgs := strings.Fields(strings.TrimSpace(pipeParts[0]))
+		shArgs := strings.Fields(strings.TrimSpace(pipeParts[1]))
+
+		curlCmd := exec.Command(curlArgs[0], curlArgs[1:]...)
+		shCmd := exec.Command(shArgs[0])
+
+		pipe, err := curlCmd.StdoutPipe()
+		if err != nil {
+			fmt.Printf("   ✗ Upgrade failed: %v\n", err)
+			return
+		}
+		shCmd.Stdin = pipe
+		shCmd.Stdout = os.Stdout
+		shCmd.Stderr = os.Stderr
+		curlCmd.Stderr = os.Stderr
+
+		if err := shCmd.Start(); err != nil {
+			fmt.Printf("   ✗ Upgrade failed: %v\n", err)
+			return
+		}
+		if err := curlCmd.Run(); err != nil {
+			fmt.Printf("   ✗ Upgrade failed: %v\n", err)
+			return
+		}
+		if err := shCmd.Wait(); err != nil {
 			fmt.Printf("   ✗ Upgrade failed: %v\n", err)
 			return
 		}
@@ -155,20 +177,26 @@ func fetchLatestVersion() (string, error) {
 
 // isNewerVersion returns true if latest is newer than current
 func isNewerVersion(latest, current string) bool {
+	// Strip pre-release suffixes (e.g., "1.2.3-beta" -> "1.2.3")
+	latest = strings.SplitN(latest, "-", 2)[0]
+	current = strings.SplitN(current, "-", 2)[0]
+
 	latestParts := strings.Split(latest, ".")
 	currentParts := strings.Split(current, ".")
 
-	for i := 0; i < len(latestParts) && i < len(currentParts); i++ {
-		l, err1 := strconv.Atoi(latestParts[i])
-		c, err2 := strconv.Atoi(currentParts[i])
-		if err1 != nil || err2 != nil {
-			if latestParts[i] > currentParts[i] {
-				return true
-			}
-			if latestParts[i] < currentParts[i] {
-				return false
-			}
-			continue
+	// Compare up to the length of the shorter version
+	maxLen := len(latestParts)
+	if len(currentParts) > maxLen {
+		maxLen = len(currentParts)
+	}
+
+	for i := 0; i < maxLen; i++ {
+		var l, c int
+		if i < len(latestParts) {
+			l, _ = strconv.Atoi(latestParts[i])
+		}
+		if i < len(currentParts) {
+			c, _ = strconv.Atoi(currentParts[i])
 		}
 		if l > c {
 			return true
@@ -178,7 +206,7 @@ func isNewerVersion(latest, current string) bool {
 		}
 	}
 
-	return len(latestParts) > len(currentParts)
+	return false
 }
 
 // getUpgradeCommand returns the appropriate upgrade command based on install method

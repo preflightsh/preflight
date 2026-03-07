@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 )
 
 type SentryCheck struct{}
@@ -37,9 +36,9 @@ func (c SentryCheck) Run(ctx Context) (CheckResult, error) {
 		regexp.MustCompile(`@sentry/`),
 		regexp.MustCompile(`require\s*\(\s*['"]@sentry`),
 		regexp.MustCompile(`import.*from\s+['"]@sentry`),
-		regexp.MustCompile(`Sentry::init`),           // Ruby
-		regexp.MustCompile(`sentry_sdk\.init`),       // Python
-		regexp.MustCompile(`\bsentry-laravel\b`),     // Laravel
+		regexp.MustCompile(`Sentry::init`),       // Ruby
+		regexp.MustCompile(`sentry_sdk\.init`),    // Python
+		regexp.MustCompile(`\bsentry-laravel\b`),  // Laravel
 	}
 
 	// Check for Next.js Sentry config files at root first
@@ -132,12 +131,15 @@ func (c SentryCheck) Run(ctx Context) (CheckResult, error) {
 		}
 
 		err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
-			if err != nil || info.IsDir() {
+			if err != nil {
 				return nil
 			}
 
-			// Skip node_modules and vendor
-			if strings.Contains(path, "node_modules") || strings.Contains(path, "vendor") {
+			if info.IsDir() {
+				name := info.Name()
+				if name == "node_modules" || name == "vendor" || name == ".git" {
+					return filepath.SkipDir
+				}
 				return nil
 			}
 

@@ -1,8 +1,8 @@
-.PHONY: build test clean release install lint fmt
+.PHONY: build test clean release install lint fmt tidy run run-init run-scan test-coverage release-snapshot
 
 # Build binary
 build:
-	go build -o bin/preflight main.go
+	go build -ldflags "-X github.com/preflightsh/preflight/cmd.version=$(shell git describe --tags 2>/dev/null | sed 's/^v//' || echo dev)" -o bin/preflight main.go
 
 # Run tests
 test:

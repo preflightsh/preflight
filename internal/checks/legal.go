@@ -2,6 +2,7 @@ package checks
 
 import (
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,8 +31,10 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 	}
 
 	if baseURL != "" {
+		// Use a separate client that doesn't follow redirects so we can detect 3xx as "page exists".
+		// We intentionally don't use ctx.Client here because we need different redirect behavior.
 		client := &http.Client{
-			Timeout: 5 * time.Second,
+			Timeout: 2 * time.Second,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse // Don't follow redirects
 			},
@@ -51,9 +54,15 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 			resp, err := client.Get(baseURL + path)
 			if err == nil {
 				resp.Body.Close()
-				if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+				if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 					hasPrivacy = true
 					privacyPath = path + " (via HTTP)"
+				} else if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+					// Only count redirect as "found" if it stays on the same domain
+					if isSameDomainRedirect(baseURL, resp.Header.Get("Location")) {
+						hasPrivacy = true
+						privacyPath = path + " (via HTTP)"
+					}
 				}
 			}
 		}
@@ -72,9 +81,14 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 			resp, err := client.Get(baseURL + path)
 			if err == nil {
 				resp.Body.Close()
-				if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+				if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 					hasTerms = true
 					termsPath = path + " (via HTTP)"
+				} else if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+					if isSameDomainRedirect(baseURL, resp.Header.Get("Location")) {
+						hasTerms = true
+						termsPath = path + " (via HTTP)"
+					}
 				}
 			}
 		}
@@ -363,4 +377,24 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 			"Add terms of service page (e.g., /terms)",
 		},
 	}, nil
+}
+
+// isSameDomainRedirect checks if a redirect Location stays on the same domain
+func isSameDomainRedirect(baseURL, location string) bool {
+	if location == "" {
+		return false
+	}
+	// Relative redirects are same-domain
+	if strings.HasPrefix(location, "/") {
+		return true
+	}
+	baseU, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
+	locU, err := url.Parse(location)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(baseU.Hostname(), locU.Hostname())
 }

@@ -129,9 +129,16 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 
 	var findings []secretFinding
 	maxFileSize := int64(1024 * 1024) // 1 MB
+	filesScanned := 0
+	filesErrored := 0
 
 	err := filepath.Walk(ctx.RootDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			if info != nil && info.IsDir() {
+				filesErrored++
+				return filepath.SkipDir
+			}
+			filesErrored++
 			return nil
 		}
 
@@ -172,8 +179,12 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 		}
 
 		// Scan file
-		fileFindings := scanFileForSecrets(path, patterns)
+		fileFindings, scanErr := scanFileForSecrets(path, patterns)
+		if scanErr != nil {
+			filesErrored++
+		}
 		findings = append(findings, fileFindings...)
+		filesScanned++
 
 		return nil
 	})
@@ -188,13 +199,23 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
+	// Build scan summary
+	scanSummary := fmt.Sprintf("Scanned %d files", filesScanned)
+	if filesErrored > 0 {
+		scanSummary += fmt.Sprintf(", %d files could not be read", filesErrored)
+	}
+
 	if len(findings) == 0 {
+		message := "No secrets detected in tracked files"
+		if filesErrored > 0 {
+			message = fmt.Sprintf("No secrets detected (%s)", scanSummary)
+		}
 		return CheckResult{
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
 			Passed:   true,
-			Message:  "No secrets detected in tracked files",
+			Message:  message,
 		}, nil
 	}
 
@@ -218,12 +239,17 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 		suffix = fmt.Sprintf(" (and %d more)", len(findings)-5)
 	}
 
+	message := "Potential secrets found:\n  " + strings.Join(displayMessages, "\n  ") + suffix
+	if filesErrored > 0 {
+		message += fmt.Sprintf("\n  Note: %s", scanSummary)
+	}
+
 	return CheckResult{
 		ID:       c.ID(),
 		Title:    c.Title(),
 		Severity: SeverityError,
 		Passed:   false,
-		Message:  "Potential secrets found:\n  " + strings.Join(displayMessages, "\n  ") + suffix,
+		Message:  message,
 		Suggestions: []string{
 			"Remove secrets from source code",
 			"Use environment variables instead",
@@ -239,16 +265,18 @@ type secretFinding struct {
 	secretType string
 }
 
-func scanFileForSecrets(path string, patterns []secretPattern) []secretFinding {
+func scanFileForSecrets(path string, patterns []secretPattern) ([]secretFinding, error) {
 	var findings []secretFinding
 
 	file, err := os.Open(path)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
+	// Use a 1MB buffer to handle minified files
+	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
 	lineNum := 0
 
 	for scanner.Scan() {
@@ -268,8 +296,8 @@ func scanFileForSecrets(path string, patterns []secretPattern) []secretFinding {
 	}
 
 	if err := scanner.Err(); err != nil {
-		return findings
+		return findings, fmt.Errorf("incomplete scan of %s: %w", path, err)
 	}
 
-	return findings
+	return findings, nil
 }

@@ -42,21 +42,7 @@ func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {
 	foundKeys := make(map[string]bool)
 	for _, envFile := range envFiles {
 		path := filepath.Join(ctx.RootDir, envFile)
-		file, err := os.Open(path)
-		if err != nil {
-			continue
-		}
-
-		scanner := bufio.NewScanner(file)
-		for scanner.Scan() {
-			line := strings.ToUpper(scanner.Text())
-			for _, key := range append(requiredKeys, webhookKey) {
-				if strings.HasPrefix(line, key) {
-					foundKeys[key] = true
-				}
-			}
-		}
-		file.Close()
+		scanEnvFile(path, append(requiredKeys, webhookKey), foundKeys)
 	}
 
 	// Check required keys
@@ -171,4 +157,22 @@ func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {
 		Message:     strings.Join(issues, "; "),
 		Suggestions: suggestions,
 	}, nil
+}
+
+func scanEnvFile(path string, keys []string, foundKeys map[string]bool) {
+	file, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.ToUpper(scanner.Text())
+		for _, key := range keys {
+			if strings.HasPrefix(line, key) {
+				foundKeys[key] = true
+			}
+		}
+	}
 }

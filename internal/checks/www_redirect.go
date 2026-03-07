@@ -168,7 +168,7 @@ func (c WWWRedirectCheck) Run(ctx Context) (CheckResult, error) {
 
 func getFinalURL(urlStr string) (string, error) {
 	client := &http.Client{
-		Timeout: 10 * time.Second,
+		Timeout: 5 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
 				return fmt.Errorf("too many redirects")
@@ -177,7 +177,7 @@ func getFinalURL(urlStr string) (string, error) {
 		},
 	}
 
-	req, err := http.NewRequest("GET", urlStr, nil)
+	req, err := http.NewRequest("HEAD", urlStr, nil)
 	if err != nil {
 		return "", err
 	}

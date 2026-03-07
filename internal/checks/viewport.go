@@ -55,7 +55,7 @@ func (c ViewportCheck) Run(ctx Context) (CheckResult, error) {
 			Title:    c.Title(),
 			Severity: SeverityWarn,
 			Passed:   false,
-			Message:  "Could not read layout file: " + cfg.MainLayout,
+			Message:  "Could not read layout file: " + layoutFile,
 		}, nil
 	}
 

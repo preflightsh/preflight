@@ -1,6 +1,6 @@
 #!/bin/sh
 # Preflight CLI Installer
-# Usage: curl -sSL https://preflight.sh/install | sh
+# Usage: curl -sSL https://preflight.sh/install.sh | sh
 
 set -e
 
@@ -79,17 +79,41 @@ install() {
 
     # Create temp directory
     TMP_DIR=$(mktemp -d)
-    trap "rm -rf ${TMP_DIR}" EXIT
+    trap 'rm -rf "$TMP_DIR"' EXIT
 
-    # Download
+    # Download binary and checksums
     curl -fsSL "${DOWNLOAD_URL}" -o "${TMP_DIR}/${FILENAME}"
+    CHECKSUMS_URL="https://github.com/${REPO}/releases/download/${VERSION}/checksums.txt"
+    curl -fsSL "${CHECKSUMS_URL}" -o "${TMP_DIR}/checksums.txt" 2>/dev/null || true
+
+    # Verify checksum if checksums file was downloaded
+    if [ -f "${TMP_DIR}/checksums.txt" ]; then
+        cd "${TMP_DIR}"
+        expected=$(grep "${FILENAME}" checksums.txt | awk '{print $1}')
+        if [ -n "$expected" ]; then
+            if command -v sha256sum >/dev/null 2>&1; then
+                actual=$(sha256sum "${FILENAME}" | awk '{print $1}')
+            elif command -v shasum >/dev/null 2>&1; then
+                actual=$(shasum -a 256 "${FILENAME}" | awk '{print $1}')
+            else
+                warn "Could not verify checksum (sha256sum/shasum not found)"
+                actual="$expected"
+            fi
+            if [ "$actual" != "$expected" ]; then
+                error "Checksum verification failed! Expected: ${expected}, Got: ${actual}"
+            fi
+            info "Checksum verified"
+        fi
+    else
+        warn "Could not download checksums file, skipping verification"
+    fi
 
     # Extract
     cd "${TMP_DIR}"
     if [ "$OS" = "windows" ]; then
         unzip -q "${FILENAME}"
     else
-        tar -xzf "${FILENAME}"
+        tar -xzf "${FILENAME}" --strip-components=1
     fi
 
     # Install

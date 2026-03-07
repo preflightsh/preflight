@@ -79,6 +79,9 @@ func findLargeImages(rootDir string, threshold int64) []largeImage {
 
 		filepath.WalkDir(rootPath, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
+				if d != nil && d.IsDir() {
+					return filepath.SkipDir
+				}
 				return nil
 			}
 

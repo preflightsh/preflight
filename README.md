@@ -2,7 +2,7 @@
 
 [Preflight.sh](https://preflight.sh/) is a command-line tool that scans your codebase for launch readiness. Identifies missing configuration, integration issues, security concerns, SEO metadata gaps, and other common mistakes before you deploy to production. [View the changelog here.](https://changelog.preflight.sh/)
 
-Don’t embarrass yourself in production. Just run the command.
+Don't embarrass yourself in production. Just run the command.
 
 ## Installation
 
@@ -102,7 +102,7 @@ preflight checks
 | **IndexNow** | Verifies IndexNow key file for faster search indexing (opt-in) |
 | **LICENSE** | Checks for license file (opt-in, for open source projects) |
 
-## Supported Services (70)
+## Supported Services (72)
 
 Preflight auto-detects and validates configuration for these services:
 
@@ -258,7 +258,7 @@ All services have validation checks that verify proper integration (env vars, SD
 
 **AI:** `openai`, `anthropic`, `google_ai`, `mistral`, `cohere`, `replicate`, `huggingface`, `grok`, `perplexity`, `together_ai`
 
-**SEO:** `indexnow`
+**SEO:** `indexNow`
 
 **Cookie Consent:** `cookieconsent`, `cookiebot`, `onetrust`, `termly`, `cookieyes`, `iubenda`
 
@@ -296,7 +296,7 @@ All services have validation checks that verify proper integration (env vars, SD
 # GitHub Actions example (curl)
 - name: Run Preflight
   run: |
-    curl -sSL https://raw.githubusercontent.com/preflightsh/preflight/main/install.sh | sh
+    curl -sSL https://preflight.sh/install.sh | sh
     preflight scan --ci --format json
 ```
 

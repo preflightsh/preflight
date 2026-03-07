@@ -80,7 +80,13 @@ func (c OGTwitterCheck) Run(ctx Context) (CheckResult, error) {
 		metadataExportPattern := regexp.MustCompile(`(?s)export\s+(const|let|var)\s+metadata\s*[=:]`)
 
 		filepath.Walk(appDir, func(path string, info os.FileInfo, err error) error {
-			if err != nil || hasMetadataInApp {
+			if err != nil {
+				if info != nil && info.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if hasMetadataInApp {
 				return nil
 			}
 			if info.IsDir() {
@@ -227,6 +233,9 @@ func (c OGTwitterCheck) Run(ctx Context) (CheckResult, error) {
 		}
 		filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
+				if info != nil && info.IsDir() {
+					return filepath.SkipDir
+				}
 				return nil
 			}
 			if info.IsDir() {
@@ -470,13 +479,23 @@ func extractBraceBlock(content string, pos int) string {
 		return ""
 	}
 	depth := 0
+	inString := false
+	stringChar := byte(0)
 	for i := pos; i < len(content); i++ {
-		if content[i] == '{' {
-			depth++
-		} else if content[i] == '}' {
-			depth--
-			if depth == 0 {
-				return content[pos : i+1]
+		c := content[i]
+		if !inString && (c == '"' || c == '\'' || c == '`') {
+			inString = true
+			stringChar = c
+		} else if inString && c == stringChar && (i == 0 || content[i-1] != '\\') {
+			inString = false
+		} else if !inString {
+			if c == '{' {
+				depth++
+			} else if c == '}' {
+				depth--
+				if depth == 0 {
+					return content[pos : i+1]
+				}
 			}
 		}
 	}
@@ -485,7 +504,7 @@ func extractBraceBlock(content string, pos int) string {
 
 // extractNestedBlockOG extracts a nested object block like openGraph: { ... }
 func extractNestedBlockOG(content, key string) string {
-	pattern := regexp.MustCompile(`(?s)` + key + `\s*:\s*\{`)
+	pattern := regexp.MustCompile(`(?s)` + regexp.QuoteMeta(key) + `\s*:\s*\{`)
 	loc := pattern.FindStringIndex(content)
 	if loc == nil {
 		return ""

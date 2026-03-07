@@ -1,10 +1,12 @@
 package checks
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/url"
 	"strings"
+	"time"
 )
 
 type EmailAuthCheck struct{}
@@ -115,8 +117,15 @@ func extractDomain(rawURL string) (string, error) {
 	return parsed.Hostname(), nil
 }
 
+func dnsLookupTXT(name string) ([]string, error) {
+	resolver := &net.Resolver{}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return resolver.LookupTXT(ctx, name)
+}
+
 func checkSPF(domain string) (bool, string, error) {
-	records, err := net.LookupTXT(domain)
+	records, err := dnsLookupTXT(domain)
 	if err != nil {
 		if dnsErr, ok := err.(*net.DNSError); ok && dnsErr.IsNotFound {
 			return false, "", nil
@@ -133,7 +142,7 @@ func checkSPF(domain string) (bool, string, error) {
 }
 
 func checkDMARC(domain string) (bool, string, error) {
-	records, err := net.LookupTXT("_dmarc." + domain)
+	records, err := dnsLookupTXT("_dmarc." + domain)
 	if err != nil {
 		if dnsErr, ok := err.(*net.DNSError); ok && dnsErr.IsNotFound {
 			return false, "", nil

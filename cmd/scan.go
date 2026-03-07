@@ -43,6 +43,14 @@ func runScan(cmd *cobra.Command, args []string) error {
 	var projectDir string
 	if len(args) > 0 {
 		projectDir = args[0]
+		// Validate the provided path
+		info, err := os.Stat(projectDir)
+		if err != nil {
+			return &ExitError{Code: 2, Err: fmt.Errorf("path does not exist: %s", projectDir)}
+		}
+		if !info.IsDir() {
+			return &ExitError{Code: 2, Err: fmt.Errorf("path is not a directory: %s", projectDir)}
+		}
 	} else {
 		var err error
 		projectDir, err = os.Getwd()
@@ -54,11 +62,11 @@ func runScan(cmd *cobra.Command, args []string) error {
 	// Load config
 	cfg, err := config.Load(projectDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		msg := fmt.Sprintf("Error: %v", err)
 		if !ciMode {
-			fmt.Fprintln(os.Stderr, "Run 'preflight init' to create a configuration file.")
+			msg += "\nRun 'preflight init' to create a configuration file."
 		}
-		os.Exit(2)
+		return &ExitError{Code: 2, Err: fmt.Errorf("%s", msg)}
 	}
 
 	// Create HTTP client with timeout
@@ -129,7 +137,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	// Determine exit code
 	exitCode := determineExitCode(results)
 	if exitCode != 0 {
-		os.Exit(exitCode)
+		return &ExitError{Code: exitCode}
 	}
 
 	return nil
