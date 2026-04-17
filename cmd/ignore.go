@@ -10,7 +10,7 @@ import (
 )
 
 var ignoreCmd = &cobra.Command{
-	Use:   "ignore <check-id>",
+	Use:   "ignore <check-id> [path]",
 	Short: "Add a check to the ignore list",
 	Long: `Add a check ID to the ignore list in preflight.yml.
 The check will be skipped in future scans.
@@ -18,8 +18,13 @@ The check will be skipped in future scans.
 Example:
   preflight ignore sitemap
   preflight ignore llmsTxt
-  preflight ignore debug_statements`,
-	Args: cobra.ExactArgs(1),
+  preflight ignore debug_statements
+
+To allowlist a single file from the secrets scan (rather than silencing
+the whole check), pass "secrets" and a project-relative path:
+
+  preflight ignore secrets web/js/golden-hour.js`,
+	Args: cobra.RangeArgs(1, 2),
 	RunE: runIgnore,
 }
 
@@ -50,6 +55,15 @@ func runIgnore(cmd *cobra.Command, args []string) error {
 	var cfg map[string]interface{}
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return fmt.Errorf("failed to parse preflight.yml: %w", err)
+	}
+
+	// Two-arg form: `preflight ignore secrets <path>` → append an
+	// allowlist entry instead of silencing the whole check.
+	if len(args) == 2 {
+		if checkID != "secrets" {
+			return fmt.Errorf("per-path ignore is only supported for 'secrets' (got %q)", checkID)
+		}
+		return addSecretsAllowlistEntry(configPath, cfg, args[1])
 	}
 
 	// Get or create ignore list
@@ -87,6 +101,53 @@ func runIgnore(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Added '%s' to ignore list\n", checkID)
+	return nil
+}
+
+// addSecretsAllowlistEntry appends {path: <path>} to
+// checks.secrets.allowlist in preflight.yml. It does not set a
+// fingerprint — users can edit the file to pin one (recommended; see
+// README). Intermediate maps and lists are created as needed.
+func addSecretsAllowlistEntry(configPath string, cfg map[string]interface{}, path string) error {
+	checksRaw, _ := cfg["checks"].(map[string]interface{})
+	if checksRaw == nil {
+		checksRaw = map[string]interface{}{}
+		cfg["checks"] = checksRaw
+	}
+
+	secretsRaw, _ := checksRaw["secrets"].(map[string]interface{})
+	if secretsRaw == nil {
+		secretsRaw = map[string]interface{}{"enabled": true}
+		checksRaw["secrets"] = secretsRaw
+	}
+
+	var allowlist []interface{}
+	if existing, ok := secretsRaw["allowlist"].([]interface{}); ok {
+		allowlist = existing
+	}
+
+	// De-dupe: if an entry with the same path already exists, do nothing
+	for _, item := range allowlist {
+		if entry, ok := item.(map[string]interface{}); ok {
+			if p, _ := entry["path"].(string); p == path {
+				fmt.Printf("'%s' is already in the secrets allowlist\n", path)
+				return nil
+			}
+		}
+	}
+
+	allowlist = append(allowlist, map[string]interface{}{"path": path})
+	secretsRaw["allowlist"] = allowlist
+
+	newData, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to serialize config: %w", err)
+	}
+	if err := os.WriteFile(configPath, newData, 0644); err != nil {
+		return fmt.Errorf("failed to write config: %w", err)
+	}
+
+	fmt.Printf("Added '%s' to secrets allowlist. Consider adding a fingerprint to re-alert on key rotation (see README).\n", path)
 	return nil
 }
 

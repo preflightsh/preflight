@@ -2,11 +2,16 @@ package checks
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/bmatcuk/doublestar/v4"
+	"github.com/preflightsh/preflight/internal/config"
 )
 
 // secretPattern holds a regex pattern and its human-readable description
@@ -189,6 +194,8 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 		return nil
 	})
 
+	findings = applySecretAllowlist(findings, ctx)
+
 	if err != nil {
 		return CheckResult{
 			ID:       c.ID(),
@@ -260,9 +267,62 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 }
 
 type secretFinding struct {
-	file       string
-	line       int
-	secretType string
+	file        string
+	line        int
+	secretType  string
+	fingerprint string // "sha256:<hex>" of the matched secret value
+}
+
+// fingerprintSecret returns "sha256:<hex>" for a matched secret value.
+func fingerprintSecret(match string) string {
+	sum := sha256.Sum256([]byte(match))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// applySecretAllowlist drops findings that match an entry in
+// checks.secrets.allowlist. An entry matches when the doublestar glob
+// in `path` matches the project-relative file path; if `fingerprint`
+// is also set, the finding's fingerprint must match exactly. This means
+// rotating a secret invalidates the allowlist entry and the finding
+// re-alerts — which is the point.
+func applySecretAllowlist(findings []secretFinding, ctx Context) []secretFinding {
+	if ctx.Config == nil || ctx.Config.Checks.Secrets == nil || len(ctx.Config.Checks.Secrets.Allowlist) == 0 {
+		return findings
+	}
+	entries := ctx.Config.Checks.Secrets.Allowlist
+
+	var kept []secretFinding
+	for _, f := range findings {
+		rel, err := filepath.Rel(ctx.RootDir, f.file)
+		if err != nil {
+			rel = f.file
+		}
+		rel = filepath.ToSlash(rel)
+
+		if matchesSecretAllowlist(rel, f.fingerprint, entries) {
+			continue
+		}
+		kept = append(kept, f)
+	}
+	return kept
+}
+
+func matchesSecretAllowlist(relPath, fingerprint string, entries []config.SecretAllowlistEntry) bool {
+	for _, e := range entries {
+		if e.Path == "" {
+			continue
+		}
+		pattern := filepath.ToSlash(e.Path)
+		ok, err := doublestar.Match(pattern, relPath)
+		if err != nil || !ok {
+			continue
+		}
+		if e.Fingerprint != "" && e.Fingerprint != fingerprint {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func scanFileForSecrets(path string, patterns []secretPattern) ([]secretFinding, error) {
@@ -287,11 +347,12 @@ func scanFileForSecrets(path string, patterns []secretPattern) ([]secretFinding,
 		line := scanner.Text()
 
 		for _, sp := range patterns {
-			if sp.pattern.MatchString(line) {
+			if m := sp.pattern.FindString(line); m != "" {
 				findings = append(findings, secretFinding{
-					file:       path,
-					line:       lineNum,
-					secretType: sp.description,
+					file:        path,
+					line:        lineNum,
+					secretType:  sp.description,
+					fingerprint: fingerprintSecret(m),
 				})
 				break // Only report one finding per line
 			}

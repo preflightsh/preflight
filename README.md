@@ -181,6 +181,17 @@ checks:
   security:
     enabled: true
 
+  secrets:
+    enabled: true
+    # Per-file allowlist for the secrets scan. Use this to suppress an
+    # individual finding (e.g. a referrer-restricted public key) without
+    # disabling the whole check.
+    allowlist:
+      - path: web/js/golden-hour.js
+        fingerprint: "sha256:<hex>"   # recommended — pins to the exact secret
+        reason: "HTTP-referrer-restricted Google Timezone key"
+      - path: "web/tools/**/*.php"    # doublestar globs are supported
+
   indexNow:
     enabled: true
     key: "your32characterhexkeyhere00000"
@@ -211,6 +222,30 @@ preflight ignore sentry         # Ignore Sentry service validation
 preflight unignore sitemap      # Re-enable sitemap check
 preflight checks                # List all ignorable IDs
 ```
+
+### Allowlisting a single secrets finding
+
+Prefer allowlisting an individual finding over silencing the whole
+`secrets` check. Add one-off exceptions from the command line:
+
+```bash
+preflight ignore secrets web/js/golden-hour.js
+```
+
+That appends a path entry under `checks.secrets.allowlist` in your
+`preflight.yml`. The `path` field is a [doublestar](https://github.com/bmatcuk/doublestar)
+glob (`**` matches across directories) resolved against the
+project-relative file path.
+
+**Pin the fingerprint.** A path-only allowlist silently accepts *any*
+future secret dropped into that file. Edit the entry and add a
+`fingerprint: "sha256:<hex>"` — the SHA-256 of the detected secret
+value. Now if the key is rotated or a different secret shows up in the
+same file, preflight re-alerts.
+
+Findings are matched by **path + fingerprint**, not whole-file. An
+allowlisted fingerprint in a file does not suppress other secrets on
+other lines in the same file.
 
 ### Ignorable Check IDs
 

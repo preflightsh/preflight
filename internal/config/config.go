@@ -66,7 +66,14 @@ type SecurityConfig struct {
 }
 
 type SecretsConfig struct {
-	Enabled bool `yaml:"enabled"`
+	Enabled   bool                    `yaml:"enabled"`
+	Allowlist []SecretAllowlistEntry  `yaml:"allowlist,omitempty"`
+}
+
+type SecretAllowlistEntry struct {
+	Path        string `yaml:"path"`
+	Fingerprint string `yaml:"fingerprint,omitempty"`
+	Reason      string `yaml:"reason,omitempty"`
 }
 
 type AdsTxtConfig struct {
