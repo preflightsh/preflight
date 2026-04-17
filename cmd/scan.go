@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/preflightsh/preflight/internal/checks"
@@ -530,7 +531,7 @@ func canAutoDetectLayout(rootDir, stack string) bool {
 	// Check stack-specific layouts
 	if layouts, ok := layoutsByStack[stack]; ok {
 		for _, layout := range layouts {
-			if _, err := os.Stat(rootDir + "/" + layout); err == nil {
+			if _, err := os.Stat(filepath.Join(rootDir, layout)); err == nil {
 				return true
 			}
 		}
@@ -543,7 +544,7 @@ func canAutoDetectLayout(rootDir, stack string) bool {
 		"index.html", "public/index.html",
 	}
 	for _, layout := range commonLayouts {
-		if _, err := os.Stat(rootDir + "/" + layout); err == nil {
+		if _, err := os.Stat(filepath.Join(rootDir, layout)); err == nil {
 			return true
 		}
 	}

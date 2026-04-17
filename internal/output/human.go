@@ -2,13 +2,15 @@ package output
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/preflightsh/preflight/internal/checks"
 )
 
-// Colors
-const (
+// Colors. Variables rather than constants so init() can blank them out
+// when stdout isn't a terminal or NO_COLOR is set.
+var (
 	colorReset  = "\033[0m"
 	colorRed    = "\033[31m"
 	colorGreen  = "\033[32m"
@@ -18,6 +20,35 @@ const (
 	colorGray   = "\033[90m"
 	colorBold   = "\033[1m"
 )
+
+func init() {
+	if !shouldUseColor() {
+		colorReset = ""
+		colorRed = ""
+		colorGreen = ""
+		colorYellow = ""
+		colorBlue = ""
+		colorCyan = ""
+		colorGray = ""
+		colorBold = ""
+	}
+}
+
+// shouldUseColor honors the NO_COLOR convention and detects whether
+// stdout is a character device (terminal) vs. a pipe/file.
+func shouldUseColor() bool {
+	if _, noColor := os.LookupEnv("NO_COLOR"); noColor {
+		return false
+	}
+	if os.Getenv("TERM") == "dumb" {
+		return false
+	}
+	fi, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}
 
 type HumanOutputter struct {
 	Verbose bool

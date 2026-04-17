@@ -54,3 +54,14 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}" \
             https://api.github.com/repos/preflightsh/npm-preflight/dispatches \
             -d "{\"event_type\":\"publish\",\"client_payload\":{\"version\":\"$VERSION\"}}"
+
+      - name: Trigger AutoChangelog
+        env:
+          WEBHOOK_SECRET: ${{ secrets.AUTOCHANGELOG_WEBHOOK_SECRET }}
+        run: |
+          BODY='{"bump": "patch"}'
+          SIGNATURE=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$WEBHOOK_SECRET" | awk '{print $NF}')
+          curl -fsSL -X POST https://autochangelog.com/api/v1/hooks/045aaccf-bd97-4227-bf8f-bec556e4331b \
+            -H "Content-Type: application/json" \
+            -H "X-Webhook-Signature: sha256=$SIGNATURE" \
+            -d "$BODY"

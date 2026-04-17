@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/preflightsh/preflight/internal/netutil"
 )
 
 type WWWRedirectCheck struct{}
@@ -167,14 +169,12 @@ func (c WWWRedirectCheck) Run(ctx Context) (CheckResult, error) {
 }
 
 func getFinalURL(urlStr string) (string, error) {
+	// This call starts with a user-configured URL but follows redirects,
+	// so use SafeCheckRedirect to refuse any redirect hop that lands on
+	// a private / loopback / link-local address.
 	client := &http.Client{
-		Timeout: 5 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 10 {
-				return fmt.Errorf("too many redirects")
-			}
-			return nil
-		},
+		Timeout:       5 * time.Second,
+		CheckRedirect: netutil.SafeCheckRedirect,
 	}
 
 	req, err := http.NewRequest("HEAD", urlStr, nil)

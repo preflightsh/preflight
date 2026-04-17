@@ -275,8 +275,11 @@ func scanFileForSecrets(path string, patterns []secretPattern) ([]secretFinding,
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
-	// Use a 1MB buffer to handle minified files
-	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
+	// Walker caps files at 1 MB, but a minified bundle can legally be a
+	// single line at that cap. Give the scanner enough headroom so the
+	// whole file fits in one token instead of being silently skipped.
+	const maxLine = 2 * 1024 * 1024
+	scanner.Buffer(make([]byte, 0, 64*1024), maxLine)
 	lineNum := 0
 
 	for scanner.Scan() {

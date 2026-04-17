@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -201,22 +202,20 @@ func runInit(cmd *cobra.Command, args []string) error {
 				// Append to .gitignore
 				f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_WRONLY, 0644)
 				if err == nil {
-					writeErr := false
+					var errs []error
 					if len(content) > 0 && content[len(content)-1] != '\n' {
-						if _, err := f.WriteString("\n"); err != nil {
-							writeErr = true
+						if _, werr := f.WriteString("\n"); werr != nil {
+							errs = append(errs, werr)
 						}
 					}
-					if !writeErr {
-						if _, err := f.WriteString("preflight.yml\n"); err != nil {
-							writeErr = true
-						}
+					if _, werr := f.WriteString("preflight.yml\n"); werr != nil {
+						errs = append(errs, werr)
 					}
-					if err := f.Close(); err != nil {
-						writeErr = true
+					if cerr := f.Close(); cerr != nil {
+						errs = append(errs, cerr)
 					}
-					if writeErr {
-						fmt.Fprintln(os.Stderr, "⚠️  Could not update .gitignore")
+					if joined := errors.Join(errs...); joined != nil {
+						fmt.Fprintln(os.Stderr, "⚠️  Could not update .gitignore:", joined)
 					} else {
 						gitignoreUpdated = true
 						fmt.Println("✅ Added preflight.yml to .gitignore")
@@ -317,11 +316,11 @@ func promptYesNo(reader *bufio.Reader, prompt string, defaultYes bool) bool {
 }
 
 func getDefaultProjectName(cwd string) string {
-	parts := strings.Split(cwd, string(os.PathSeparator))
-	if len(parts) > 0 {
-		return parts[len(parts)-1]
+	base := filepath.Base(cwd)
+	if base == "" || base == "." || base == string(filepath.Separator) {
+		return "my-project"
 	}
-	return "my-project"
+	return base
 }
 
 func buildDefaultChecks(cwd, stack string, services map[string]config.ServiceConfig, productionURL string, hasLicense bool, hasAds bool, indexNowKey string, checkEmailAuth bool, checkHumansTxt bool) config.ChecksConfig {
@@ -672,7 +671,7 @@ func detectStackVersion(cwd, stack string) string {
 		return detectComposerVersion(cwd, "drupal/core")
 	case "wordpress":
 		// Check wp-includes/version.php for WordPress version
-		versionFile := cwd + "/wp-includes/version.php"
+		versionFile := filepath.Join(cwd, "wp-includes", "version.php")
 		if content, err := os.ReadFile(versionFile); err == nil {
 			re := regexp.MustCompile(`\$wp_version\s*=\s*'([^']+)'`)
 			if matches := re.FindStringSubmatch(string(content)); len(matches) > 1 {
@@ -706,7 +705,7 @@ func detectStackVersion(cwd, stack string) string {
 }
 
 func detectComposerVersion(cwd, pkg string) string {
-	composerLock := cwd + "/composer.lock"
+	composerLock := filepath.Join(cwd, "composer.lock")
 	if content, err := os.ReadFile(composerLock); err == nil {
 		var lock struct {
 			Packages []struct {
@@ -723,7 +722,7 @@ func detectComposerVersion(cwd, pkg string) string {
 		}
 	}
 	// Fallback to composer.json
-	composerJSON := cwd + "/composer.json"
+	composerJSON := filepath.Join(cwd, "composer.json")
 	if content, err := os.ReadFile(composerJSON); err == nil {
 		var composer struct {
 			Require map[string]string `json:"require"`
@@ -738,7 +737,7 @@ func detectComposerVersion(cwd, pkg string) string {
 }
 
 func detectNpmVersion(cwd, pkg string) string {
-	packageLock := cwd + "/package-lock.json"
+	packageLock := filepath.Join(cwd, "package-lock.json")
 	if content, err := os.ReadFile(packageLock); err == nil {
 		var lock struct {
 			Packages map[string]struct {
@@ -760,7 +759,7 @@ func detectNpmVersion(cwd, pkg string) string {
 		}
 	}
 	// Fallback to package.json
-	packageJSON := cwd + "/package.json"
+	packageJSON := filepath.Join(cwd, "package.json")
 	if content, err := os.ReadFile(packageJSON); err == nil {
 		var pkg2 struct {
 			Dependencies    map[string]string `json:"dependencies"`
@@ -779,7 +778,7 @@ func detectNpmVersion(cwd, pkg string) string {
 }
 
 func detectGemVersion(cwd, gem string) string {
-	gemfileLock := cwd + "/Gemfile.lock"
+	gemfileLock := filepath.Join(cwd, "Gemfile.lock")
 	if content, err := os.ReadFile(gemfileLock); err == nil {
 		// Parse Gemfile.lock for gem version
 		re := regexp.MustCompile(`(?m)^\s+` + regexp.QuoteMeta(gem) + ` \(([^)]+)\)`)

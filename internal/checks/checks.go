@@ -12,7 +12,10 @@ import (
 func relPath(base, target string) string {
 	rel, err := filepath.Rel(base, target)
 	if err != nil {
-		return target
+		// Fall back to filepath.Base so we never leak the full absolute
+		// path (which typically contains the user's home directory) into
+		// user-facing output.
+		return filepath.Base(target)
 	}
 	return rel
 }
@@ -233,34 +236,34 @@ func tryURL(client *http.Client, url string) (*http.Response, string, error) {
 	return resp, url, err
 }
 
-// stripComments removes common comment syntax from code to avoid false positives
-// when pattern matching. Supports JS/TS, HTML, Twig/Jinja, ERB, and PHP comments.
+// Comment-stripping regexes, compiled once at package init.
+var (
+	reSingleLineComment = regexp.MustCompile(`//[^\n]*`)
+	reMultiLineComment  = regexp.MustCompile(`(?s)/\*.*?\*/`)
+	reHTMLComment       = regexp.MustCompile(`(?s)<!--.*?-->`)
+	reTwigComment       = regexp.MustCompile(`(?s)\{#.*?#\}`)
+	reERBComment        = regexp.MustCompile(`(?s)<%#.*?%>`)
+	reHashLineComment   = regexp.MustCompile(`(?m)^\s*#[^{].*$`)
+)
+
+// stripComments removes common comment syntax from code to avoid false
+// positives when pattern matching. Supports JS/TS, HTML, Twig/Jinja,
+// ERB, PHP, and shell/Python/Ruby style comments.
 func stripComments(content string) string {
-	// Remove single-line comments (// ...)
-	singleLine := regexp.MustCompile(`//[^\n]*`)
-	content = singleLine.ReplaceAllString(content, "")
+	content = stripCodeComments(content)
+	content = reHashLineComment.ReplaceAllString(content, "")
+	return content
+}
 
-	// Remove multi-line comments (/* ... */) including JSX comments ({/* ... */})
-	multiLine := regexp.MustCompile(`(?s)/\*.*?\*/`)
-	content = multiLine.ReplaceAllString(content, "")
-
-	// Remove HTML comments (<!-- ... -->)
-	htmlComments := regexp.MustCompile(`(?s)<!--.*?-->`)
-	content = htmlComments.ReplaceAllString(content, "")
-
-	// Remove Twig/Jinja comments ({# ... #})
-	twigComments := regexp.MustCompile(`(?s)\{#.*?#\}`)
-	content = twigComments.ReplaceAllString(content, "")
-
-	// Remove ERB comments (<%# ... %>)
-	erbComments := regexp.MustCompile(`(?s)<%#.*?%>`)
-	content = erbComments.ReplaceAllString(content, "")
-
-	// Remove Python/Ruby/Shell single-line comments (# ...)
-	// Be careful not to remove Twig tags or hex colors
-	// Only remove if # is at start of line (with optional whitespace)
-	hashComments := regexp.MustCompile(`(?m)^\s*#[^{].*$`)
-	content = hashComments.ReplaceAllString(content, "")
-
+// stripCodeComments removes only the language-specific block and line
+// comments (JS/HTML/Twig/ERB). It does not touch hash-style comments,
+// which makes it safer for content that legitimately uses `#` at line
+// starts (CSS selectors, YAML keys, etc.).
+func stripCodeComments(content string) string {
+	content = reSingleLineComment.ReplaceAllString(content, "")
+	content = reMultiLineComment.ReplaceAllString(content, "")
+	content = reHTMLComment.ReplaceAllString(content, "")
+	content = reTwigComment.ReplaceAllString(content, "")
+	content = reERBComment.ReplaceAllString(content, "")
 	return content
 }

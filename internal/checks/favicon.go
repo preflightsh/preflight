@@ -389,7 +389,7 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 			Title:    c.Title(),
 			Severity: SeverityWarn,
 			Passed:   false,
-			Message:  "Missing: " + joinStrings(missing, ", "),
+			Message:  "Missing: " + strings.Join(missing, ", "),
 			Suggestions: []string{
 				"Add apple-touch-icon.png (180x180px) for iOS",
 				"Add manifest.json for PWA support",
@@ -410,16 +410,6 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 	}, nil
 }
 
-func joinStrings(strs []string, sep string) string {
-	if len(strs) == 0 {
-		return ""
-	}
-	result := strs[0]
-	for i := 1; i < len(strs); i++ {
-		result += sep + strs[i]
-	}
-	return result
-}
 
 // findMonorepoAppRouterPaths searches for a file in common monorepo structures
 // with Next.js App Router convention (apps/*/src/app/, packages/*/src/app/)

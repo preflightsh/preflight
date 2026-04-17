@@ -6,10 +6,14 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
+
+	"github.com/preflightsh/preflight/internal/netutil"
 
 	_ "golang.org/x/image/webp"
 )
@@ -204,8 +208,8 @@ func (c OGTwitterCheck) Run(ctx Context) (CheckResult, error) {
 		fullPath := filepath.Join(ctx.RootDir, imgPath)
 		if _, err := os.Stat(fullPath); err == nil {
 			if strings.Contains(imgPath, "opengraph") || strings.Contains(imgPath, "og") {
-				missing = removeFromSlice(missing, "og:image")
-				if !contains(found, "og:image") {
+				missing = removeString(missing, "og:image")
+				if !slices.Contains(found, "og:image") {
 					found = append(found, "og:image (file)")
 				}
 				if localOGImagePath == "" {
@@ -213,8 +217,8 @@ func (c OGTwitterCheck) Run(ctx Context) (CheckResult, error) {
 				}
 			}
 			if strings.Contains(imgPath, "twitter") {
-				missing = removeFromSlice(missing, "twitter:image")
-				if !contains(found, "twitter:image") {
+				missing = removeString(missing, "twitter:image")
+				if !slices.Contains(found, "twitter:image") {
 					found = append(found, "twitter:image (file)")
 				}
 				if localTwitterImagePath == "" {
@@ -250,8 +254,8 @@ func (c OGTwitterCheck) Run(ctx Context) (CheckResult, error) {
 
 			// Check for opengraph-image files (static or dynamic)
 			if strings.HasPrefix(nameLower, "opengraph-image.") {
-				missing = removeFromSlice(missing, "og:image")
-				if !contains(found, "og:image") && !contains(found, "og:image (file)") {
+				missing = removeString(missing, "og:image")
+				if !slices.Contains(found, "og:image") && !slices.Contains(found, "og:image (file)") {
 					found = append(found, "og:image ("+relPath+")")
 				}
 				if localOGImagePath == "" && (strings.HasSuffix(nameLower, ".png") || strings.HasSuffix(nameLower, ".jpg") || strings.HasSuffix(nameLower, ".jpeg")) {
@@ -261,12 +265,12 @@ func (c OGTwitterCheck) Run(ctx Context) (CheckResult, error) {
 
 			// Check for twitter-image files (static or dynamic)
 			if strings.HasPrefix(nameLower, "twitter-image.") {
-				missing = removeFromSlice(missing, "twitter:image")
-				missing = removeFromSlice(missing, "twitter:card") // twitter-image implies twitter:card
-				if !contains(found, "twitter:image") && !contains(found, "twitter:image (file)") {
+				missing = removeString(missing, "twitter:image")
+				missing = removeString(missing, "twitter:card") // twitter-image implies twitter:card
+				if !slices.Contains(found, "twitter:image") && !slices.Contains(found, "twitter:image (file)") {
 					found = append(found, "twitter:image ("+relPath+")")
 				}
-				if !contains(found, "twitter:card") {
+				if !slices.Contains(found, "twitter:card") {
 					found = append(found, "twitter:card")
 				}
 				if localTwitterImagePath == "" && (strings.HasSuffix(nameLower, ".png") || strings.HasSuffix(nameLower, ".jpg") || strings.HasSuffix(nameLower, ".jpeg")) {
@@ -372,10 +376,10 @@ func (c OGTwitterCheck) Run(ctx Context) (CheckResult, error) {
 
 	severity := SeverityWarn
 	suggestions := []string{}
-	if len(missing) > 0 && contains(missing, "og:image") {
+	if len(missing) > 0 && slices.Contains(missing, "og:image") {
 		suggestions = append(suggestions, "Add og:image for rich social media previews")
 	}
-	if len(missing) > 0 && contains(missing, "twitter:card") {
+	if len(missing) > 0 && slices.Contains(missing, "twitter:card") {
 		suggestions = append(suggestions, "Add twitter:card for Twitter/X previews")
 	}
 	if len(dimensionWarnings) > 0 {
@@ -575,7 +579,9 @@ func fetchImageDimensions(ctx Context, url string) (width, height int, err error
 		return 0, 0, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
-	img, _, err := image.DecodeConfig(resp.Body)
+	// DecodeConfig allocates based on header-declared dimensions, so a
+	// malicious image could OOM the scanner. Cap the reader.
+	img, _, err := image.DecodeConfig(io.LimitReader(resp.Body, netutil.MaxResponseBody))
 	if err != nil {
 		return 0, 0, err
 	}
@@ -591,7 +597,7 @@ func getLocalImageDimensions(path string) (width, height int, err error) {
 	}
 	defer f.Close()
 
-	img, _, err := image.DecodeConfig(f)
+	img, _, err := image.DecodeConfig(io.LimitReader(f, netutil.MaxResponseBody))
 	if err != nil {
 		return 0, 0, err
 	}
@@ -599,21 +605,8 @@ func getLocalImageDimensions(path string) (width, height int, err error) {
 	return img.Width, img.Height, nil
 }
 
-func removeFromSlice(slice []string, item string) []string {
-	var result []string
-	for _, s := range slice {
-		if s != item {
-			result = append(result, s)
-		}
-	}
-	return result
-}
-
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
+// removeString returns slice with all occurrences of item removed.
+// Thin wrapper over slices.DeleteFunc for readability at call sites.
+func removeString(slice []string, item string) []string {
+	return slices.DeleteFunc(slice, func(s string) bool { return s == item })
 }

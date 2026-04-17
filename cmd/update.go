@@ -8,9 +8,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/mod/semver"
 )
 
 const updateCheckInterval = 24 * time.Hour
@@ -41,23 +42,36 @@ func CheckForUpdates() {
 	markUpdateChecked()
 
 	if isNewerVersion(latest, version) {
+		upgradeCmd := getUpgradeCommand()
 		fmt.Println()
 		fmt.Printf("📦 A new version of Preflight is available: %s → %s\n", version, latest)
-		fmt.Print("   Install now? [Y/n] ")
+
+		// For the `curl ... | sh` path we refuse to auto-execute. Piping a
+		// network-fetched script into a shell on the user's machine is too
+		// risky for an auto-prompt, even over HTTPS. Just print the command.
+		if strings.Contains(upgradeCmd, "|") {
+			fmt.Printf("   To upgrade: %s\n", upgradeCmd)
+			fmt.Println()
+			return
+		}
+
+		// Print the command first so the user sees exactly what will run.
+		fmt.Printf("   Will run: %s\n", upgradeCmd)
+		fmt.Print("   Install now? [y/N] ")
 
 		reader := bufio.NewReader(os.Stdin)
 		response, err := reader.ReadString('\n')
 		if err != nil {
-			// If we can't read input, just show the command
-			fmt.Printf("   Run: %s\n", getUpgradeCommand())
+			fmt.Printf("   To upgrade later: %s\n", upgradeCmd)
 			return
 		}
 
+		// Require explicit Y; default (empty input) is No.
 		response = strings.TrimSpace(strings.ToLower(response))
-		if response == "" || response == "y" || response == "yes" {
-			runUpgrade()
+		if response == "y" || response == "yes" {
+			runUpgrade(upgradeCmd)
 		} else {
-			fmt.Printf("   To upgrade later: %s\n", getUpgradeCommand())
+			fmt.Printf("   To upgrade later: %s\n", upgradeCmd)
 		}
 		fmt.Println()
 	}
@@ -97,57 +111,31 @@ func markUpdateChecked() {
 	_ = os.WriteFile(checkFile, []byte(time.Now().UTC().Format(time.RFC3339)), 0644)
 }
 
-// runUpgrade executes the appropriate upgrade command
-func runUpgrade() {
-	upgradeCmd := getUpgradeCommand()
-	fmt.Printf("   Running: %s\n", upgradeCmd)
+// runUpgrade executes an already-vetted upgrade command. The caller is
+// responsible for gating any `curl | sh` style commands, which this
+// function will refuse for safety.
+func runUpgrade(upgradeCmd string) {
+	if strings.Contains(upgradeCmd, "|") {
+		// Defense in depth: CheckForUpdates is supposed to filter these
+		// out already, but make sure we never pipe untrusted bytes into
+		// a shell from this code path.
+		fmt.Printf("   ✗ Refusing to auto-run piped shell command: %s\n", upgradeCmd)
+		return
+	}
 
-	// Parse the command
+	fmt.Printf("   Running: %s\n", upgradeCmd)
 	parts := strings.Fields(upgradeCmd)
 	if len(parts) == 0 {
 		fmt.Println("   ✗ Could not determine upgrade command")
 		return
 	}
 
-	// Handle piped commands (curl ... | sh) safely without sh -c
-	if strings.Contains(upgradeCmd, "|") {
-		pipeParts := strings.SplitN(upgradeCmd, "|", 2)
-		curlArgs := strings.Fields(strings.TrimSpace(pipeParts[0]))
-		shArgs := strings.Fields(strings.TrimSpace(pipeParts[1]))
-
-		curlCmd := exec.Command(curlArgs[0], curlArgs[1:]...)
-		shCmd := exec.Command(shArgs[0])
-
-		pipe, err := curlCmd.StdoutPipe()
-		if err != nil {
-			fmt.Printf("   ✗ Upgrade failed: %v\n", err)
-			return
-		}
-		shCmd.Stdin = pipe
-		shCmd.Stdout = os.Stdout
-		shCmd.Stderr = os.Stderr
-		curlCmd.Stderr = os.Stderr
-
-		if err := shCmd.Start(); err != nil {
-			fmt.Printf("   ✗ Upgrade failed: %v\n", err)
-			return
-		}
-		if err := curlCmd.Run(); err != nil {
-			fmt.Printf("   ✗ Upgrade failed: %v\n", err)
-			return
-		}
-		if err := shCmd.Wait(); err != nil {
-			fmt.Printf("   ✗ Upgrade failed: %v\n", err)
-			return
-		}
-	} else {
-		cmd := exec.Command(parts[0], parts[1:]...)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			fmt.Printf("   ✗ Upgrade failed: %v\n", err)
-			return
-		}
+	cmd := exec.Command(parts[0], parts[1:]...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("   ✗ Upgrade failed: %v\n", err)
+		return
 	}
 
 	fmt.Println("   ✓ Upgrade complete!")
@@ -175,38 +163,28 @@ func fetchLatestVersion() (string, error) {
 	return strings.TrimPrefix(release.TagName, "v"), nil
 }
 
-// isNewerVersion returns true if latest is newer than current
+// isNewerVersion returns true if latest is newer than current. Uses
+// semver comparison which understands pre-release ordering and handles
+// non-numeric suffixes correctly (e.g. "1.2.3-rc1" < "1.2.3").
 func isNewerVersion(latest, current string) bool {
-	// Strip pre-release suffixes (e.g., "1.2.3-beta" -> "1.2.3")
-	latest = strings.SplitN(latest, "-", 2)[0]
-	current = strings.SplitN(current, "-", 2)[0]
-
-	latestParts := strings.Split(latest, ".")
-	currentParts := strings.Split(current, ".")
-
-	// Compare up to the length of the shorter version
-	maxLen := len(latestParts)
-	if len(currentParts) > maxLen {
-		maxLen = len(currentParts)
+	l := normalizeSemver(latest)
+	c := normalizeSemver(current)
+	if !semver.IsValid(l) || !semver.IsValid(c) {
+		return false
 	}
+	return semver.Compare(l, c) > 0
+}
 
-	for i := 0; i < maxLen; i++ {
-		var l, c int
-		if i < len(latestParts) {
-			l, _ = strconv.Atoi(latestParts[i])
-		}
-		if i < len(currentParts) {
-			c, _ = strconv.Atoi(currentParts[i])
-		}
-		if l > c {
-			return true
-		}
-		if l < c {
-			return false
-		}
+// normalizeSemver ensures the version has a leading "v" for semver pkg.
+func normalizeSemver(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return ""
 	}
-
-	return false
+	if !strings.HasPrefix(v, "v") {
+		return "v" + v
+	}
+	return v
 }
 
 // getUpgradeCommand returns the appropriate upgrade command based on install method

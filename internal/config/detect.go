@@ -4,12 +4,14 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/preflightsh/preflight/internal/fsutil"
+	"github.com/preflightsh/preflight/internal/netutil"
 )
 
 // DetectStack determines the project stack based on files present
@@ -818,109 +820,112 @@ func scanEnvFile(path string, envPatterns map[string][]string, services map[stri
 	_ = scanner.Err()
 }
 
+// analyticsServicePatterns holds the service-detection regexes used by
+// detectAnalyticsScripts. Compiled once at package load so we don't
+// rebuild the full set on every scan.
+var analyticsServicePatterns = map[string]*regexp.Regexp{
+	// Analytics - look for script URLs or specific SDK patterns
+	"plausible":        regexp.MustCompile(`(?i)plausible\.io/js/|plausible\.io/api`),
+	"fathom":           regexp.MustCompile(`(?i)cdn\.usefathom\.com|script\.src.*fathom`),
+	"umami":            regexp.MustCompile(`(?i)cloud\.umami\.is|analytics\.umami\.is|data-website-id=|umami\.track\(`),
+	"fullres":          regexp.MustCompile(`(?i)window\.fullres|var fullres|fullres\.events|fullres\.src|fullres\.async`),
+	"datafast":         regexp.MustCompile(`(?i)datafa\.st/js/`),
+	"google_analytics": regexp.MustCompile(`(?i)googletagmanager\.com|google-analytics\.com/|gtag\(['"]|monsterinsights`),
+	"posthog":          regexp.MustCompile(`(?i)posthog\.com|us\.i\.posthog\.com|eu\.i\.posthog\.com|posthog\.init`),
+	"hotjar":           regexp.MustCompile(`(?i)static\.hotjar\.com|hotjar\.com/`),
+	"mixpanel":         regexp.MustCompile(`(?i)cdn\.mxpnl\.com|mixpanel\.com/|mixpanel\.init`),
+	"segment":          regexp.MustCompile(`(?i)cdn\.segment\.com|analytics\.load\(`),
+	"amplitude":        regexp.MustCompile(`(?i)cdn\.amplitude\.com|amplitude\.getInstance`),
+
+	// Communication - require specific URLs or SDK
+	"intercom": regexp.MustCompile(`(?i)widget\.intercom\.io|Intercom\(['"]|intercom-client`),
+	"crisp":    regexp.MustCompile(`(?i)client\.crisp\.chat|CRISP_WEBSITE_ID`),
+	"twilio":   regexp.MustCompile(`(?i)twilio\.com|@twilio/|twilio-node`),
+	"slack":    regexp.MustCompile(`(?i)@slack/|slack-ruby|api\.slack\.com|hooks\.slack\.com`),
+	"discord":  regexp.MustCompile(`(?i)discord\.js|discordrb|discord\.py|disnake|discord\.com/api`),
+
+	// Payments - only match SDK imports or API URLs, not the word itself
+	"stripe":       regexp.MustCompile(`(?i)js\.stripe\.com|Stripe\(['"]|stripe/stripe-`),
+	"paypal":       regexp.MustCompile(`(?i)paypal\.com/sdk|paypalobjects\.com|@paypal/`),
+	"paddle":       regexp.MustCompile(`(?i)cdn\.paddle\.com|Paddle\.Setup|paddle\.com/paddlejs`),
+	"lemonsqueezy": regexp.MustCompile(`(?i)lemonsqueezy\.com|@lemonsqueezy/`),
+
+	// Error tracking - require DSN patterns or SDK
+	"sentry":      regexp.MustCompile(`(?i)@sentry/|sentry\.io/|Sentry\.init|dsn.*sentry`),
+	"bugsnag":     regexp.MustCompile(`(?i)bugsnag\.com|@bugsnag/|Bugsnag\.start`),
+	"rollbar":     regexp.MustCompile(`(?i)rollbar\.com/js|Rollbar\.init|@rollbar/`),
+	"honeybadger": regexp.MustCompile(`(?i)@honeybadger-io/|honeybadger\.io/`),
+	"datadog":     regexp.MustCompile(`(?i)datadoghq\.com|dd-trace|@datadog/`),
+	"newrelic":    regexp.MustCompile(`(?i)newrelic\.com/|@newrelic/`),
+	"logrocket":   regexp.MustCompile(`(?i)cdn\.logrocket\.com|LogRocket\.init`),
+
+	// Email - require SDK or API patterns
+	"postmark":        regexp.MustCompile(`(?i)postmarkapp\.com|@postmark/|postmark-client`),
+	"sendgrid":        regexp.MustCompile(`(?i)@sendgrid/|sendgrid\.com/`),
+	"mailgun":         regexp.MustCompile(`(?i)mailgun\.com/|mailgun-js|@mailgun/`),
+	"aws_ses":         regexp.MustCompile(`(?i)ses\.amazonaws\.com|@aws-sdk/client-ses|aws-sdk-ses|craft-amazon-ses`),
+	"resend":          regexp.MustCompile(`(?i)api\.resend\.com|@resend/`),
+	"mailchimp":       regexp.MustCompile(`(?i)mailchimp\.com/|@mailchimp/|mailchimp-for-wp|mc4wp|list-manage\.com`),
+	"convertkit":      regexp.MustCompile(`(?i)convertkit\.com|@convertkit/|app\.kit\.com`),
+	"beehiiv":         regexp.MustCompile(`(?i)beehiiv\.com|embeds\.beehiiv\.com`),
+	"aweber":          regexp.MustCompile(`(?i)aweber\.com|forms\.aweber\.com`),
+	"activecampaign":  regexp.MustCompile(`(?i)activecampaign\.com|trackcmp\.net`),
+	"campaignmonitor": regexp.MustCompile(`(?i)campaignmonitor\.com|createsend\.com`),
+	"drip":            regexp.MustCompile(`(?i)getdrip\.com|api\.getdrip\.com|tag\.getdrip\.com`),
+	"klaviyo":         regexp.MustCompile(`(?i)klaviyo\.com|static\.klaviyo\.com/onsite/js/klaviyo`),
+	"buttondown":      regexp.MustCompile(`(?i)buttondown\.email|buttondown\.com`),
+
+	// Auth - require SDK patterns
+	"auth0":    regexp.MustCompile(`(?i)@auth0/|auth0\.com/`),
+	"clerk":    regexp.MustCompile(`(?i)@clerk/|clerk\.com/`),
+	"workos":   regexp.MustCompile(`(?i)@workos/|workos\.com/|api\.workos\.com`),
+	"firebase": regexp.MustCompile(`(?i)firebase\.google\.com|firebaseapp\.com|@firebase/`),
+	"supabase": regexp.MustCompile(`(?i)supabase\.co|@supabase/`),
+
+	// Infrastructure - require specific connection patterns
+	"redis":         regexp.MustCompile(`(?i)redis://|rediss://|Redis\.new|ioredis`),
+	"sidekiq":       regexp.MustCompile(`(?i)Sidekiq::Worker|include Sidekiq|sidekiq\.yml`),
+	"rabbitmq":      regexp.MustCompile(`(?i)amqp://|amqps://|rabbitmq\.com|@rabbitmq/`),
+	"elasticsearch": regexp.MustCompile(`(?i)@elastic/elasticsearch|elasticsearch\.org`),
+	"convex":        regexp.MustCompile(`(?i)convex\.dev|@convex/|convex/_generated`),
+
+	// Storage/CDN - require API URLs
+	"aws_s3":     regexp.MustCompile(`(?i)s3\.amazonaws\.com|@aws-sdk/client-s3`),
+	"cloudinary": regexp.MustCompile(`(?i)cloudinary\.com/|@cloudinary/`),
+	"cloudflare": regexp.MustCompile(`(?i)cdn\.cloudflare\.com|@cloudflare/|cloudflare-workers`),
+
+	// Search - require SDK
+	"algolia": regexp.MustCompile(`(?i)algolia\.com/|@algolia/|algoliasearch`),
+
+	// AI - require SDK or API patterns
+	"openai":      regexp.MustCompile(`(?i)api\.openai\.com|openai\.ChatCompletion|from openai|openai\.create`),
+	"anthropic":   regexp.MustCompile(`(?i)api\.anthropic\.com|anthropic\.Anthropic|from anthropic|@anthropic/`),
+	"google_ai":   regexp.MustCompile(`(?i)@google/generative-ai|generativelanguage\.googleapis\.com|gemini-pro|gemini-1\.5`),
+	"mistral":     regexp.MustCompile(`(?i)api\.mistral\.ai|@mistralai/`),
+	"cohere":      regexp.MustCompile(`(?i)api\.cohere\.ai|cohere\.Client|cohere-ai`),
+	"replicate":   regexp.MustCompile(`(?i)api\.replicate\.com|replicate\.run`),
+	"huggingface": regexp.MustCompile(`(?i)huggingface\.co/|@huggingface/`),
+	"grok":        regexp.MustCompile(`(?i)api\.x\.ai|xai/grok|grok-beta`),
+	"perplexity":  regexp.MustCompile(`(?i)perplexity\.ai|pplx-api`),
+	"together_ai": regexp.MustCompile(`(?i)together\.ai|@together-ai/|api\.together\.xyz`),
+
+	// SEO - require actual API usage, not just the word
+	"indexnow": regexp.MustCompile(`(?i)api\.indexnow\.org|indexnow\.org/key|indexnow-js|indexnow-sdk`),
+
+	// Cookie Consent - require script URLs or SDK initialization
+	"cookieconsent": regexp.MustCompile(`cdn\.jsdelivr\.net.*cookieconsent|cookieconsent\.min\.js|osano.*cookieconsent|CookieConsent\.run\(|new CookieConsent\(`),
+	"cookiebot":     regexp.MustCompile(`consent\.cookiebot\.com|Cookiebot\.consent|window\.Cookiebot`),
+	"onetrust":      regexp.MustCompile(`cdn\.cookielaw\.org|optanon-wrapper|OneTrust\.Init|window\.OneTrust`),
+	"termly":        regexp.MustCompile(`app\.termly\.io|termly\.min\.js|Termly\.initialize\(`),
+	"cookieyes":     regexp.MustCompile(`cdn-cookieyes\.com|cookieyes\.min\.js`),
+	"iubenda":       regexp.MustCompile(`cdn\.iubenda\.com|_iub\.csConfiguration`),
+}
+
+// scriptSrcRe extracts the src attribute of <script src=...> tags.
+var scriptSrcRe = regexp.MustCompile(`<script[^>]+src=["']([^"']+)["']`)
+
 func detectAnalyticsScripts(rootDir string, services map[string]bool) {
-	// Patterns for detecting services in code/template content
-	// These are intentionally specific to avoid false positives - require URLs, SDK imports, or API calls
-	patterns := map[string]*regexp.Regexp{
-		// Analytics - look for script URLs or specific SDK patterns
-		"plausible":        regexp.MustCompile(`(?i)plausible\.io/js/|plausible\.io/api`),
-		"fathom":           regexp.MustCompile(`(?i)cdn\.usefathom\.com|script\.src.*fathom`),
-		"umami":            regexp.MustCompile(`(?i)cloud\.umami\.is|analytics\.umami\.is|data-website-id=|umami\.track\(`),
-		"fullres":          regexp.MustCompile(`(?i)window\.fullres|var fullres|fullres\.events|fullres\.src|fullres\.async`),
-		"datafast":         regexp.MustCompile(`(?i)datafa\.st/js/`),
-		"google_analytics": regexp.MustCompile(`(?i)googletagmanager\.com|google-analytics\.com/|gtag\(['"]|monsterinsights`),
-		"posthog":          regexp.MustCompile(`(?i)posthog\.com|us\.i\.posthog\.com|eu\.i\.posthog\.com|posthog\.init`),
-		"hotjar":           regexp.MustCompile(`(?i)static\.hotjar\.com|hotjar\.com/`),
-		"mixpanel":         regexp.MustCompile(`(?i)cdn\.mxpnl\.com|mixpanel\.com/|mixpanel\.init`),
-		"segment":          regexp.MustCompile(`(?i)cdn\.segment\.com|analytics\.load\(`),
-		"amplitude":        regexp.MustCompile(`(?i)cdn\.amplitude\.com|amplitude\.getInstance`),
-
-		// Communication - require specific URLs or SDK
-		"intercom": regexp.MustCompile(`(?i)widget\.intercom\.io|Intercom\(['"]|intercom-client`),
-		"crisp":    regexp.MustCompile(`(?i)client\.crisp\.chat|CRISP_WEBSITE_ID`),
-		"twilio":   regexp.MustCompile(`(?i)twilio\.com|@twilio/|twilio-node`),
-		"slack":    regexp.MustCompile(`(?i)@slack/|slack-ruby|api\.slack\.com|hooks\.slack\.com`),
-		"discord":  regexp.MustCompile(`(?i)discord\.js|discordrb|discord\.py|disnake|discord\.com/api`),
-
-		// Payments - only match SDK imports or API URLs, not the word itself
-		"stripe":       regexp.MustCompile(`(?i)js\.stripe\.com|Stripe\(['"]|stripe/stripe-`),
-		"paypal":       regexp.MustCompile(`(?i)paypal\.com/sdk|paypalobjects\.com|@paypal/`),
-		"paddle":       regexp.MustCompile(`(?i)cdn\.paddle\.com|Paddle\.Setup|paddle\.com/paddlejs`),
-		"lemonsqueezy": regexp.MustCompile(`(?i)lemonsqueezy\.com|@lemonsqueezy/`),
-
-		// Error tracking - require DSN patterns or SDK
-		"sentry":      regexp.MustCompile(`(?i)@sentry/|sentry\.io/|Sentry\.init|dsn.*sentry`),
-		"bugsnag":     regexp.MustCompile(`(?i)bugsnag\.com|@bugsnag/|Bugsnag\.start`),
-		"rollbar":     regexp.MustCompile(`(?i)rollbar\.com/js|Rollbar\.init|@rollbar/`),
-		"honeybadger": regexp.MustCompile(`(?i)@honeybadger-io/|honeybadger\.io/`),
-		"datadog":     regexp.MustCompile(`(?i)datadoghq\.com|dd-trace|@datadog/`),
-		"newrelic":    regexp.MustCompile(`(?i)newrelic\.com/|@newrelic/`),
-		"logrocket":   regexp.MustCompile(`(?i)cdn\.logrocket\.com|LogRocket\.init`),
-
-		// Email - require SDK or API patterns
-		"postmark":   regexp.MustCompile(`(?i)postmarkapp\.com|@postmark/|postmark-client`),
-		"sendgrid":   regexp.MustCompile(`(?i)@sendgrid/|sendgrid\.com/`),
-		"mailgun":    regexp.MustCompile(`(?i)mailgun\.com/|mailgun-js|@mailgun/`),
-		"aws_ses":    regexp.MustCompile(`(?i)ses\.amazonaws\.com|@aws-sdk/client-ses|aws-sdk-ses|craft-amazon-ses`),
-		"resend":     regexp.MustCompile(`(?i)api\.resend\.com|@resend/`),
-		"mailchimp":  regexp.MustCompile(`(?i)mailchimp\.com/|@mailchimp/|mailchimp-for-wp|mc4wp|list-manage\.com`),
-		"convertkit":      regexp.MustCompile(`(?i)convertkit\.com|@convertkit/|app\.kit\.com`),
-		"beehiiv":         regexp.MustCompile(`(?i)beehiiv\.com|embeds\.beehiiv\.com`),
-		"aweber":          regexp.MustCompile(`(?i)aweber\.com|forms\.aweber\.com`),
-		"activecampaign":  regexp.MustCompile(`(?i)activecampaign\.com|trackcmp\.net`),
-		"campaignmonitor": regexp.MustCompile(`(?i)campaignmonitor\.com|createsend\.com`),
-		"drip":            regexp.MustCompile(`(?i)getdrip\.com|api\.getdrip\.com|tag\.getdrip\.com`),
-		"klaviyo":         regexp.MustCompile(`(?i)klaviyo\.com|static\.klaviyo\.com/onsite/js/klaviyo`),
-		"buttondown":      regexp.MustCompile(`(?i)buttondown\.email|buttondown\.com`),
-
-		// Auth - require SDK patterns
-		"auth0":    regexp.MustCompile(`(?i)@auth0/|auth0\.com/`),
-		"clerk":    regexp.MustCompile(`(?i)@clerk/|clerk\.com/`),
-		"workos":   regexp.MustCompile(`(?i)@workos/|workos\.com/|api\.workos\.com`),
-		"firebase": regexp.MustCompile(`(?i)firebase\.google\.com|firebaseapp\.com|@firebase/`),
-		"supabase": regexp.MustCompile(`(?i)supabase\.co|@supabase/`),
-
-		// Infrastructure - require specific connection patterns
-		"redis":         regexp.MustCompile(`(?i)redis://|rediss://|Redis\.new|ioredis`),
-		"sidekiq":       regexp.MustCompile(`(?i)Sidekiq::Worker|include Sidekiq|sidekiq\.yml`),
-		"rabbitmq":      regexp.MustCompile(`(?i)amqp://|amqps://|rabbitmq\.com|@rabbitmq/`),
-		"elasticsearch": regexp.MustCompile(`(?i)@elastic/elasticsearch|elasticsearch\.org`),
-		"convex":        regexp.MustCompile(`(?i)convex\.dev|@convex/|convex/_generated`),
-
-		// Storage/CDN - require API URLs
-		"aws_s3":     regexp.MustCompile(`(?i)s3\.amazonaws\.com|@aws-sdk/client-s3`),
-		"cloudinary": regexp.MustCompile(`(?i)cloudinary\.com/|@cloudinary/`),
-		"cloudflare": regexp.MustCompile(`(?i)cdn\.cloudflare\.com|@cloudflare/|cloudflare-workers`),
-
-		// Search - require SDK
-		"algolia": regexp.MustCompile(`(?i)algolia\.com/|@algolia/|algoliasearch`),
-
-		// AI - require SDK or API patterns
-		"openai":      regexp.MustCompile(`(?i)api\.openai\.com|openai\.ChatCompletion|from openai|openai\.create`),
-		"anthropic":   regexp.MustCompile(`(?i)api\.anthropic\.com|anthropic\.Anthropic|from anthropic|@anthropic/`),
-		"google_ai":   regexp.MustCompile(`(?i)@google/generative-ai|generativelanguage\.googleapis\.com|gemini-pro|gemini-1\.5`),
-		"mistral":     regexp.MustCompile(`(?i)api\.mistral\.ai|@mistralai/`),
-		"cohere":      regexp.MustCompile(`(?i)api\.cohere\.ai|cohere\.Client|cohere-ai`),
-		"replicate":   regexp.MustCompile(`(?i)api\.replicate\.com|replicate\.run`),
-		"huggingface": regexp.MustCompile(`(?i)huggingface\.co/|@huggingface/`),
-		"grok":        regexp.MustCompile(`(?i)api\.x\.ai|xai/grok|grok-beta`),
-		"perplexity":  regexp.MustCompile(`(?i)perplexity\.ai|pplx-api`),
-		"together_ai": regexp.MustCompile(`(?i)together\.ai|@together-ai/|api\.together\.xyz`),
-
-		// SEO - require actual API usage, not just the word
-		"indexnow": regexp.MustCompile(`(?i)api\.indexnow\.org|indexnow\.org/key|indexnow-js|indexnow-sdk`),
-
-		// Cookie Consent - require script URLs or SDK initialization
-		"cookieconsent": regexp.MustCompile(`cdn\.jsdelivr\.net.*cookieconsent|cookieconsent\.min\.js|osano.*cookieconsent|CookieConsent\.run\(|new CookieConsent\(`),
-		"cookiebot":     regexp.MustCompile(`consent\.cookiebot\.com|Cookiebot\.consent|window\.Cookiebot`),
-		"onetrust":      regexp.MustCompile(`cdn\.cookielaw\.org|optanon-wrapper|OneTrust\.Init|window\.OneTrust`),
-		"termly":        regexp.MustCompile(`app\.termly\.io|termly\.min\.js|Termly\.initialize\(`),
-		"cookieyes":     regexp.MustCompile(`cdn-cookieyes\.com|cookieyes\.min\.js`),
-		"iubenda":       regexp.MustCompile(`cdn\.iubenda\.com|_iub\.csConfiguration`),
-	}
-
-	// Regex to find script src URLs
-	scriptSrcRe := regexp.MustCompile(`<script[^>]+src=["']([^"']+)["']`)
+	patterns := analyticsServicePatterns
 
 	// File extensions to scan
 	codeExts := map[string]bool{
@@ -1055,9 +1060,10 @@ func detectAnalyticsScripts(rootDir string, services map[string]bool) {
 }
 
 func detectServicesFromExternalScripts(urls []string, services map[string]bool, patterns map[string]*regexp.Regexp) {
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-	}
+	// URLs come from scanned HTML / templates in the project, so they are
+	// untrusted content. Use a client that refuses to dial private or
+	// loopback addresses to avoid SSRF.
+	client := netutil.SafeHTTPClient(5 * time.Second)
 
 	// Limit to first 10 scripts to avoid slowdown
 	maxScripts := 10
@@ -1082,7 +1088,7 @@ func detectServicesFromExternalScripts(urls []string, services map[string]bool, 
 		resp, err := client.Get(url)
 		if err != nil {
 			if strings.Contains(err.Error(), "timeout") || strings.Contains(err.Error(), "deadline") {
-				domain := extractDomain(url)
+				domain := hostFromURL(url)
 				fmt.Printf("\n  ⚠️  %s timed out", domain)
 			}
 			if resp != nil {
@@ -1098,6 +1104,7 @@ func detectServicesFromExternalScripts(urls []string, services map[string]bool, 
 
 		// Read up to 100KB of the script
 		body, err := io.ReadAll(io.LimitReader(resp.Body, 100*1024))
+		_, _ = io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 		if err != nil {
 			continue
@@ -1116,11 +1123,12 @@ func detectServicesFromExternalScripts(urls []string, services map[string]bool, 
 	fmt.Println(" done")
 }
 
-func extractDomain(url string) string {
-	// Remove protocol
+// hostFromURL extracts just the host portion of a URL-like string via
+// cheap string ops (no url.Parse). Used only for human-readable
+// diagnostics; see checks.extractDomain for the validating variant.
+func hostFromURL(url string) string {
 	url = strings.TrimPrefix(url, "https://")
 	url = strings.TrimPrefix(url, "http://")
-	// Get just the domain part
 	if idx := strings.Index(url, "/"); idx != -1 {
 		url = url[:idx]
 	}
@@ -1128,9 +1136,7 @@ func extractDomain(url string) string {
 }
 
 func fileExists(rootDir, relativePath string) bool {
-	path := filepath.Join(rootDir, relativePath)
-	_, err := os.Stat(path)
-	return err == nil
+	return fsutil.FileExists(rootDir, relativePath)
 }
 
 // hasHTMLFiles checks if the project root or common web directories contain HTML files

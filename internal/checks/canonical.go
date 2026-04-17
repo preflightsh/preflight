@@ -82,94 +82,48 @@ func (c CanonicalURLCheck) Run(ctx Context) (CheckResult, error) {
 	}, nil
 }
 
+// canonicalPatterns covers the full set of template / framework idioms
+// we recognize as declaring a canonical URL. Compiled once so
+// hasCanonicalURL doesn't rebuild 14 regexes per invocation.
+var canonicalPatterns = []*regexp.Regexp{
+	// Standard HTML canonical link (rel before href)
+	regexp.MustCompile(`(?i)<link[^>]+rel=["']canonical["'][^>]*>`),
+	// Reverse order: href before rel
+	regexp.MustCompile(`(?i)<link[^>]+href=["'][^"']+["'][^>]+rel=["']canonical["'][^>]*>`),
+	// Next.js App Router metadata API
+	regexp.MustCompile(`(?i)alternates\s*:\s*\{[^}]*canonical`),
+	// Next.js metadataBase (implies canonical handling)
+	regexp.MustCompile(`(?i)metadataBase\s*[:=]`),
+	// React Helmet / react-helmet-async
+	regexp.MustCompile(`(?i)<Helmet[^>]*>.*canonical.*</Helmet>`),
+	// Vue Meta
+	regexp.MustCompile(`(?i)link\s*:\s*\[[^\]]*rel:\s*["']canonical["']`),
+	// Nuxt/Vue useHead
+	regexp.MustCompile(`(?i)useHead\s*\([^)]*canonical`),
+	// Rails canonical helper
+	regexp.MustCompile(`(?i)<%=.*canonical.*%>`),
+	// Django/Jinja canonical
+	regexp.MustCompile(`(?i)\{%.*canonical.*%\}|\{\{.*canonical.*\}\}`),
+	// Twig canonical (Craft CMS, Symfony)
+	regexp.MustCompile(`(?i)\{\{.*canonical.*\}\}|\{%.*canonical.*%\}`),
+	// PHP canonical
+	regexp.MustCompile(`(?i)<\?.*canonical.*\?>`),
+	// Blade canonical (Laravel)
+	regexp.MustCompile(`(?i)\{\{.*canonical.*\}\}|@.*canonical`),
+	// Hugo canonical
+	regexp.MustCompile(`(?i)\{\{.*\.Permalink.*\}\}.*rel=["']canonical["']|\.Site\.BaseURL`),
+	// Astro canonical
+	regexp.MustCompile(`(?i)Astro\.url|canonical\s*=`),
+}
+
 func hasCanonicalURL(content, stack string) bool {
 	// Strip comments to avoid false positives on commented-out code
-	content = stripCommentsCanonical(content)
-
-	// Standard HTML canonical link
-	htmlCanonical := regexp.MustCompile(`(?i)<link[^>]+rel=["']canonical["'][^>]*>`)
-	if htmlCanonical.MatchString(content) {
-		return true
+	content = stripCodeComments(content)
+	for _, re := range canonicalPatterns {
+		if re.MatchString(content) {
+			return true
+		}
 	}
-
-	// Also check reverse order: href before rel
-	htmlCanonicalAlt := regexp.MustCompile(`(?i)<link[^>]+href=["'][^"']+["'][^>]+rel=["']canonical["'][^>]*>`)
-	if htmlCanonicalAlt.MatchString(content) {
-		return true
-	}
-
-	// Next.js App Router metadata API
-	nextjsCanonical := regexp.MustCompile(`(?i)alternates\s*:\s*\{[^}]*canonical`)
-	if nextjsCanonical.MatchString(content) {
-		return true
-	}
-
-	// Next.js metadataBase (implies canonical handling)
-	nextjsMetadataBase := regexp.MustCompile(`(?i)metadataBase\s*[:=]`)
-	if nextjsMetadataBase.MatchString(content) {
-		return true
-	}
-
-	// React Helmet / react-helmet-async
-	helmetCanonical := regexp.MustCompile(`(?i)<Helmet[^>]*>.*canonical.*</Helmet>`)
-	if helmetCanonical.MatchString(content) {
-		return true
-	}
-
-	// Vue Meta
-	vueMetaCanonical := regexp.MustCompile(`(?i)link\s*:\s*\[[^\]]*rel:\s*["']canonical["']`)
-	if vueMetaCanonical.MatchString(content) {
-		return true
-	}
-
-	// Nuxt/Vue useHead
-	useHeadCanonical := regexp.MustCompile(`(?i)useHead\s*\([^)]*canonical`)
-	if useHeadCanonical.MatchString(content) {
-		return true
-	}
-
-	// Rails canonical helper
-	railsCanonical := regexp.MustCompile(`(?i)<%=.*canonical.*%>`)
-	if railsCanonical.MatchString(content) {
-		return true
-	}
-
-	// Django/Jinja canonical
-	djangoCanonical := regexp.MustCompile(`(?i)\{%.*canonical.*%\}|\{\{.*canonical.*\}\}`)
-	if djangoCanonical.MatchString(content) {
-		return true
-	}
-
-	// Twig canonical (Craft CMS, Symfony)
-	twigCanonical := regexp.MustCompile(`(?i)\{\{.*canonical.*\}\}|\{%.*canonical.*%\}`)
-	if twigCanonical.MatchString(content) {
-		return true
-	}
-
-	// PHP canonical
-	phpCanonical := regexp.MustCompile(`(?i)<\?.*canonical.*\?>`)
-	if phpCanonical.MatchString(content) {
-		return true
-	}
-
-	// Blade canonical (Laravel)
-	bladeCanonical := regexp.MustCompile(`(?i)\{\{.*canonical.*\}\}|@.*canonical`)
-	if bladeCanonical.MatchString(content) {
-		return true
-	}
-
-	// Hugo canonical
-	hugoCanonical := regexp.MustCompile(`(?i)\{\{.*\.Permalink.*\}\}.*rel=["']canonical["']|\.Site\.BaseURL`)
-	if hugoCanonical.MatchString(content) {
-		return true
-	}
-
-	// Astro canonical
-	astroCanonical := regexp.MustCompile(`(?i)Astro\.url|canonical\s*=`)
-	if astroCanonical.MatchString(content) {
-		return true
-	}
-
 	return false
 }
 
@@ -294,27 +248,3 @@ func getCanonicalSuggestions(stack string) []string {
 	}
 }
 
-// stripCommentsCanonical removes comments from code to avoid false positives
-func stripCommentsCanonical(content string) string {
-	// Remove single-line comments (// ...)
-	singleLine := regexp.MustCompile(`//[^\n]*`)
-	content = singleLine.ReplaceAllString(content, "")
-
-	// Remove multi-line comments (/* ... */) including JSX comments ({/* ... */})
-	multiLine := regexp.MustCompile(`(?s)/\*.*?\*/`)
-	content = multiLine.ReplaceAllString(content, "")
-
-	// Remove HTML comments (<!-- ... -->)
-	htmlComments := regexp.MustCompile(`(?s)<!--.*?-->`)
-	content = htmlComments.ReplaceAllString(content, "")
-
-	// Remove Twig/Jinja comments ({# ... #})
-	twigComments := regexp.MustCompile(`(?s)\{#.*?#\}`)
-	content = twigComments.ReplaceAllString(content, "")
-
-	// Remove ERB comments (<%# ... %>)
-	erbComments := regexp.MustCompile(`(?s)<%#.*?%>`)
-	content = erbComments.ReplaceAllString(content, "")
-
-	return content
-}

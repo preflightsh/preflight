@@ -60,7 +60,9 @@ func (c SSLCheck) Run(ctx Context) (CheckResult, error) {
 	}
 
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
-	conn, err := tls.DialWithDialer(dialer, "tcp", host, &tls.Config{})
+	conn, err := tls.DialWithDialer(dialer, "tcp", host, &tls.Config{
+		MinVersion: tls.VersionTLS12,
+	})
 	if err != nil {
 		return CheckResult{
 			ID:       c.ID(),

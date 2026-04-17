@@ -39,7 +39,7 @@ func (c SecurityHeadersCheck) Run(ctx Context) (CheckResult, error) {
 	if prodURL != "" {
 		missing, err := c.checkURL(ctx, prodURL, true)
 		if err != nil {
-			results = append(results, fmt.Sprintf("prod: unreachable"))
+			results = append(results, "prod: unreachable")
 			hasFailure = true
 		} else if len(missing) > 0 {
 			results = append(results, fmt.Sprintf("prod missing: %s", strings.Join(missing, ", ")))
@@ -54,7 +54,7 @@ func (c SecurityHeadersCheck) Run(ctx Context) (CheckResult, error) {
 	if stagingURL != "" {
 		missing, err := c.checkURL(ctx, stagingURL, false)
 		if err != nil {
-			results = append(results, fmt.Sprintf("staging: unreachable"))
+			results = append(results, "staging: unreachable")
 			hasFailure = true
 		} else if len(missing) > 0 {
 			results = append(results, fmt.Sprintf("staging missing: %s", strings.Join(missing, ", ")))
