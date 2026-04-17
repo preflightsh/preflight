@@ -117,11 +117,32 @@ func extractDomain(rawURL string) (string, error) {
 	return parsed.Hostname(), nil
 }
 
+const fallbackDNSServer = "1.1.1.1:53"
+
 func dnsLookupTXT(name string) ([]string, error) {
-	resolver := &net.Resolver{}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return resolver.LookupTXT(ctx, name)
+
+	records, err := net.DefaultResolver.LookupTXT(ctx, name)
+	if err == nil {
+		return records, nil
+	}
+	if dnsErr, ok := err.(*net.DNSError); ok && dnsErr.IsNotFound {
+		return records, err
+	}
+
+	// System resolver failed (timeout, refused, server error). Retry against
+	// a public resolver so a flaky local resolver doesn't produce false WARNs.
+	fallback := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			d := net.Dialer{Timeout: 5 * time.Second}
+			return d.DialContext(ctx, network, fallbackDNSServer)
+		},
+	}
+	fbCtx, fbCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer fbCancel()
+	return fallback.LookupTXT(fbCtx, name)
 }
 
 func checkSPF(domain string) (bool, string, error) {
