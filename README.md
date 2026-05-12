@@ -1,5 +1,7 @@
 # Preflight.sh
 
+[![Agent skill on skills.sh](https://skills.sh/b/preflightsh/preflight)](https://skills.sh/preflightsh/preflight)
+
 [Preflight.sh](https://preflight.sh/) is a command-line tool that scans your codebase for launch readiness. Identifies missing configuration, integration issues, security concerns, SEO metadata gaps, and other common mistakes before you deploy to production. [View the changelog here.](https://changelog.preflight.sh/)
 
 Don't embarrass yourself in production. Just run the command.
@@ -68,6 +70,22 @@ preflight unignore sitemap
 
 # List all check IDs
 preflight checks
+```
+
+## Agent Skill
+
+This repo includes a skills.sh-compatible agent skill at [`skills/preflight/SKILL.md`](skills/preflight/SKILL.md). It gives coding agents a repeatable Preflight workflow: inspect `preflight.yml`, run CI-safe scans, triage findings, avoid unsafe ignores, rerun validation, and report residual launch risk.
+
+List the skill from this repository:
+
+```bash
+bunx --yes skills add preflightsh/preflight --list
+```
+
+Install only the Preflight skill:
+
+```bash
+bunx --yes skills add preflightsh/preflight --skill preflight
 ```
 
 ## What It Checks

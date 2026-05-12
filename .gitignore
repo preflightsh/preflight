@@ -1,6 +1,6 @@
 # Binaries
 bin/
-preflight
+/preflight
 *.exe
 *.dll
 *.so
