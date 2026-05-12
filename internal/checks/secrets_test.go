@@ -169,3 +169,46 @@ func TestSecrets_StillSkipsEnvLocalFamily(t *testing.T) {
 		})
 	}
 }
+
+// Symlinks must not be followed. A hostile repo could plant a symlink
+// with an in-scope filename pointing at ~/.aws/credentials etc. and
+// trick the scanner into reading outside ctx.RootDir.
+func TestSecrets_SkipsSymlinks(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "real-secrets.env"),
+		[]byte("GITHUB_TOKEN="+fakeGHPATa+"\n"), 0o644); err != nil {
+		t.Fatalf("write outside: %v", err)
+	}
+	link := filepath.Join(root, "leak.env")
+	if err := os.Symlink(filepath.Join(outside, "real-secrets.env"), link); err != nil {
+		t.Skipf("symlinks not supported on this filesystem: %v", err)
+	}
+
+	res := runSecretsCheck(t, root, &config.SecretsConfig{Enabled: true})
+	if !res.Passed {
+		t.Fatalf("expected no findings — symlink should be skipped — got: %s", res.Message)
+	}
+}
+
+// A line containing an allowlisted secret AND a different real secret
+// must still alert on the un-allowlisted one. The previous "only one
+// match per line" loop made it possible to hide a real secret behind
+// an allowlisted neighbor.
+func TestSecrets_SameLineAllowlistDoesNotHideOtherSecret(t *testing.T) {
+	root := t.TempDir()
+	// Two distinct GitHub PATs on the same line.
+	writeFile(t, root, "config.js", "const A = \""+fakeGHPATa+"\"; const B = \""+fakeGHPATb+"\";\n")
+
+	res := runSecretsCheck(t, root, &config.SecretsConfig{
+		Enabled: true,
+		Allowlist: []config.SecretAllowlistEntry{
+			// Only the A secret is allowlisted by fingerprint.
+			{Path: "config.js", Fingerprint: fingerprintSecret(fakeGHPATa)},
+		},
+	})
+
+	if res.Passed {
+		t.Fatalf("expected alert for the un-allowlisted same-line secret, got pass: %s", res.Message)
+	}
+}

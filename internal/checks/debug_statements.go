@@ -304,6 +304,13 @@ func scanForDebugStatements(rootDir string) []string {
 			return nil
 		}
 
+		// Skip symlinks, devices, pipes — same path-traversal / DoS
+		// concern as the secrets walker (e.g. a symlink to /dev/zero
+		// would let os.ReadFile bypass the 500KB size cap below).
+		if !d.Type().IsRegular() {
+			return nil
+		}
+
 		// Check if file should be skipped
 		filename := strings.ToLower(d.Name())
 		for _, skip := range skipFiles {
@@ -479,11 +486,6 @@ func isDevGuarded(lines []string, lineNum int) bool {
 		"@env('local')",
 		"@production",
 		"@unless(app()->environment('production'))",
-
-		// General
-		"development",
-		"localhost",
-		"127.0.0.1",
 	}
 
 	// Look up to 10 lines back to find dev guards (handles nested code)
@@ -493,7 +495,10 @@ func isDevGuarded(lines []string, lineNum int) bool {
 	}
 
 	for i := start; i <= lineNum; i++ {
-		lineLower := strings.ToLower(lines[i])
+		// Strip line/block comments first so a nearby comment that
+		// happens to mention NODE_ENV (or whatever) doesn't get
+		// mis-read as an actual guard expression.
+		lineLower := strings.ToLower(stripCodeComments(lines[i]))
 		for _, pattern := range devPatterns {
 			if strings.Contains(lineLower, strings.ToLower(pattern)) {
 				return true

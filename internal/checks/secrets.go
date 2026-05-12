@@ -155,6 +155,15 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 			return nil
 		}
 
+		// Skip symlinks, devices, pipes — anything not a plain file. A
+		// hostile project could otherwise drop a symlink named like an
+		// in-scope source file (`leak.env` → `~/.aws/credentials`,
+		// `bigfile.js` → `/dev/zero`) and trick the scanner into
+		// reading outside the project root or hanging on a device.
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+
 		// Skip files that are too large
 		if info.Size() > maxFileSize {
 			return nil
@@ -350,15 +359,26 @@ func scanFileForSecrets(path string, patterns []secretPattern) ([]secretFinding,
 		lineNum++
 		line := scanner.Text()
 
+		// Collect every match on the line, not just the first one. If a
+		// line contains an allowlisted token AND a real secret,
+		// recording only the first would let applySecretAllowlist drop
+		// the allowlisted finding while the real one was never seen.
+		// Dedupe by fingerprint so two patterns that match the same
+		// exact substring don't double-report.
+		seen := map[string]struct{}{}
 		for _, sp := range patterns {
-			if m := sp.pattern.FindString(line); m != "" {
+			for _, m := range sp.pattern.FindAllString(line, -1) {
+				fp := fingerprintSecret(m)
+				if _, dup := seen[fp]; dup {
+					continue
+				}
+				seen[fp] = struct{}{}
 				findings = append(findings, secretFinding{
 					file:        path,
 					line:        lineNum,
 					secretType:  sp.description,
-					fingerprint: fingerprintSecret(m),
+					fingerprint: fp,
 				})
-				break // Only report one finding per line
 			}
 		}
 	}
