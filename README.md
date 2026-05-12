@@ -79,13 +79,21 @@ This repo includes a skills.sh-compatible agent skill at [`skills/preflight/SKIL
 List the skill from this repository:
 
 ```bash
+# With Bun
 bunx --yes skills add preflightsh/preflight --list
+
+# Or with npm
+npx --yes skills add preflightsh/preflight --list
 ```
 
 Install only the Preflight skill:
 
 ```bash
+# With Bun
 bunx --yes skills add preflightsh/preflight --skill preflight
+
+# Or with npm
+npx --yes skills add preflightsh/preflight --skill preflight
 ```
 
 ## What It Checks
