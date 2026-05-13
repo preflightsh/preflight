@@ -190,14 +190,14 @@ func (c RobotsTxtCheck) Run(ctx Context) (CheckResult, error) {
 			// Match robots.ts, robots.tsx, robots.js, robots.jsx
 			if nameLower == "robots.ts" || nameLower == "robots.tsx" || nameLower == "robots.js" || nameLower == "robots.jsx" {
 				robotsFound = true
-				robotsFoundPath, _ = filepath.Rel(ctx.RootDir, path)
+				robotsFoundPath = relPath(ctx.RootDir, path)
 				return nil
 			}
 			// Match route.ts/js in robots.txt/ or robots/ directory
 			parentDir := strings.ToLower(filepath.Base(filepath.Dir(path)))
 			if (parentDir == "robots.txt" || parentDir == "robots") && strings.HasPrefix(nameLower, "route.") {
 				robotsFound = true
-				robotsFoundPath, _ = filepath.Rel(ctx.RootDir, path)
+				robotsFoundPath = relPath(ctx.RootDir, path)
 				return nil
 			}
 			return nil
@@ -382,14 +382,14 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 			// Match sitemap.ts, sitemap.tsx, sitemap.js, sitemap.jsx
 			if nameLower == "sitemap.ts" || nameLower == "sitemap.tsx" || nameLower == "sitemap.js" || nameLower == "sitemap.jsx" {
 				sitemapFound = true
-				sitemapFoundPath, _ = filepath.Rel(ctx.RootDir, path)
+				sitemapFoundPath = relPath(ctx.RootDir, path)
 				return nil
 			}
 			// Match route.ts/js in sitemap.xml/ or sitemap/ directory
 			parentDir := strings.ToLower(filepath.Base(filepath.Dir(path)))
 			if (parentDir == "sitemap.xml" || parentDir == "sitemap") && strings.HasPrefix(nameLower, "route.") {
 				sitemapFound = true
-				sitemapFoundPath, _ = filepath.Rel(ctx.RootDir, path)
+				sitemapFoundPath = relPath(ctx.RootDir, path)
 				return nil
 			}
 			return nil
@@ -957,13 +957,13 @@ func (c LLMsTxtCheck) Run(ctx Context) (CheckResult, error) {
 			// Match route.ts/js in llms.txt/ or llms/ directory
 			if (parentDir == "llms.txt" || parentDir == "llms") && strings.HasPrefix(nameLower, "route.") {
 				llmsFound = true
-				llmsFoundPath, _ = filepath.Rel(ctx.RootDir, path)
+				llmsFoundPath = relPath(ctx.RootDir, path)
 				return nil
 			}
 			// Match +server.ts/js in llms.txt directory (SvelteKit)
 			if parentDir == "llms.txt" && strings.HasPrefix(nameLower, "+server.") {
 				llmsFound = true
-				llmsFoundPath, _ = filepath.Rel(ctx.RootDir, path)
+				llmsFoundPath = relPath(ctx.RootDir, path)
 				return nil
 			}
 			return nil

@@ -626,19 +626,19 @@ func resolveImageURL(imageURL, baseURL string) string {
 func fetchImageDimensions(ctx Context, url string) (width, height int, err error) {
 	resp, err := doGet(ctx.Client, url)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, fmt.Errorf("fetch %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return 0, 0, fmt.Errorf("HTTP %d", resp.StatusCode)
+		return 0, 0, fmt.Errorf("fetch %s: HTTP %d", url, resp.StatusCode)
 	}
 
 	// DecodeConfig allocates based on header-declared dimensions, so a
 	// malicious image could OOM the scanner. Cap the reader.
 	img, _, err := image.DecodeConfig(io.LimitReader(resp.Body, netutil.MaxResponseBody))
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, fmt.Errorf("decode %s: %w", url, err)
 	}
 
 	return img.Width, img.Height, nil
@@ -648,13 +648,13 @@ func fetchImageDimensions(ctx Context, url string) (width, height int, err error
 func getLocalImageDimensions(path string) (width, height int, err error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, fmt.Errorf("open %s: %w", path, err)
 	}
 	defer f.Close()
 
 	img, _, err := image.DecodeConfig(io.LimitReader(f, netutil.MaxResponseBody))
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, fmt.Errorf("decode %s: %w", path, err)
 	}
 
 	return img.Width, img.Height, nil

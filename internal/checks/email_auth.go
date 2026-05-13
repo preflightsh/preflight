@@ -112,7 +112,7 @@ func extractDomain(rawURL string) (string, error) {
 	}
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("parse %s: %w", rawURL, err)
 	}
 	return parsed.Hostname(), nil
 }
@@ -127,8 +127,10 @@ func dnsLookupTXT(name string) ([]string, error) {
 	if err == nil {
 		return records, nil
 	}
+	// Domain or record does not exist. Return nil so callers can't
+	// accidentally consume a partial slice alongside the non-nil error.
 	if dnsErr, ok := err.(*net.DNSError); ok && dnsErr.IsNotFound {
-		return records, err
+		return nil, err
 	}
 
 	// System resolver failed (timeout, refused, server error). Retry against

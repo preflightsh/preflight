@@ -2,8 +2,10 @@ package config
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -1087,7 +1089,8 @@ func detectServicesFromExternalScripts(urls []string, services map[string]bool, 
 
 		resp, err := client.Get(url)
 		if err != nil {
-			if strings.Contains(err.Error(), "timeout") || strings.Contains(err.Error(), "deadline") {
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
 				domain := hostFromURL(url)
 				fmt.Printf("\n  ⚠️  %s timed out", domain)
 			}

@@ -178,13 +178,13 @@ func getFinalURL(urlStr string) (string, error) {
 
 	req, err := http.NewRequest("HEAD", urlStr, nil)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("build request for %s: %w", urlStr, err)
 	}
 	req.Header.Set("User-Agent", "Preflight/1.0")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("HEAD %s: %w", urlStr, err)
 	}
 	defer resp.Body.Close()
 

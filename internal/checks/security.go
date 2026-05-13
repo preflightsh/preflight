@@ -109,7 +109,7 @@ func (c SecurityHeadersCheck) Run(ctx Context) (CheckResult, error) {
 func (c SecurityHeadersCheck) checkURL(ctx Context, url string, isProd bool) ([]string, error) {
 	resp, actualURL, err := tryURL(ctx.Client, url)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("fetch %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 

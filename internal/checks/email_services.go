@@ -338,25 +338,28 @@ func hasEnvVar(rootDir, prefix string) bool {
 
 	for _, envFile := range envFiles {
 		path := filepath.Join(rootDir, envFile)
-		file, err := os.Open(path)
-		if err != nil {
-			continue
-		}
-
-		scanner := bufio.NewScanner(file)
-		found := false
-		for scanner.Scan() {
-			line := strings.ToUpper(scanner.Text())
-			if strings.HasPrefix(line, prefix) {
-				found = true
-				break
-			}
-		}
-		file.Close()
-		if found {
+		if envFileHasPrefix(path, prefix) {
 			return true
 		}
 	}
 
+	return false
+}
+
+// envFileHasPrefix reports whether path contains any line beginning with
+// prefix (uppercased). Lives in its own function so defer can close the
+// file even if scanning panics on a pathological line.
+func envFileHasPrefix(path, prefix string) bool {
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		if strings.HasPrefix(strings.ToUpper(scanner.Text()), prefix) {
+			return true
+		}
+	}
 	return false
 }

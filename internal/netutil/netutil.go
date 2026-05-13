@@ -45,7 +45,8 @@ func IsPrivateIP(ip net.IP) bool {
 }
 
 // safeDialer wraps net.Dialer.DialContext and rejects any connection
-// whose destination resolves to a private IP.
+// whose destination resolves to a private IP. Tries each resolved IP in
+// order so dual-stack hosts with a broken AAAA still connect.
 func safeDialer(timeout time.Duration) func(ctx context.Context, network, addr string) (net.Conn, error) {
 	d := &net.Dialer{Timeout: timeout}
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -57,12 +58,23 @@ func safeDialer(timeout time.Duration) func(ctx context.Context, network, addr s
 		if err != nil {
 			return nil, err
 		}
+		if len(ips) == 0 {
+			return nil, fmt.Errorf("no IP addresses for %s", host)
+		}
 		for _, ip := range ips {
 			if IsPrivateIP(ip.IP) {
 				return nil, fmt.Errorf("%w: %s", ErrPrivateAddress, ip.IP)
 			}
 		}
-		return d.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+		var lastErr error
+		for _, ip := range ips {
+			conn, dialErr := d.DialContext(ctx, network, net.JoinHostPort(ip.IP.String(), port))
+			if dialErr == nil {
+				return conn, nil
+			}
+			lastErr = dialErr
+		}
+		return nil, lastErr
 	}
 }
 

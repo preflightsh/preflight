@@ -215,7 +215,7 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 			Title:    c.Title(),
 			Severity: SeverityWarn,
 			Passed:   false,
-			Message:  "Error scanning files: " + err.Error(),
+			Message:  fmt.Sprintf("Error scanning files: %v", err),
 		}, nil
 	}
 
