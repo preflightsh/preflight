@@ -311,8 +311,8 @@ func getLayoutFile(rootDir string, stack string, configuredLayout string) string
 func checkAlternatePatterns(content, name string) bool {
 	alternates := map[string][]*regexp.Regexp{
 		"title": {
-			regexp.MustCompile(`\btitle\s*[:=]`),  // JSX/React
-			regexp.MustCompile(`<Title>`),         // Next.js Head
+			regexp.MustCompile(`\btitle\s*[:=]`), // JSX/React
+			regexp.MustCompile(`<Title>`),        // Next.js Head
 		},
 		"description": {
 			regexp.MustCompile(`name:\s*["']description["']`),

@@ -90,7 +90,7 @@ func (c GoogleAnalyticsCheck) Run(ctx Context) (CheckResult, error) {
 		regexp.MustCompile(`gtag\(`),
 		regexp.MustCompile(`ga\(`),
 		regexp.MustCompile(`GoogleAnalyticsObject`),
-		regexp.MustCompile(`G-[A-Z0-9]+`), // GA4 measurement ID
+		regexp.MustCompile(`G-[A-Z0-9]+`),      // GA4 measurement ID
 		regexp.MustCompile(`UA-[0-9]+-[0-9]+`), // Universal Analytics
 	}
 
@@ -332,7 +332,7 @@ func searchForPatterns(rootDir, stack string, patterns []*regexp.Regexp) bool {
 		}
 
 		found := false
-		filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		_ = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 			if err != nil || found {
 				return nil
 			}
@@ -473,7 +473,7 @@ func searchForPatternsWithDetails(rootDir, stack string, patterns []*regexp.Rege
 			continue
 		}
 
-		filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		_ = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 			if err != nil || result != nil {
 				return nil
 			}
@@ -584,4 +584,3 @@ func getLayoutFilesForStack(stack string) []string {
 	}
 	return []string{"index.html", "public/index.html"}
 }
-

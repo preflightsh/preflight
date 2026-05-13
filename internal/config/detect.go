@@ -694,12 +694,12 @@ func detectServicesFromEnv(rootDir string, services map[string]bool) map[string]
 		"logrocket":   {"LOGROCKET_"},
 
 		// Email
-		"postmark":   {"POSTMARK_"},
-		"sendgrid":   {"SENDGRID_"},
-		"mailgun":    {"MAILGUN_"},
-		"aws_ses":    {"AWS_SES_", "SES_REGION"},
-		"resend":     {"RESEND_"},
-		"mailchimp":  {"MAILCHIMP_"},
+		"postmark":        {"POSTMARK_"},
+		"sendgrid":        {"SENDGRID_"},
+		"mailgun":         {"MAILGUN_"},
+		"aws_ses":         {"AWS_SES_", "SES_REGION"},
+		"resend":          {"RESEND_"},
+		"mailchimp":       {"MAILCHIMP_"},
 		"convertkit":      {"CONVERTKIT_", "KIT_API", "KIT_FORM"},
 		"beehiiv":         {"BEEHIIV_"},
 		"aweber":          {"AWEBER_"},
@@ -973,17 +973,19 @@ func detectAnalyticsScripts(rootDir string, services map[string]bool) {
 		"tmp":          true,
 		"log":          true,
 		"logs":         true,
-		"storage":      true,      // Laravel/Craft CMS storage (backups, logs, etc.)
-		"cpresources":  true,      // Craft CMS control panel assets
-		"web":          true,      // Common public web root (contains compiled assets)
-		"public":       true,      // Common public web root
+		"storage":      true, // Laravel/Craft CMS storage (backups, logs, etc.)
+		"cpresources":  true, // Craft CMS control panel assets
+		"web":          true, // Common public web root (contains compiled assets)
+		"public":       true, // Common public web root
 	}
 
 	// Collect external script URLs to fetch
 	var externalScripts []string
 
-	// Walk the entire project directory
-	_ = filepath.WalkDir(rootDir, func(path string, d os.DirEntry, err error) error {
+	// Walk the entire project directory. Capture the outer error so an
+	// unreadable rootDir is surfaced instead of producing a silent empty
+	// scan; per-entry errors are still tolerated inside the callback.
+	walkErr := filepath.WalkDir(rootDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil // Skip files/dirs we can't access
 		}
@@ -1039,6 +1041,9 @@ func detectAnalyticsScripts(rootDir string, services map[string]bool) {
 
 		return nil
 	})
+	if walkErr != nil {
+		fmt.Printf("⚠️  Could not fully scan project directory: %v\n", walkErr)
+	}
 
 	// Fetch and check external scripts (limit to avoid slowdown)
 	if len(externalScripts) > 0 {

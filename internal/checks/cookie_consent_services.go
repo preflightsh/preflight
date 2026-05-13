@@ -640,7 +640,7 @@ func checkLiveSiteForPatterns(ctx Context, patterns []*regexp.Regexp) (bool, str
 		return false, ""
 	}
 
-	resp, _, err := tryURL(ctx.Client, url)
+	resp, _, err := tryURL(ctx.reqContext(), ctx.Client, url)
 	if err != nil {
 		return false, url
 	}

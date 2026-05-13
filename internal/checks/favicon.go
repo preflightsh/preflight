@@ -31,17 +31,17 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 
 	// Common web root directories across frameworks
 	webRoots := []string{
-		"public",     // Laravel, Rails, many Node.js
-		"static",     // Hugo, some SSGs
-		"web",        // Craft CMS, Symfony
-		"www",        // Some PHP apps
-		"dist",       // Built static sites
-		"build",      // Build outputs
-		"_site",      // Jekyll
-		"out",        // Next.js static export
-		"app",        // Next.js App Router (pages)
-		"src/app",    // Next.js App Router (standard)
-		"",           // Root directory
+		"public",  // Laravel, Rails, many Node.js
+		"static",  // Hugo, some SSGs
+		"web",     // Craft CMS, Symfony
+		"www",     // Some PHP apps
+		"dist",    // Built static sites
+		"build",   // Build outputs
+		"_site",   // Jekyll
+		"out",     // Next.js static export
+		"app",     // Next.js App Router (pages)
+		"src/app", // Next.js App Router (standard)
+		"",        // Root directory
 	}
 
 	// Also check monorepo structures for Next.js App Router
@@ -106,7 +106,7 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 			if _, err := os.Stat(dirPath); err != nil {
 				continue
 			}
-			filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+			_ = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 				if err != nil {
 					if info != nil && info.IsDir() {
 						return filepath.SkipDir
@@ -191,17 +191,17 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 		// Check common template locations
 		if !hasAppleIcon {
 			templatePaths := []string{
-				"templates/_layout.twig",           // Craft CMS
-				"templates/_layout.html",           // Craft CMS
-				"templates/_head.twig",             // Craft CMS partials
+				"templates/_layout.twig", // Craft CMS
+				"templates/_layout.html", // Craft CMS
+				"templates/_head.twig",   // Craft CMS partials
 				"templates/_head.html",
-				"templates/_partials/head.twig",    // Craft CMS partials
-				"templates/_partials/header.twig",  // Craft CMS partials
+				"templates/_partials/head.twig",          // Craft CMS partials
+				"templates/_partials/header.twig",        // Craft CMS partials
 				"app/views/layouts/application.html.erb", // Rails
 				"resources/views/layouts/app.blade.php",  // Laravel
-				"_includes/head.html",              // Jekyll
-				"layouts/_default/baseof.html",     // Hugo
-				"src/layouts/Layout.astro",         // Astro
+				"_includes/head.html",                    // Jekyll
+				"layouts/_default/baseof.html",           // Hugo
+				"src/layouts/Layout.astro",               // Astro
 			}
 			for _, tplPath := range templatePaths {
 				fullPath := filepath.Join(ctx.RootDir, tplPath)
@@ -258,7 +258,7 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 			if _, err := os.Stat(dirPath); err != nil {
 				continue
 			}
-			filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+			_ = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 				if err != nil {
 					if info != nil && info.IsDir() {
 						return filepath.SkipDir
@@ -355,7 +355,7 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 			if _, err := os.Stat(dirPath); err != nil {
 				continue
 			}
-			filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+			_ = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 				if err != nil {
 					if info != nil && info.IsDir() {
 						return filepath.SkipDir
@@ -456,7 +456,6 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 		},
 	}, nil
 }
-
 
 // findMonorepoAppRouterPaths searches for a file in common monorepo structures
 // with Next.js App Router convention (apps/*/src/app/, packages/*/src/app/)

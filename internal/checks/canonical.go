@@ -99,11 +99,11 @@ func (c CanonicalURLCheck) Run(ctx Context) (CheckResult, error) {
 	}
 
 	return CheckResult{
-		ID:       c.ID(),
-		Title:    c.Title(),
-		Severity: SeverityWarn,
-		Passed:   false,
-		Message:  "No canonical URL tag found",
+		ID:          c.ID(),
+		Title:       c.Title(),
+		Severity:    SeverityWarn,
+		Passed:      false,
+		Message:     "No canonical URL tag found",
 		Suggestions: getCanonicalSuggestions(ctx.Config.Stack),
 	}, nil
 }
@@ -277,4 +277,3 @@ func getCanonicalSuggestions(stack string) []string {
 		}
 	}
 }
-

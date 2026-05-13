@@ -58,15 +58,15 @@ func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {
 
 	// Check for Stripe initialization in code
 	initPatterns := []*regexp.Regexp{
-		regexp.MustCompile(`Stripe\.api_key`),              // Ruby
-		regexp.MustCompile(`stripe\.Key`),                  // Go
-		regexp.MustCompile(`new Stripe\(`),                 // Node
-		regexp.MustCompile(`Stripe\(`),                     // Node alt
-		regexp.MustCompile(`stripe\.setApiKey`),            // Node alt
-		regexp.MustCompile(`STRIPE_SECRET_KEY`),            // Generic env usage
-		regexp.MustCompile(`stripe/stripe-php`),            // PHP
-		regexp.MustCompile(`gem ['"]stripe['"]`),           // Ruby Gemfile
-		regexp.MustCompile(`"stripe":`),                    // package.json
+		regexp.MustCompile(`Stripe\.api_key`),    // Ruby
+		regexp.MustCompile(`stripe\.Key`),        // Go
+		regexp.MustCompile(`new Stripe\(`),       // Node
+		regexp.MustCompile(`Stripe\(`),           // Node alt
+		regexp.MustCompile(`stripe\.setApiKey`),  // Node alt
+		regexp.MustCompile(`STRIPE_SECRET_KEY`),  // Generic env usage
+		regexp.MustCompile(`stripe/stripe-php`),  // PHP
+		regexp.MustCompile(`gem ['"]stripe['"]`), // Ruby Gemfile
+		regexp.MustCompile(`"stripe":`),          // package.json
 	}
 
 	initFound := false

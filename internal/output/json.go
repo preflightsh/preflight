@@ -11,9 +11,9 @@ import (
 type JSONOutputter struct{}
 
 type JSONOutput struct {
-	Project string             `json:"project"`
-	Summary Summary            `json:"summary"`
-	Checks  []JSONCheckResult  `json:"checks"`
+	Project string            `json:"project"`
+	Summary Summary           `json:"summary"`
+	Checks  []JSONCheckResult `json:"checks"`
 }
 
 type JSONCheckResult struct {

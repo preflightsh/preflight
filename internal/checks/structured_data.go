@@ -106,11 +106,11 @@ func (c StructuredDataCheck) Run(ctx Context) (CheckResult, error) {
 	}
 
 	return CheckResult{
-		ID:       c.ID(),
-		Title:    c.Title(),
-		Severity: SeverityWarn,
-		Passed:   false,
-		Message:  "No structured data found",
+		ID:          c.ID(),
+		Title:       c.Title(),
+		Severity:    SeverityWarn,
+		Passed:      false,
+		Message:     "No structured data found",
 		Suggestions: getStructuredDataSuggestions(ctx.Config.Stack),
 	}, nil
 }

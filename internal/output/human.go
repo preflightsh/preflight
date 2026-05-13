@@ -95,32 +95,32 @@ func (h HumanOutputter) Output(projectName string, results []checks.CheckResult)
 
 	// Map check IDs to display categories
 	categoryMap := map[string]string{
-		"envParity":            "ENV",
-		"healthEndpoint":       "HEALTH",
-		"seoMeta":              "SEO",
-		"ogTwitter":            "SOCIAL",
-		"securityHeaders":      "SECURITY",
-		"ssl":                  "SSL",
-		"secrets":              "SECRETS",
-		"favicon":              "ICONS",
-		"robotsTxt":            "FILES",
-		"sitemap":              "FILES",
-		"llmsTxt":              "FILES",
-		"adsTxt":               "FILES",
-		"humansTxt":            "FILES",
-		"license":              "LICENSE",
-		"vulnerability":        "DEPS",
-		"indexNow":             "INDEXNOW",
-		"canonical":            "SEO",
-		"viewport":             "MOBILE",
-		"lang":                 "LANG",
-		"error_pages":          "PAGES",
-		"debug_statements":     "DEBUG",
-		"structured_data":      "SEO",
-		"image_optimization":   "PERF",
-		"email_auth":           "EMAIL",
-		"www_redirect":         "INFRA",
-		"legal_pages":          "LEGAL",
+		"envParity":          "ENV",
+		"healthEndpoint":     "HEALTH",
+		"seoMeta":            "SEO",
+		"ogTwitter":          "SOCIAL",
+		"securityHeaders":    "SECURITY",
+		"ssl":                "SSL",
+		"secrets":            "SECRETS",
+		"favicon":            "ICONS",
+		"robotsTxt":          "FILES",
+		"sitemap":            "FILES",
+		"llmsTxt":            "FILES",
+		"adsTxt":             "FILES",
+		"humansTxt":          "FILES",
+		"license":            "LICENSE",
+		"vulnerability":      "DEPS",
+		"indexNow":           "INDEXNOW",
+		"canonical":          "SEO",
+		"viewport":           "MOBILE",
+		"lang":               "LANG",
+		"error_pages":        "PAGES",
+		"debug_statements":   "DEBUG",
+		"structured_data":    "SEO",
+		"image_optimization": "PERF",
+		"email_auth":         "EMAIL",
+		"www_redirect":       "INFRA",
+		"legal_pages":        "LEGAL",
 	}
 
 	// Service check IDs - these will be grouped separately
@@ -299,7 +299,7 @@ func (h HumanOutputter) Output(projectName string, results []checks.CheckResult)
 func hasUsefulPassedMessage(msg string) bool {
 	// Show messages that identify specific types/versions
 	usefulPatterns := []string{
-		"license found",  // License type detection
+		"license found", // License type detection
 		"MIT", "Apache", "GPL", "AGPL", "BSD", "ISC", "MPL",
 		"(at ",           // Location info for files found in parent dirs
 		"not enabled",    // Check passed because it's disabled/not configured

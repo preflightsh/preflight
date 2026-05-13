@@ -1,6 +1,7 @@
 package checks
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -76,8 +77,8 @@ func (c WWWRedirectCheck) Run(ctx Context) (CheckResult, error) {
 	nonWwwURL := scheme + "://" + nonWwwHost
 
 	// Check both URLs
-	wwwFinal, wwwErr := getFinalURL(wwwURL)
-	nonWwwFinal, nonWwwErr := getFinalURL(nonWwwURL)
+	wwwFinal, wwwErr := getFinalURL(ctx.reqContext(), wwwURL)
+	nonWwwFinal, nonWwwErr := getFinalURL(ctx.reqContext(), nonWwwURL)
 
 	// Both fail to resolve
 	if wwwErr != nil && nonWwwErr != nil {
@@ -170,13 +171,13 @@ func (c WWWRedirectCheck) Run(ctx Context) (CheckResult, error) {
 	}, nil
 }
 
-func getFinalURL(urlStr string) (string, error) {
+func getFinalURL(ctx context.Context, urlStr string) (string, error) {
 	// This call starts with a user-configured URL and follows redirects;
 	// SafeHTTPClient guards both the initial dial AND each redirect hop
 	// against private / loopback / link-local addresses.
 	client := netutil.SafeHTTPClient(5 * time.Second)
 
-	req, err := http.NewRequest("HEAD", urlStr, nil)
+	req, err := http.NewRequestWithContext(ctx, "HEAD", urlStr, nil)
 	if err != nil {
 		return "", fmt.Errorf("build request for %s: %w", urlStr, err)
 	}

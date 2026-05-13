@@ -37,8 +37,8 @@ func (c SentryCheck) Run(ctx Context) (CheckResult, error) {
 		regexp.MustCompile(`require\s*\(\s*['"]@sentry`),
 		regexp.MustCompile(`import.*from\s+['"]@sentry`),
 		regexp.MustCompile(`Sentry::init`),       // Ruby
-		regexp.MustCompile(`sentry_sdk\.init`),    // Python
-		regexp.MustCompile(`\bsentry-laravel\b`),  // Laravel
+		regexp.MustCompile(`sentry_sdk\.init`),   // Python
+		regexp.MustCompile(`\bsentry-laravel\b`), // Laravel
 	}
 
 	// Check for Next.js Sentry config files at root first

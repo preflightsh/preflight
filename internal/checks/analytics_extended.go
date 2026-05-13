@@ -28,15 +28,15 @@ func (c UmamiCheck) Run(ctx Context) (CheckResult, error) {
 	}
 
 	patterns := []*regexp.Regexp{
-		regexp.MustCompile(`data-website-id=`),            // Umami-specific script attribute
-		regexp.MustCompile(`(?i)cloud\.umami\.is`),        // Umami Cloud
-		regexp.MustCompile(`(?i)analytics\.umami\.is`),    // Umami Cloud (legacy)
-		regexp.MustCompile(`(?i)umami\.track\(`),          // umami.track() API
-		regexp.MustCompile(`(?i)umami\.identify\(`),       // umami.identify() API
+		regexp.MustCompile(`data-website-id=`),           // Umami-specific script attribute
+		regexp.MustCompile(`(?i)cloud\.umami\.is`),       // Umami Cloud
+		regexp.MustCompile(`(?i)analytics\.umami\.is`),   // Umami Cloud (legacy)
+		regexp.MustCompile(`(?i)umami\.track\(`),         // umami.track() API
+		regexp.MustCompile(`(?i)umami\.identify\(`),      // umami.identify() API
 		regexp.MustCompile(`from\s+["']@umami/`),         // npm package import
 		regexp.MustCompile(`require\s*\(\s*["']@umami/`), // npm package require
-		regexp.MustCompile(`UMAMI_WEBSITE_ID`),            // env var pattern
-		regexp.MustCompile(`NEXT_PUBLIC_UMAMI`),           // Next.js env var
+		regexp.MustCompile(`UMAMI_WEBSITE_ID`),           // env var pattern
+		regexp.MustCompile(`NEXT_PUBLIC_UMAMI`),          // Next.js env var
 	}
 
 	found := searchForPatterns(ctx.RootDir, ctx.Config.Stack, patterns)
@@ -198,16 +198,16 @@ func (c PostHogCheck) Run(ctx Context) (CheckResult, error) {
 	}
 
 	patterns := []*regexp.Regexp{
-		regexp.MustCompile(`(?i)posthog\.init`),           // posthog.init() or PostHog.init()
-		regexp.MustCompile(`(?i)posthog\.capture`),        // posthog.capture() or PostHog.capture()
-		regexp.MustCompile(`PostHogProvider`),             // React provider pattern
-		regexp.MustCompile(`from\s+["']posthog-js["']`),   // import from 'posthog-js'
+		regexp.MustCompile(`(?i)posthog\.init`),                   // posthog.init() or PostHog.init()
+		regexp.MustCompile(`(?i)posthog\.capture`),                // posthog.capture() or PostHog.capture()
+		regexp.MustCompile(`PostHogProvider`),                     // React provider pattern
+		regexp.MustCompile(`from\s+["']posthog-js["']`),           // import from 'posthog-js'
 		regexp.MustCompile(`require\s*\(\s*["']posthog-js["']\)`), // require('posthog-js')
-		regexp.MustCompile(`i\.posthog\.com`),             // PostHog cloud endpoint
-		regexp.MustCompile(`us\.posthog\.com`),            // US cloud endpoint
-		regexp.MustCompile(`eu\.posthog\.com`),            // EU cloud endpoint
-		regexp.MustCompile(`POSTHOG_KEY`),                 // env var pattern
-		regexp.MustCompile(`NEXT_PUBLIC_POSTHOG`),         // Next.js env var
+		regexp.MustCompile(`i\.posthog\.com`),                     // PostHog cloud endpoint
+		regexp.MustCompile(`us\.posthog\.com`),                    // US cloud endpoint
+		regexp.MustCompile(`eu\.posthog\.com`),                    // EU cloud endpoint
+		regexp.MustCompile(`POSTHOG_KEY`),                         // env var pattern
+		regexp.MustCompile(`NEXT_PUBLIC_POSTHOG`),                 // Next.js env var
 	}
 
 	found := searchForPatterns(ctx.RootDir, ctx.Config.Stack, patterns)

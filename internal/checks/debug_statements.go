@@ -221,29 +221,29 @@ func scanForDebugStatements(rootDir string) []string {
 
 	// Directories to skip
 	skipDirs := map[string]bool{
-		"node_modules":   true,
-		"vendor":         true,
-		".git":           true,
-		"dist":           true,
-		"build":          true,
-		".next":          true,
-		".nuxt":          true,
-		"coverage":       true,
-		"__pycache__":    true,
-		".cache":         true,
-		"tmp":            true,
-		"log":            true,
-		"logs":           true,
-		"storage":        true,
-		"cpresources":    true,
-		".turbo":         true,
-		".vercel":        true,
-		".netlify":       true,
-		"public":         true,
-		"static":         true,
-		"_site":          true,
-		"out":            true,
-		"assets":         true,
+		"node_modules": true,
+		"vendor":       true,
+		".git":         true,
+		"dist":         true,
+		"build":        true,
+		".next":        true,
+		".nuxt":        true,
+		"coverage":     true,
+		"__pycache__":  true,
+		".cache":       true,
+		"tmp":          true,
+		"log":          true,
+		"logs":         true,
+		"storage":      true,
+		"cpresources":  true,
+		".turbo":       true,
+		".vercel":      true,
+		".netlify":     true,
+		"public":       true,
+		"static":       true,
+		"_site":        true,
+		"out":          true,
+		"assets":       true,
 	}
 
 	skipFiles := []string{
@@ -288,7 +288,7 @@ func scanForDebugStatements(rootDir string) []string {
 	}
 
 	// Walk the project
-	filepath.WalkDir(rootDir, func(path string, d os.DirEntry, err error) error {
+	_ = filepath.WalkDir(rootDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			if d != nil && d.IsDir() {
 				return filepath.SkipDir

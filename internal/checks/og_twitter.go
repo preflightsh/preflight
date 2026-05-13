@@ -83,7 +83,7 @@ func (c OGTwitterCheck) Run(ctx Context) (CheckResult, error) {
 		generateMetadataPattern := regexp.MustCompile(`(?s)export\s+(async\s+)?function\s+generateMetadata`)
 		metadataExportPattern := regexp.MustCompile(`(?s)export\s+(const|let|var)\s+metadata\s*[=:]`)
 
-		filepath.Walk(appDir, func(path string, info os.FileInfo, err error) error {
+		_ = filepath.Walk(appDir, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				if info != nil && info.IsDir() {
 					return filepath.SkipDir
@@ -262,7 +262,7 @@ func (c OGTwitterCheck) Run(ctx Context) (CheckResult, error) {
 		if _, err := os.Stat(dirPath); err != nil {
 			continue
 		}
-		filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		_ = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				if info != nil && info.IsDir() {
 					return filepath.SkipDir
@@ -624,7 +624,7 @@ func resolveImageURL(imageURL, baseURL string) string {
 
 // fetchImageDimensions fetches an image from a URL and returns its dimensions
 func fetchImageDimensions(ctx Context, url string) (width, height int, err error) {
-	resp, err := doGet(ctx.Client, url)
+	resp, err := doGet(ctx.reqContext(), ctx.Client, url)
 	if err != nil {
 		return 0, 0, fmt.Errorf("fetch %s: %w", url, err)
 	}

@@ -91,7 +91,7 @@ func (c HealthCheck) Run(ctx Context) (CheckResult, error) {
 func (c HealthCheck) probePath(ctx Context, baseURLs []string, path string) (CheckResult, bool) {
 	for _, baseURL := range baseURLs {
 		baseURL = strings.TrimSuffix(baseURL, "/")
-		resp, actualURL, err := tryURL(ctx.Client, baseURL+path)
+		resp, actualURL, err := tryURL(ctx.reqContext(), ctx.Client, baseURL+path)
 		if err != nil {
 			continue
 		}
@@ -115,7 +115,7 @@ func (c HealthCheck) probePath(ctx Context, baseURLs []string, path string) (Che
 func (c HealthCheck) probeRoot(ctx Context, baseURLs []string) (CheckResult, bool) {
 	for _, baseURL := range baseURLs {
 		baseURL = strings.TrimSuffix(baseURL, "/")
-		resp, actualURL, err := tryURL(ctx.Client, baseURL+"/")
+		resp, actualURL, err := tryURL(ctx.reqContext(), ctx.Client, baseURL+"/")
 		if err != nil {
 			continue
 		}

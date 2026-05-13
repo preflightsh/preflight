@@ -66,8 +66,8 @@ type SecurityConfig struct {
 }
 
 type SecretsConfig struct {
-	Enabled   bool                    `yaml:"enabled"`
-	Allowlist []SecretAllowlistEntry  `yaml:"allowlist,omitempty"`
+	Enabled   bool                   `yaml:"enabled"`
+	Allowlist []SecretAllowlistEntry `yaml:"allowlist,omitempty"`
 }
 
 type SecretAllowlistEntry struct {

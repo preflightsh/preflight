@@ -1,6 +1,7 @@
 package checks
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -44,6 +45,12 @@ type CheckResult struct {
 }
 
 type Context struct {
+	// Ctx is the scan-wide cancellation context. Checks that make
+	// network requests must thread this into http.NewRequestWithContext
+	// so the scan can be aborted by signal (SIGINT, SIGTERM) without
+	// leaving in-flight requests dangling. A nil Ctx is treated as
+	// context.Background() by the HTTP helpers below.
+	Ctx     context.Context
 	RootDir string
 	Config  *config.PreflightConfig
 	Client  *http.Client
@@ -62,6 +69,16 @@ type Context struct {
 	// preferred). Convenience for env-agnostic checks like favicon
 	// detection that don't care which environment the markup came from.
 	PageHTML string
+}
+
+// reqContext returns ctx.Ctx if set, otherwise context.Background(). Lets
+// helpers be called from places (tests, init flows) where the scan
+// context hasn't been wired up.
+func (c Context) reqContext() context.Context {
+	if c.Ctx == nil {
+		return context.Background()
+	}
+	return c.Ctx
 }
 
 type Check interface {
@@ -271,13 +288,17 @@ func RunPerEnv(ctx Context, scanRenderedHTML func(html string) []string) (summar
 // FetchPageHTML fetches a single URL's body. Returns empty string on
 // any error. Body is capped at netutil.MaxResponseBody. The caller picks
 // the client so SafeHTTPClient can guard fetches to production URLs
-// while a relaxed client can reach local dev URLs.
-func FetchPageHTML(client *http.Client, rawURL string) string {
+// while a relaxed client can reach local dev URLs. A nil ctx is treated
+// as context.Background().
+func FetchPageHTML(ctx context.Context, client *http.Client, rawURL string) string {
 	if rawURL == "" {
 		return ""
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	baseURL := strings.TrimSuffix(rawURL, "/")
-	resp, _, err := tryURL(client, baseURL+"/")
+	resp, _, err := tryURL(ctx, client, baseURL+"/")
 	if err != nil {
 		return ""
 	}
@@ -292,9 +313,13 @@ func FetchPageHTML(client *http.Client, rawURL string) string {
 	return string(body)
 }
 
-// doGet performs an HTTP GET with a User-Agent header
-func doGet(client *http.Client, url string) (*http.Response, error) {
-	req, err := http.NewRequest("GET", url, nil)
+// doGet performs an HTTP GET with a User-Agent header. A nil ctx is
+// treated as context.Background().
+func doGet(ctx context.Context, client *http.Client, url string) (*http.Response, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -302,20 +327,24 @@ func doGet(client *http.Client, url string) (*http.Response, error) {
 	return client.Do(req)
 }
 
-// tryURL attempts to reach a URL, trying both protocols for local URLs
-func tryURL(client *http.Client, url string) (*http.Response, string, error) {
+// tryURL attempts to reach a URL, trying both protocols for local URLs.
+// A nil ctx is treated as context.Background().
+func tryURL(ctx context.Context, client *http.Client, url string) (*http.Response, string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	// If it's a local URL without protocol, try both
 	if IsLocalURL(url) && !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 		// Try https first (for ddev, etc.)
 		httpsURL := "https://" + url
-		resp, err := doGet(client, httpsURL)
+		resp, err := doGet(ctx, client, httpsURL)
 		if err == nil {
 			return resp, httpsURL, nil
 		}
 
 		// Fall back to http
 		httpURL := "http://" + url
-		resp, err = doGet(client, httpURL)
+		resp, err = doGet(ctx, client, httpURL)
 		if err == nil {
 			return resp, httpURL, nil
 		}
@@ -325,7 +354,7 @@ func tryURL(client *http.Client, url string) (*http.Response, string, error) {
 	// If it already has a protocol, or it's a local URL with protocol, just try it
 	// But for local URLs, also try the alternate protocol
 	if IsLocalURL(url) {
-		resp, err := doGet(client, url)
+		resp, err := doGet(ctx, client, url)
 		if err == nil {
 			return resp, url, nil
 		}
@@ -339,7 +368,7 @@ func tryURL(client *http.Client, url string) (*http.Response, string, error) {
 		}
 
 		if altURL != "" {
-			resp, err = doGet(client, altURL)
+			resp, err = doGet(ctx, client, altURL)
 			if err == nil {
 				return resp, altURL, nil
 			}
@@ -348,7 +377,7 @@ func tryURL(client *http.Client, url string) (*http.Response, string, error) {
 	}
 
 	// Non-local URL, just try it directly
-	resp, err := doGet(client, url)
+	resp, err := doGet(ctx, client, url)
 	return resp, url, err
 }
 

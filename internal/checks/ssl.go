@@ -74,7 +74,7 @@ func (c SSLCheck) Run(ctx Context) (CheckResult, error) {
 			Message:  sanitizeTLSDialError(err),
 		}, nil
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	certs := conn.ConnectionState().PeerCertificates
 	if len(certs) == 0 {

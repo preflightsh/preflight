@@ -1,0 +1,81 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    # Always-on hygiene
+    - errcheck      # report unchecked errors
+    - govet         # printf, struct tags, etc.
+    - ineffassign   # ineffectual assignments
+    - staticcheck   # broad bug + style checks (includes the old gosimple)
+    - unused        # unused identifiers
+    - bodyclose     # http.Response.Body must be closed
+    - rowserrcheck  # sql.Rows.Err() must be checked
+    - errorlint     # errors.Is / errors.As / %w correctness
+    - gosec         # security smells (SSRF, command injection, etc.)
+    - misspell      # English spelling in comments and strings
+
+  settings:
+    errcheck:
+      # Ignore well-known intentional swallows. Adjust as new false
+      # positives appear rather than disabling the linter.
+      exclude-functions:
+        - (*os.File).Close
+        - (io.Closer).Close
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - fmt.Print
+        - fmt.Printf
+        - fmt.Println
+
+    gosec:
+      excludes:
+        # G104: errors unhandled. errcheck covers this with finer control.
+        - G104
+        # G204: subprocess with variable. Used for `npm audit` / upgrade
+        # commands; arguments are constructed from a vetted list, not user
+        # input.
+        - G204
+        # G301: directory perms. State and config dirs use 0755 so the
+        # user can re-enter their own preflight directory.
+        - G301
+        # G302: file perms 0644. preflight.yml, robots.txt, gitignore
+        # appends are intentionally world-readable.
+        - G302
+        # G304: file inclusion via variable. We scan user code by design.
+        - G304
+        # G306: file permissions. We use 0644/0755 intentionally.
+        - G306
+
+    staticcheck:
+      # QF rules are quickfix-style style suggestions. Useful in editors,
+      # too noisy to gate CI on. ST1000 (package comment) is project
+      # convention rather than a bug class.
+      checks:
+        - all
+        - -QF1003
+        - -QF1008
+        - -ST1000
+
+  exclusions:
+    rules:
+      # Test files routinely build small fixtures inline; relax a few
+      # checks there so the signal stays high in production code.
+      - path: _test\.go
+        linters:
+          - gosec
+          - errcheck
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

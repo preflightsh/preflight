@@ -165,9 +165,15 @@ func SafeTLSDial(network, addr string, cfg *tls.Config, timeout time.Duration) (
 			return nil, fmt.Errorf("%w: %s", ErrPrivateAddress, ip.IP)
 		}
 	}
-	clonedCfg := &tls.Config{}
+	// Start with TLS 1.2 as the floor. Modern Go already defaults here,
+	// but being explicit lets the linter prove it and shields us from a
+	// future caller passing a Config that downgrades.
+	clonedCfg := &tls.Config{MinVersion: tls.VersionTLS12}
 	if cfg != nil {
 		clonedCfg = cfg.Clone()
+		if clonedCfg.MinVersion == 0 {
+			clonedCfg.MinVersion = tls.VersionTLS12
+		}
 	}
 	if clonedCfg.ServerName == "" {
 		clonedCfg.ServerName = host

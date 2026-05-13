@@ -91,11 +91,11 @@ func (c LangAttributeCheck) Run(ctx Context) (CheckResult, error) {
 	}
 
 	return CheckResult{
-		ID:       c.ID(),
-		Title:    c.Title(),
-		Severity: SeverityWarn,
-		Passed:   false,
-		Message:  "No lang attribute on <html> tag",
+		ID:          c.ID(),
+		Title:       c.Title(),
+		Severity:    SeverityWarn,
+		Passed:      false,
+		Message:     "No lang attribute on <html> tag",
 		Suggestions: getLangSuggestions(ctx.Config.Stack),
 	}, nil
 }

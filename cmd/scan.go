@@ -1,11 +1,14 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/preflightsh/preflight/internal/checks"
@@ -98,10 +101,18 @@ func runScan(cmd *cobra.Command, args []string) error {
 		spinner = &output.Spinner{} // no-op
 	}
 
+	// Scan-wide cancellation context. SIGINT (Ctrl-C) or SIGTERM cancels
+	// the context, which propagates to every in-flight HTTP request via
+	// http.NewRequestWithContext and lets checks return promptly instead
+	// of leaving the process hung on a long timeout.
+	scanCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+
 	// Create check context. Pre-fetch the homepage once so checks that
 	// need to scan rendered HTML (OG/Twitter and favicon detection for
 	// CMS-driven sites) can share a single request.
 	ctx := checks.Context{
+		Ctx:     scanCtx,
 		RootDir: projectDir,
 		Config:  cfg,
 		Client:  httpClient,
@@ -121,7 +132,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				ctx.PageHTMLStaging = checks.FetchPageHTML(httpClient, cfg.URLs.Staging)
+				ctx.PageHTMLStaging = checks.FetchPageHTML(scanCtx, httpClient, cfg.URLs.Staging)
 			}()
 		}
 		if cfg.URLs.Production != "" {
@@ -132,7 +143,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 				if checks.IsLocalURL(cfg.URLs.Production) {
 					prodClient = httpClient
 				}
-				ctx.PageHTMLProduction = checks.FetchPageHTML(prodClient, cfg.URLs.Production)
+				ctx.PageHTMLProduction = checks.FetchPageHTML(scanCtx, prodClient, cfg.URLs.Production)
 			}()
 		}
 		wg.Wait()
@@ -166,6 +177,13 @@ func runScan(cmd *cobra.Command, args []string) error {
 	// Run all checks
 	var results []checks.CheckResult
 	for i, check := range enabledChecks {
+		// Honor Ctrl-C / SIGTERM between checks so a long scan can be
+		// stopped cleanly instead of being killed mid-request.
+		if scanCtx.Err() != nil {
+			spinner.Stop()
+			fmt.Fprintln(os.Stderr, "\nScan cancelled.")
+			return &ExitError{Code: 130}
+		}
 		spinner.Update(fmt.Sprintf("Running %s (%d/%d)", check.Title(), i+1, len(enabledChecks)))
 		result, err := check.Run(ctx)
 		if err != nil {
@@ -566,10 +584,10 @@ func canAutoDetectLayout(rootDir, stack string) bool {
 			"src/app/layout.tsx", "src/app/layout.js", "src/app/layout.jsx",
 			"pages/_app.tsx", "pages/_app.js", "pages/_document.tsx", "pages/_document.js",
 		},
-		"react": {"index.html", "public/index.html", "src/index.html"},
-		"vite":  {"index.html", "src/index.html"},
-		"vue":   {"index.html", "public/index.html", "src/App.vue"},
-		"svelte": {"src/app.html", "index.html"},
+		"react":   {"index.html", "public/index.html", "src/index.html"},
+		"vite":    {"index.html", "src/index.html"},
+		"vue":     {"index.html", "public/index.html", "src/App.vue"},
+		"svelte":  {"src/app.html", "index.html"},
 		"angular": {"src/index.html"},
 		"rails": {
 			"app/views/layouts/application.html.erb",

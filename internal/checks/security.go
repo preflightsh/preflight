@@ -107,7 +107,7 @@ func (c SecurityHeadersCheck) Run(ctx Context) (CheckResult, error) {
 
 // checkURL checks security headers for a single URL and returns missing headers
 func (c SecurityHeadersCheck) checkURL(ctx Context, url string, isProd bool) ([]string, error) {
-	resp, actualURL, err := tryURL(ctx.Client, url)
+	resp, actualURL, err := tryURL(ctx.reqContext(), ctx.Client, url)
 	if err != nil {
 		return nil, fmt.Errorf("fetch %s: %w", url, err)
 	}

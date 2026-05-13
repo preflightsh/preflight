@@ -31,7 +31,7 @@ func probeStaticFileOverHTTP(ctx Context, path string) (string, bool) {
 		return "", false
 	}
 	baseURL = strings.TrimSuffix(baseURL, "/")
-	resp, actualURL, err := tryURL(ctx.Client, baseURL+path)
+	resp, actualURL, err := tryURL(ctx.reqContext(), ctx.Client, baseURL+path)
 	if err != nil {
 		return "", false
 	}
@@ -63,15 +63,15 @@ func (c RobotsTxtCheck) Title() string {
 func (c RobotsTxtCheck) Run(ctx Context) (CheckResult, error) {
 	// Common web root directories across frameworks
 	webRoots := []string{
-		"public",  // Laravel, Rails, many Node.js
-		"static",  // Hugo, some SSGs
-		"web",     // Craft CMS, Symfony
-		"www",     // Some PHP apps
-		"dist",    // Built static sites
-		"build",   // Build outputs
-		"_site",   // Jekyll
-		"out",     // Next.js static export
-		"",        // Root directory
+		"public", // Laravel, Rails, many Node.js
+		"static", // Hugo, some SSGs
+		"web",    // Craft CMS, Symfony
+		"www",    // Some PHP apps
+		"dist",   // Built static sites
+		"build",  // Build outputs
+		"_site",  // Jekyll
+		"out",    // Next.js static export
+		"",       // Root directory
 	}
 
 	for _, root := range webRoots {
@@ -175,7 +175,7 @@ func (c RobotsTxtCheck) Run(ctx Context) (CheckResult, error) {
 		if _, err := os.Stat(dirPath); err != nil {
 			continue
 		}
-		filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		_ = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 			if err != nil || robotsFound {
 				return nil
 			}
@@ -252,15 +252,15 @@ func (c SitemapCheck) Title() string {
 func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 	// Common web root directories across frameworks
 	webRoots := []string{
-		"public",  // Laravel, Rails, many Node.js
-		"static",  // Hugo, some SSGs
-		"web",     // Craft CMS, Symfony
-		"www",     // Some PHP apps
-		"dist",    // Built static sites
-		"build",   // Build outputs
-		"_site",   // Jekyll
-		"out",     // Next.js static export
-		"",        // Root directory
+		"public", // Laravel, Rails, many Node.js
+		"static", // Hugo, some SSGs
+		"web",    // Craft CMS, Symfony
+		"www",    // Some PHP apps
+		"dist",   // Built static sites
+		"build",  // Build outputs
+		"_site",  // Jekyll
+		"out",    // Next.js static export
+		"",       // Root directory
 	}
 
 	for _, root := range webRoots {
@@ -367,7 +367,7 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 		if _, err := os.Stat(dirPath); err != nil {
 			continue
 		}
-		filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		_ = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 			if err != nil || sitemapFound {
 				return nil
 			}
@@ -561,9 +561,9 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 
 	// WordPress: Check for SEO plugins that generate sitemaps
 	wpPluginDirs := []string{
-		"wp-content/plugins/wordpress-seo",        // Yoast SEO
-		"wp-content/plugins/all-in-one-seo-pack",  // All in One SEO
-		"wp-content/plugins/seo-by-rank-math",     // Rank Math
+		"wp-content/plugins/wordpress-seo",            // Yoast SEO
+		"wp-content/plugins/all-in-one-seo-pack",      // All in One SEO
+		"wp-content/plugins/seo-by-rank-math",         // Rank Math
 		"wp-content/plugins/google-sitemap-generator", // Google XML Sitemaps
 	}
 	for _, dir := range wpPluginDirs {
@@ -793,15 +793,15 @@ func (c LLMsTxtCheck) Title() string {
 func (c LLMsTxtCheck) Run(ctx Context) (CheckResult, error) {
 	// Common web root directories across frameworks
 	webRoots := []string{
-		"public",  // Laravel, Rails, many Node.js
-		"static",  // Hugo, some SSGs
-		"web",     // Craft CMS, Symfony
-		"www",     // Some PHP apps
-		"dist",    // Built static sites
-		"build",   // Build outputs
-		"_site",   // Jekyll
-		"out",     // Next.js static export
-		"",        // Root directory
+		"public", // Laravel, Rails, many Node.js
+		"static", // Hugo, some SSGs
+		"web",    // Craft CMS, Symfony
+		"www",    // Some PHP apps
+		"dist",   // Built static sites
+		"build",  // Build outputs
+		"_site",  // Jekyll
+		"out",    // Next.js static export
+		"",       // Root directory
 	}
 
 	// Check both root and .well-known locations
@@ -941,7 +941,7 @@ func (c LLMsTxtCheck) Run(ctx Context) (CheckResult, error) {
 		if _, err := os.Stat(dirPath); err != nil {
 			continue
 		}
-		filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		_ = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 			if err != nil || llmsFound {
 				return nil
 			}
@@ -1018,15 +1018,15 @@ func (c AdsTxtCheck) Run(ctx Context) (CheckResult, error) {
 
 	// Common web root directories across frameworks
 	webRoots := []string{
-		"public",  // Laravel, Rails, many Node.js
-		"static",  // Hugo, some SSGs
-		"web",     // Craft CMS, Symfony
-		"www",     // Some PHP apps
-		"dist",    // Built static sites
-		"build",   // Build outputs
-		"_site",   // Jekyll
-		"out",     // Next.js static export
-		"",        // Root directory
+		"public", // Laravel, Rails, many Node.js
+		"static", // Hugo, some SSGs
+		"web",    // Craft CMS, Symfony
+		"www",    // Some PHP apps
+		"dist",   // Built static sites
+		"build",  // Build outputs
+		"_site",  // Jekyll
+		"out",    // Next.js static export
+		"",       // Root directory
 	}
 
 	for _, root := range webRoots {
@@ -1092,15 +1092,15 @@ func (c IndexNowCheck) Run(ctx Context) (CheckResult, error) {
 
 	// Common web root directories across frameworks
 	webRoots := []string{
-		"public",  // Laravel, Rails, many Node.js
-		"static",  // Hugo, some SSGs
-		"web",     // Craft CMS, Symfony
-		"www",     // Some PHP apps
-		"dist",    // Built static sites
-		"build",   // Build outputs
-		"_site",   // Jekyll
-		"out",     // Next.js static export
-		"",        // Root directory
+		"public", // Laravel, Rails, many Node.js
+		"static", // Hugo, some SSGs
+		"web",    // Craft CMS, Symfony
+		"www",    // Some PHP apps
+		"dist",   // Built static sites
+		"build",  // Build outputs
+		"_site",  // Jekyll
+		"out",    // Next.js static export
+		"",       // Root directory
 	}
 
 	// If we have a configured key, check for that specific file first
@@ -1212,8 +1212,8 @@ func (c IndexNowCheck) Run(ctx Context) (CheckResult, error) {
 
 	// Check for IndexNow references in controller files (e.g., Rails SitemapsController serving the key)
 	controllerDirs := []string{
-		"app/controllers",        // Rails
-		"app/Http/Controllers",   // Laravel
+		"app/controllers",      // Rails
+		"app/Http/Controllers", // Laravel
 	}
 	for _, dir := range controllerDirs {
 		dirPath := filepath.Join(ctx.RootDir, dir)

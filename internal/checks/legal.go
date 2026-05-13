@@ -1,12 +1,28 @@
 package checks
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+// getWithContext is a context-aware GET that, unlike doGet, does not set
+// a User-Agent. Used by legal-page probing where we historically called
+// http.Client.Get directly so as not to identify Preflight to the
+// scanned host.
+func getWithContext(ctx context.Context, client *http.Client, url string) (*http.Response, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	return client.Do(req)
+}
 
 type LegalPagesCheck struct{}
 
@@ -51,7 +67,7 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 			if hasPrivacy {
 				break
 			}
-			resp, err := client.Get(baseURL + path)
+			resp, err := getWithContext(ctx.reqContext(), client, baseURL+path)
 			if err == nil {
 				resp.Body.Close()
 				if resp.StatusCode >= 200 && resp.StatusCode < 300 {
@@ -78,7 +94,7 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 			if hasTerms {
 				break
 			}
-			resp, err := client.Get(baseURL + path)
+			resp, err := getWithContext(ctx.reqContext(), client, baseURL+path)
 			if err == nil {
 				resp.Body.Close()
 				if resp.StatusCode >= 200 && resp.StatusCode < 300 {
@@ -225,7 +241,7 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 			if _, err := os.Stat(dirPath); err != nil {
 				continue
 			}
-			filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+			_ = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 				if err != nil || (hasPrivacy && hasTerms) {
 					return nil
 				}

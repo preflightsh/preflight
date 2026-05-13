@@ -2,6 +2,7 @@ package checks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -129,7 +130,8 @@ func dnsLookupTXT(name string) ([]string, error) {
 	}
 	// Domain or record does not exist. Return nil so callers can't
 	// accidentally consume a partial slice alongside the non-nil error.
-	if dnsErr, ok := err.(*net.DNSError); ok && dnsErr.IsNotFound {
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
 		return nil, err
 	}
 
@@ -150,7 +152,8 @@ func dnsLookupTXT(name string) ([]string, error) {
 func checkSPF(domain string) (bool, string, error) {
 	records, err := dnsLookupTXT(domain)
 	if err != nil {
-		if dnsErr, ok := err.(*net.DNSError); ok && dnsErr.IsNotFound {
+		var dnsErr *net.DNSError
+		if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
 			return false, "", nil
 		}
 		return false, "", err
@@ -167,7 +170,8 @@ func checkSPF(domain string) (bool, string, error) {
 func checkDMARC(domain string) (bool, string, error) {
 	records, err := dnsLookupTXT("_dmarc." + domain)
 	if err != nil {
-		if dnsErr, ok := err.(*net.DNSError); ok && dnsErr.IsNotFound {
+		var dnsErr *net.DNSError
+		if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
 			return false, "", nil
 		}
 		return false, "", err
