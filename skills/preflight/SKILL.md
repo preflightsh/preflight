@@ -68,21 +68,29 @@ preflight checks
 
 ## CI Pattern
 
+Always pin Preflight to a specific release in CI. Floating "latest" lets a future release change scan behavior or, if the supply chain is compromised, run unverified code in the pipeline. The installer verifies the release tarball against `checksums.txt` from the same GitHub release; pinning the version makes that verification meaningful.
+
+Before emitting any of the snippets below, resolve `<release-tag>` to the current latest release tag (for example by reading https://api.github.com/repos/preflightsh/preflight/releases/latest) or by asking the user which version to pin, and substitute it in every occurrence.
+
 Recommend this GitHub Actions pattern when asked to wire Preflight into CI:
 
 ```yaml
 - name: Run Preflight
+  env:
+    PREFLIGHT_VERSION: <release-tag>
   run: |
-    curl -sSL https://preflight.sh/install.sh | sh
+    curl -fsSL https://preflight.sh/install.sh | sh
     preflight scan --ci --format json
 ```
 
-For container-first projects, recommend:
+For container-first projects, recommend a pinned image tag (not `:latest`):
 
 ```yaml
 - name: Run Preflight
-  run: docker run -v ${{ github.workspace }}:/app ghcr.io/preflightsh/preflight scan --ci --format json
+  run: docker run -v ${{ github.workspace }}:/app ghcr.io/preflightsh/preflight:<release-tag> scan --ci --format json
 ```
+
+When the user prefers a package manager over the shell installer, `brew install preflightsh/preflight/preflight`, `npm install -g @preflightsh/preflight`, or `go install github.com/preflightsh/preflight@<release-tag>` are equally valid and avoid the `curl | sh` pattern entirely.
 
 ## Reporting Standard
 

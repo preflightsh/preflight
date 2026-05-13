@@ -7,6 +7,8 @@ set -e
 REPO="preflightsh/preflight"
 INSTALL_DIR="/usr/local/bin"
 BINARY_NAME="preflight"
+# Optional: pin a specific release by setting PREFLIGHT_VERSION (e.g. v0.15.1).
+PREFLIGHT_VERSION="${PREFLIGHT_VERSION:-}"
 
 # Colors
 RED='\033[0;31m'
@@ -60,12 +62,16 @@ install() {
 
     info "Detected OS: ${OS}, Arch: ${ARCH}"
 
-    VERSION=$(get_latest_version)
-    if [ -z "$VERSION" ]; then
-        error "Could not determine latest version"
+    if [ -n "$PREFLIGHT_VERSION" ]; then
+        VERSION="$PREFLIGHT_VERSION"
+        info "Using pinned version: ${VERSION}"
+    else
+        VERSION=$(get_latest_version)
+        if [ -z "$VERSION" ]; then
+            error "Could not determine latest version"
+        fi
+        info "Latest version: ${VERSION}"
     fi
-
-    info "Latest version: ${VERSION}"
 
     # Build download URL
     FILENAME="preflight_${VERSION#v}_${OS}_${ARCH}.tar.gz"
@@ -81,32 +87,29 @@ install() {
     TMP_DIR=$(mktemp -d)
     trap 'rm -rf "$TMP_DIR"' EXIT
 
-    # Download binary and checksums
+    # Download binary and checksums (checksums are mandatory).
     curl -fsSL "${DOWNLOAD_URL}" -o "${TMP_DIR}/${FILENAME}"
     CHECKSUMS_URL="https://github.com/${REPO}/releases/download/${VERSION}/checksums.txt"
-    curl -fsSL "${CHECKSUMS_URL}" -o "${TMP_DIR}/checksums.txt" 2>/dev/null || true
+    curl -fsSL "${CHECKSUMS_URL}" -o "${TMP_DIR}/checksums.txt" \
+        || error "Could not download checksums file from ${CHECKSUMS_URL}"
 
-    # Verify checksum if checksums file was downloaded
-    if [ -f "${TMP_DIR}/checksums.txt" ]; then
-        cd "${TMP_DIR}"
-        expected=$(grep "${FILENAME}" checksums.txt | awk '{print $1}')
-        if [ -n "$expected" ]; then
-            if command -v sha256sum >/dev/null 2>&1; then
-                actual=$(sha256sum "${FILENAME}" | awk '{print $1}')
-            elif command -v shasum >/dev/null 2>&1; then
-                actual=$(shasum -a 256 "${FILENAME}" | awk '{print $1}')
-            else
-                warn "Could not verify checksum (sha256sum/shasum not found)"
-                actual="$expected"
-            fi
-            if [ "$actual" != "$expected" ]; then
-                error "Checksum verification failed! Expected: ${expected}, Got: ${actual}"
-            fi
-            info "Checksum verified"
-        fi
-    else
-        warn "Could not download checksums file, skipping verification"
+    # Verify checksum (hard fail if anything is missing).
+    cd "${TMP_DIR}"
+    expected=$(grep "${FILENAME}" checksums.txt | awk '{print $1}')
+    if [ -z "$expected" ]; then
+        error "No checksum entry for ${FILENAME} in checksums.txt"
     fi
+    if command -v sha256sum >/dev/null 2>&1; then
+        actual=$(sha256sum "${FILENAME}" | awk '{print $1}')
+    elif command -v shasum >/dev/null 2>&1; then
+        actual=$(shasum -a 256 "${FILENAME}" | awk '{print $1}')
+    else
+        error "sha256sum or shasum is required to verify the download"
+    fi
+    if [ "$actual" != "$expected" ]; then
+        error "Checksum verification failed! Expected: ${expected}, Got: ${actual}"
+    fi
+    info "Checksum verified"
 
     # Extract
     cd "${TMP_DIR}"
