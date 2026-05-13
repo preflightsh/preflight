@@ -19,6 +19,12 @@ func TestIsLocalURL(t *testing.T) {
 		{"https://myapp.local", true, "mDNS suffix"},
 		{"https://x.y.test", true, ".test suffix"},
 		{"https://example.ddev.site", true, "ddev"},
+		{"https://yow.lndo.site", true, "lando"},
+		{"https://app.localhost", true, ".localhost TLD"},
+
+		// SSRF-bypass attempts via the new local TLDs — must NOT match.
+		{"https://attacker.com/?h=yow.lndo.site", false, ".lndo.site in query"},
+		{"https://example.lndo.site.evil.com", false, "'.lndo.site' is not the suffix"},
 
 		// SSRF-bypass attempts via substring — must NOT match.
 		{"https://localhost.attacker.com/", false, "substring 'localhost' in hostname"},

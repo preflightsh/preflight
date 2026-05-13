@@ -1,6 +1,7 @@
 package checks
 
 import (
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/preflightsh/preflight/internal/config"
+	"github.com/preflightsh/preflight/internal/netutil"
 )
 
 func relPath(base, target string) string {
@@ -45,6 +47,13 @@ type Context struct {
 	Config  *config.PreflightConfig
 	Client  *http.Client
 	Verbose bool
+	// PageHTML is the rendered HTML of the configured site's homepage,
+	// fetched once at scan start. Empty when no URL is configured, the
+	// site is unreachable, or fetching is skipped. Checks that look for
+	// dynamically-generated meta tags (Craft+SEOmatic, WordPress+Yoast,
+	// etc.) can use this as a fallback when static template scanning
+	// turns up nothing.
+	PageHTML string
 }
 
 type Check interface {
@@ -194,12 +203,43 @@ func IsLocalURL(rawURL string) bool {
 	if ip := net.ParseIP(host); ip != nil {
 		return ip.IsLoopback()
 	}
-	for _, tld := range []string{".local", ".test", ".ddev.site"} {
+	for _, tld := range []string{".local", ".test", ".localhost", ".ddev.site", ".lndo.site"} {
 		if strings.HasSuffix(host, tld) {
 			return true
 		}
 	}
 	return false
+}
+
+// FetchPageHTML fetches the homepage of the configured site (prefers
+// staging, falls back to production) and returns its body as a string.
+// Used to populate Context.PageHTML so multiple checks can scan the
+// rendered HTML without each making their own request. Body is capped at
+// netutil.MaxResponseBody. Returns empty string on any error.
+func FetchPageHTML(client *http.Client, cfg *config.PreflightConfig) string {
+	var baseURL string
+	if cfg.URLs.Staging != "" {
+		baseURL = cfg.URLs.Staging
+	} else if cfg.URLs.Production != "" {
+		baseURL = cfg.URLs.Production
+	}
+	if baseURL == "" {
+		return ""
+	}
+	baseURL = strings.TrimSuffix(baseURL, "/")
+	resp, _, err := tryURL(client, baseURL+"/")
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		return ""
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, netutil.MaxResponseBody))
+	if err != nil {
+		return ""
+	}
+	return string(body)
 }
 
 // doGet performs an HTTP GET with a User-Agent header

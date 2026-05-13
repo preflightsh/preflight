@@ -44,8 +44,10 @@ func (c WWWRedirectCheck) Run(ctx Context) (CheckResult, error) {
 
 	host := parsedURL.Hostname()
 
-	// Skip localhost and IP addresses
-	if host == "localhost" || host == "127.0.0.1" || strings.HasSuffix(host, ".local") || strings.HasSuffix(host, ".test") {
+	// Skip local dev URLs. Reuse IsLocalURL so the list stays in sync
+	// with the SSRF-bypass allowlist (localhost, *.local, *.test,
+	// *.ddev.site, *.lndo.site, etc.).
+	if IsLocalURL(ctx.Config.URLs.Production) {
 		return CheckResult{
 			ID:       c.ID(),
 			Title:    c.Title(),

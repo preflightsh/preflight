@@ -7,6 +7,14 @@ import (
 	"strings"
 )
 
+// Regexes for detecting icon and manifest links in rendered HTML. Loose
+// enough to accept either attribute order and either quote style.
+var (
+	reFaviconLink    = regexp.MustCompile(`(?i)<link[^>]+rel\s*=\s*["']?(?:shortcut\s+)?icon["']?`)
+	reAppleTouchLink = regexp.MustCompile(`(?i)<link[^>]+rel\s*=\s*["']?apple-touch-icon["']?`)
+	reManifestLink   = regexp.MustCompile(`(?i)<link[^>]+rel\s*=\s*["']?manifest["']?`)
+)
+
 type FaviconCheck struct{}
 
 func (c FaviconCheck) ID() string {
@@ -56,6 +64,10 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 				faviconPaths = append(faviconPaths, root+"/assets/images/"+file)
 				faviconPaths = append(faviconPaths, root+"/images/"+file)
 				faviconPaths = append(faviconPaths, root+"/img/"+file)
+				// realfavicongenerator and similar tools dump everything
+				// into a /favicons/ subdir.
+				faviconPaths = append(faviconPaths, root+"/favicons/"+file)
+				faviconPaths = append(faviconPaths, root+"/favicon/"+file)
 			}
 		}
 	}
@@ -146,6 +158,8 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 				appleTouchPaths = append(appleTouchPaths, root+"/assets/images/"+file)
 				appleTouchPaths = append(appleTouchPaths, root+"/images/"+file)
 				appleTouchPaths = append(appleTouchPaths, root+"/img/"+file)
+				appleTouchPaths = append(appleTouchPaths, root+"/favicons/"+file)
+				appleTouchPaths = append(appleTouchPaths, root+"/favicon/"+file)
 			}
 		}
 	}
@@ -289,6 +303,10 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 				root+"/site.webmanifest",
 				root+"/manifest.ts",
 				root+"/manifest.js",
+				root+"/favicons/site.webmanifest",
+				root+"/favicons/manifest.json",
+				root+"/favicon/site.webmanifest",
+				root+"/favicon/manifest.json",
 			)
 		}
 	}
@@ -369,6 +387,35 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 
 	if !hasManifest {
 		missing = append(missing, "web manifest")
+	}
+
+	// Final fallback: scan rendered homepage HTML for <link rel="icon">,
+	// apple-touch-icon, and manifest references. Catches CMS-driven sites
+	// (Craft+SEOmatic, WordPress, etc.) where icons live in a partial we
+	// haven't catalogued, or are emitted by a plugin at runtime.
+	if ctx.PageHTML != "" && len(missing) > 0 {
+		if !hasFavicon && reFaviconLink.MatchString(ctx.PageHTML) {
+			hasFavicon = true
+			found = append(found, "favicon (in rendered HTML)")
+		}
+		if !hasAppleIcon && reAppleTouchLink.MatchString(ctx.PageHTML) {
+			hasAppleIcon = true
+			found = append(found, "apple-touch-icon (in rendered HTML)")
+		}
+		if !hasManifest && reManifestLink.MatchString(ctx.PageHTML) {
+			hasManifest = true
+			found = append(found, "manifest (in rendered HTML)")
+		}
+		missing = missing[:0]
+		if !hasFavicon {
+			missing = append(missing, "favicon")
+		}
+		if !hasAppleIcon {
+			missing = append(missing, "apple-touch-icon")
+		}
+		if !hasManifest {
+			missing = append(missing, "web manifest")
+		}
 	}
 
 	// Determine result

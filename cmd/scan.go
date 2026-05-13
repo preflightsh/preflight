@@ -84,12 +84,17 @@ func runScan(cmd *cobra.Command, args []string) error {
 		httpClient = netutil.SafeHTTPClient(2 * time.Second)
 	}
 
-	// Create check context
+	// Create check context. Pre-fetch the homepage once so checks that
+	// need to scan rendered HTML (OG/Twitter and favicon detection for
+	// CMS-driven sites) can share a single request.
 	ctx := checks.Context{
 		RootDir: projectDir,
 		Config:  cfg,
 		Client:  httpClient,
 		Verbose: verboseFlag,
+	}
+	if cfg.URLs.Staging != "" || cfg.URLs.Production != "" {
+		ctx.PageHTML = checks.FetchPageHTML(httpClient, cfg)
 	}
 
 	// Build list of enabled checks

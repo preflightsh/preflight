@@ -6,9 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
-
-	"github.com/preflightsh/preflight/internal/netutil"
 )
 
 type LegalPagesCheck struct{}
@@ -33,14 +30,15 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 	}
 
 	if baseURL != "" {
-		// We need different redirect behavior than ctx.Client (treat 3xx
-		// as "page exists" rather than following). Base it on
-		// SafeHTTPClient so the underlying dialer still refuses private
-		// IPs from a hostile baseURL.
-		client := netutil.SafeHTTPClient(2 * time.Second)
-		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		// Reuse ctx.Client (which already handles the local-vs-safe choice
+		// based on the configured URLs) but override CheckRedirect so 3xx
+		// is treated as "page exists" rather than followed. Copy the
+		// client by value so we don't mutate the shared one.
+		clientCopy := *ctx.Client
+		clientCopy.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		}
+		client := &clientCopy
 
 		privacyURLs := []string{
 			"/privacy", "/privacy-policy", "/privacypolicy",

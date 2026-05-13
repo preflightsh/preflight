@@ -39,89 +39,97 @@ func (c HealthCheck) Run(ctx Context) (CheckResult, error) {
 
 	baseURLs := []string{baseURL}
 
-	// If a specific path is configured, use it
-	if cfg != nil && cfg.Path != "" {
-		return c.checkPath(ctx, baseURLs, cfg.Path, true, false)
+	// Determine which health paths to probe. If the user explicitly enabled
+	// the check with a specific path, only try that one. Otherwise try the
+	// common defaults.
+	var pathsToTry []string
+	strict := false
+	if cfg != nil && cfg.Enabled && cfg.Path != "" {
+		pathsToTry = []string{cfg.Path}
+		strict = true
+	} else {
+		pathsToTry = []string{"/health", "/healthz", "/api/health", "/_health", "/status"}
 	}
 
-	// Try common health endpoint paths first
-	commonPaths := []string{"/health", "/healthz", "/api/health", "/_health", "/status"}
-	for _, path := range commonPaths {
-		result, _ := c.checkPath(ctx, baseURLs, path, false, false)
-		if result.Passed {
+	for _, path := range pathsToTry {
+		if result, ok := c.probePath(ctx, baseURLs, path); ok {
 			return result, nil
 		}
 	}
 
-	// Fallback: check if the root URL is reachable (accept 2xx and 3xx)
-	return c.checkPath(ctx, baseURLs, "/", false, true)
+	// Fallback: the configured/expected health path didn't return 200, so
+	// just check whether the site itself is up. Many sites don't expose a
+	// health endpoint at all, and a reachable homepage is good enough to
+	// confirm the site is live.
+	if result, ok := c.probeRoot(ctx, baseURLs); ok {
+		if strict {
+			result.Message = "Site reachable, but no health endpoint at " +
+				strings.TrimSuffix(baseURL, "/") + cfg.Path
+			result.Suggestions = []string{
+				"Check that the health path is correct in preflight.yml",
+				"Or remove the healthEndpoint block to rely on root URL reachability",
+			}
+		}
+		return result, nil
+	}
+
+	// Site itself isn't reachable.
+	return CheckResult{
+		ID:       c.ID(),
+		Title:    c.Title(),
+		Severity: SeverityWarn,
+		Passed:   false,
+		Message:  fmt.Sprintf("Site unreachable: %s", strings.TrimSuffix(baseURL, "/")),
+		Suggestions: []string{
+			"Ensure your site is accessible",
+		},
+	}, nil
 }
 
-// checkPath tries a specific path on all base URLs
-// allowAnySuccess: if true, accept 2xx and 3xx status codes (for root URL check)
-func (c HealthCheck) checkPath(ctx Context, baseURLs []string, path string, configured bool, allowAnySuccess bool) (CheckResult, error) {
-	var lastErr error
+// probePath tries a path and returns (result, true) on a 200 response.
+// Returns (_, false) on any error or non-200 so the caller can keep trying.
+func (c HealthCheck) probePath(ctx Context, baseURLs []string, path string) (CheckResult, bool) {
 	for _, baseURL := range baseURLs {
-		// Handle trailing slash in base URL to avoid double slashes
 		baseURL = strings.TrimSuffix(baseURL, "/")
-		url := baseURL + path
-		resp, actualURL, err := tryURL(ctx.Client, url)
+		resp, actualURL, err := tryURL(ctx.Client, baseURL+path)
 		if err != nil {
-			lastErr = err
 			continue
 		}
-
-		// For root URL checks, accept 2xx and 3xx status codes
-		isSuccess := resp.StatusCode == http.StatusOK
-		if allowAnySuccess {
-			isSuccess = resp.StatusCode >= 200 && resp.StatusCode < 400
-		}
-
-		if isSuccess {
-			resp.Body.Close()
-			msg := fmt.Sprintf("Site reachable at %s (%d)", actualURL, resp.StatusCode)
-			if path != "/" {
-				msg = fmt.Sprintf("Health endpoint at %s returned %d", actualURL, resp.StatusCode)
-			}
-			var details []string
-			if ctx.Verbose && !configured && path != "/" {
-				details = append(details, "Auto-detected health endpoint")
-			}
+		status := resp.StatusCode
+		resp.Body.Close()
+		if status == http.StatusOK {
 			return CheckResult{
 				ID:       c.ID(),
 				Title:    c.Title(),
 				Severity: SeverityInfo,
 				Passed:   true,
-				Message:  msg,
-				Details:  details,
-			}, nil
+				Message:  fmt.Sprintf("Health endpoint at %s returned %d", actualURL, status),
+			}, true
 		}
+	}
+	return CheckResult{}, false
+}
+
+// probeRoot returns (result, true) if the root URL responds with any 2xx or
+// 3xx, treating that as a sign the site is up.
+func (c HealthCheck) probeRoot(ctx Context, baseURLs []string) (CheckResult, bool) {
+	for _, baseURL := range baseURLs {
+		baseURL = strings.TrimSuffix(baseURL, "/")
+		resp, actualURL, err := tryURL(ctx.Client, baseURL+"/")
+		if err != nil {
+			continue
+		}
+		status := resp.StatusCode
 		resp.Body.Close()
-		lastErr = fmt.Errorf("returned status %d", resp.StatusCode)
-	}
-
-	// Only return failure for configured paths or root fallback
-	if configured || path == "/" {
-		suggestions := []string{
-			"Ensure your site is accessible",
+		if status >= 200 && status < 400 {
+			return CheckResult{
+				ID:       c.ID(),
+				Title:    c.Title(),
+				Severity: SeverityInfo,
+				Passed:   true,
+				Message:  fmt.Sprintf("Site reachable at %s (%d)", actualURL, status),
+			}, true
 		}
-		if configured {
-			suggestions = append(suggestions, "Check that the health path is correct in preflight.yml")
-		} else {
-			suggestions = append(suggestions, "Consider adding a /health endpoint for better monitoring")
-		}
-		return CheckResult{
-			ID:          c.ID(),
-			Title:       c.Title(),
-			Severity:    SeverityWarn,
-			Passed:      false,
-			Message:     fmt.Sprintf("Site unreachable: %v", lastErr),
-			Suggestions: suggestions,
-		}, nil
 	}
-
-	// Return non-passed for auto-detection probes (will continue to next path)
-	return CheckResult{
-		Passed: false,
-	}, nil
+	return CheckResult{}, false
 }

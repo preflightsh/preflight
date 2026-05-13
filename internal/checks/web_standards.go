@@ -2,11 +2,52 @@ package checks
 
 import (
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/preflightsh/preflight/internal/netutil"
 )
+
+// probeStaticFileOverHTTP probes baseURL+path against the configured
+// staging or production URL. Returns true if the response is 200 with
+// non-empty content. Used as a fallback for files commonly generated
+// dynamically by CMS plugins (robots.txt, sitemap.xml) so they aren't
+// reported missing just because they don't exist on disk.
+func probeStaticFileOverHTTP(ctx Context, path string) (string, bool) {
+	if ctx.Client == nil {
+		return "", false
+	}
+	var baseURL string
+	if ctx.Config.URLs.Staging != "" {
+		baseURL = ctx.Config.URLs.Staging
+	} else if ctx.Config.URLs.Production != "" {
+		baseURL = ctx.Config.URLs.Production
+	}
+	if baseURL == "" {
+		return "", false
+	}
+	baseURL = strings.TrimSuffix(baseURL, "/")
+	resp, actualURL, err := tryURL(ctx.Client, baseURL+path)
+	if err != nil {
+		return "", false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", false
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, netutil.MaxResponseBody))
+	if err != nil {
+		return "", false
+	}
+	if strings.TrimSpace(string(body)) == "" {
+		return "", false
+	}
+	return actualURL, true
+}
 
 // RobotsTxtCheck verifies robots.txt exists
 type RobotsTxtCheck struct{}
@@ -169,6 +210,18 @@ func (c RobotsTxtCheck) Run(ctx Context) (CheckResult, error) {
 			Severity: SeverityInfo,
 			Passed:   true,
 			Message:  "robots.txt generated via " + robotsFoundPath,
+		}, nil
+	}
+
+	// HTTP fallback: file isn't on disk but might be served dynamically
+	// (Craft+SEOmatic, WordPress, etc.).
+	if servedAt, ok := probeStaticFileOverHTTP(ctx, "/robots.txt"); ok {
+		return CheckResult{
+			ID:       c.ID(),
+			Title:    c.Title(),
+			Severity: SeverityInfo,
+			Passed:   true,
+			Message:  "robots.txt served at " + servedAt,
 		}, nil
 	}
 
@@ -697,6 +750,20 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 			Passed:   true,
 			Message:  "sitemap.xml generated via Drupal Simple Sitemap module",
 		}, nil
+	}
+
+	// HTTP fallback: try common sitemap paths in case it's served
+	// dynamically (Craft+SEOmatic, WordPress, etc.).
+	for _, path := range []string{"/sitemap.xml", "/sitemap_index.xml", "/sitemap.xml.gz"} {
+		if servedAt, ok := probeStaticFileOverHTTP(ctx, path); ok {
+			return CheckResult{
+				ID:       c.ID(),
+				Title:    c.Title(),
+				Severity: SeverityInfo,
+				Passed:   true,
+				Message:  "sitemap.xml served at " + servedAt,
+			}, nil
+		}
 	}
 
 	return CheckResult{
