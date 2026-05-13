@@ -149,11 +149,7 @@ func hasLangAttribute(content, stack string) bool {
 	// Next.js App Router - lang is set in RootLayout
 	// Check for lang prop or hardcoded lang
 	nextjsLang := regexp.MustCompile(`(?i)lang[:=]\s*["'][a-z]{2}`)
-	if nextjsLang.MatchString(content) {
-		return true
-	}
-
-	return false
+	return nextjsLang.MatchString(content)
 }
 
 func checkLangPartials(rootDir, stack string) bool {

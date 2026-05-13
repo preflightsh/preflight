@@ -149,11 +149,7 @@ func hasViewportMeta(content, stack string) bool {
 
 	// Vue Meta / useHead
 	vueMetaViewport := regexp.MustCompile(`(?i)name:\s*["']viewport["']`)
-	if vueMetaViewport.MatchString(content) {
-		return true
-	}
-
-	return false
+	return vueMetaViewport.MatchString(content)
 }
 
 // isNextJSAppRouter checks if the project uses Next.js App Router

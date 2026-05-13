@@ -44,11 +44,6 @@ func (e *ExitError) Error() string {
 	return fmt.Sprintf("exit code %d", e.Code)
 }
 
-func exitWithError(msg string) {
-	fmt.Fprintln(os.Stderr, msg)
-	os.Exit(2)
-}
-
 // getPreflightStateDir returns the path to the preflight state directory (~/.preflight)
 func getPreflightStateDir() string {
 	home, err := os.UserHomeDir()

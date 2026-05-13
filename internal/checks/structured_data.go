@@ -170,15 +170,7 @@ func hasStructuredData(content, stack string) bool {
 
 	// Generic Schema.org type detection
 	schemaType := regexp.MustCompile(`(?i)["']@type["']\s*:\s*["'](Organization|WebSite|Article|Product|LocalBusiness|Person|BreadcrumbList|FAQPage|HowTo|Event|Recipe|Review)["']`)
-	if schemaType.MatchString(content) {
-		return true
-	}
-
-	return false
-}
-
-func checkStructuredDataPartials(rootDir, stack string) bool {
-	return checkStructuredDataPartialsWithDetails(rootDir, stack) != ""
+	return schemaType.MatchString(content)
 }
 
 // checkStructuredDataPartialsWithDetails returns the path of the matched partial, or empty string if none

@@ -49,7 +49,6 @@ func (c PlausibleCheck) Run(ctx Context) (CheckResult, error) {
 	)
 
 	found := false
-	var checkedFiles []string
 
 	for _, file := range filesToCheck {
 		path := filepath.Join(ctx.RootDir, file)
@@ -57,8 +56,6 @@ func (c PlausibleCheck) Run(ctx Context) (CheckResult, error) {
 		if err != nil {
 			continue
 		}
-
-		checkedFiles = append(checkedFiles, file)
 
 		for _, pattern := range patterns {
 			if pattern.Match(content) {

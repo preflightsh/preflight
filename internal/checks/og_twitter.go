@@ -212,9 +212,7 @@ func (c OGTwitterCheck) Run(ctx Context) (CheckResult, error) {
 			// template as "good enough" and clear missing so dimension
 			// checks below run against the rendered values.
 			missing = nil
-			for _, name := range staticMissing {
-				found = append(found, name)
-			}
+			found = append(found, staticMissing...)
 		}
 	}
 
