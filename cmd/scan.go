@@ -22,6 +22,7 @@ var (
 	ciMode      bool
 	formatFlag  string
 	verboseFlag bool
+	publishFlag bool
 )
 
 var scanCmd = &cobra.Command{
@@ -38,6 +39,7 @@ func init() {
 	scanCmd.Flags().BoolVar(&ciMode, "ci", false, "Run in CI mode (no interactivity)")
 	scanCmd.Flags().StringVar(&formatFlag, "format", "human", "Output format: human or json")
 	scanCmd.Flags().BoolVarP(&verboseFlag, "verbose", "v", false, "Show detailed information about each check")
+	scanCmd.Flags().BoolVar(&publishFlag, "publish", false, "Publish results to your Preflight dashboard (requires 'preflight auth login')")
 }
 
 func runScan(cmd *cobra.Command, args []string) error {
@@ -209,6 +211,12 @@ func runScan(cmd *cobra.Command, args []string) error {
 	}
 
 	outputter.Output(cfg.ProjectName, results)
+
+	// Publish to the dashboard if requested. Best-effort: it never changes the
+	// scan's exit code and prints to stderr so JSON output stays clean.
+	if publishFlag {
+		_ = publishScanResults(cfg, projectDir, results)
+	}
 
 	// Show star message on first scan (only in human format, not JSON)
 	if formatFlag != "json" && isFirstRun("scan_done") {
