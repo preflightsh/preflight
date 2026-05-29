@@ -74,8 +74,11 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 					hasPrivacy = true
 					privacyPath = path + " (via HTTP)"
 				} else if resp.StatusCode >= 300 && resp.StatusCode < 400 {
-					// Only count redirect as "found" if it stays on the same domain
-					if isSameDomainRedirect(baseURL, resp.Header.Get("Location")) {
+					// Count a redirect as "found" only if it stays on the same
+					// domain AND doesn't just bounce to a login/auth page
+					// (auth-walled apps redirect unknown paths to /login).
+					loc := resp.Header.Get("Location")
+					if isSameDomainRedirect(baseURL, loc) && !isAuthRedirect(loc) {
 						hasPrivacy = true
 						privacyPath = path + " (via HTTP)"
 					}
@@ -101,7 +104,8 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 					hasTerms = true
 					termsPath = path + " (via HTTP)"
 				} else if resp.StatusCode >= 300 && resp.StatusCode < 400 {
-					if isSameDomainRedirect(baseURL, resp.Header.Get("Location")) {
+					loc := resp.Header.Get("Location")
+					if isSameDomainRedirect(baseURL, loc) && !isAuthRedirect(loc) {
 						hasTerms = true
 						termsPath = path + " (via HTTP)"
 					}
@@ -413,4 +417,23 @@ func isSameDomainRedirect(baseURL, location string) bool {
 		return false
 	}
 	return strings.EqualFold(baseU.Hostname(), locU.Hostname())
+}
+
+// isAuthRedirect reports whether a redirect Location points to a login or
+// authentication page. Apps that gate everything behind auth redirect unknown
+// paths to /login, which must not be miscounted as the requested page existing.
+func isAuthRedirect(location string) bool {
+	if location == "" {
+		return false
+	}
+	p := strings.ToLower(location)
+	if u, err := url.Parse(location); err == nil && u.Path != "" {
+		p = strings.ToLower(u.Path)
+	}
+	for _, marker := range []string{"login", "signin", "sign-in", "sign_in", "/auth", "authenticate", "session/new", "/account"} {
+		if strings.Contains(p, marker) {
+			return true
+		}
+	}
+	return false
 }

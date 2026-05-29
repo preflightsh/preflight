@@ -43,7 +43,19 @@ func probeStaticFileOverHTTP(ctx Context, path string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	if strings.TrimSpace(string(body)) == "" {
+	trimmed := strings.TrimSpace(string(body))
+	if trimmed == "" {
+		return "", false
+	}
+	// Reject HTML responses. robots.txt is plain text and sitemap.xml is XML,
+	// so an HTML body means we were served a page (commonly a login or SPA
+	// shell after the app redirected an unknown path to it) rather than the
+	// file itself — otherwise every auth-walled app reports these as present.
+	ct := strings.ToLower(resp.Header.Get("Content-Type"))
+	lower := strings.ToLower(trimmed)
+	if strings.Contains(ct, "text/html") ||
+		strings.HasPrefix(lower, "<!doctype html") ||
+		strings.HasPrefix(lower, "<html") {
 		return "", false
 	}
 	return actualURL, true

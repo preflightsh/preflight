@@ -49,8 +49,14 @@ func DetectStack(rootDir string) string {
 		return "craft"
 	}
 
-	// Check for Drupal
-	if fileExists(rootDir, "core/lib/Drupal.php") || (fileExists(rootDir, "sites/default") && fileExists(rootDir, "core")) {
+	// Check for Drupal. Composer-based installs (drupal/recommended-project)
+	// put core under a web/ (or docroot/) docroot, so check those too, plus the
+	// composer.json dependency which is the most reliable signal.
+	if fileExists(rootDir, "core/lib/Drupal.php") ||
+		fileExists(rootDir, "web/core/lib/Drupal.php") ||
+		fileExists(rootDir, "docroot/core/lib/Drupal.php") ||
+		fileContains(rootDir, "composer.json", "drupal/core") ||
+		(fileExists(rootDir, "sites/default") && fileExists(rootDir, "core")) {
 		return "drupal"
 	}
 
