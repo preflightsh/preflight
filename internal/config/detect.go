@@ -983,6 +983,8 @@ func detectAnalyticsScripts(rootDir string, services map[string]bool) {
 		"cpresources":  true, // Craft CMS control panel assets
 		"web":          true, // Common public web root (contains compiled assets)
 		"public":       true, // Common public web root
+		"wp-admin":     true, // WordPress core
+		"wp-includes":  true, // WordPress core
 	}
 
 	// Collect external script URLs to fetch
@@ -999,6 +1001,19 @@ func detectAnalyticsScripts(rootDir string, services map[string]bool) {
 		// Skip ignored directories
 		if d.IsDir() {
 			if skipDirs[d.Name()] {
+				return filepath.SkipDir
+			}
+			// Skip bundled third-party code (WordPress plugins and uploads).
+			// Bundled plugins reference many services they merely *support* but
+			// the site doesn't use (e.g. WP Mail SMTP lists SendGrid/Mailgun/
+			// Postmark; W3 Total Cache bundles the AWS SDK), which produces
+			// false positives. Real services still surface via env keys and the
+			// live site's external scripts. The active theme is kept (user code).
+			slashed := filepath.ToSlash(path)
+			if strings.Contains(slashed, "/wp-content/plugins") ||
+				strings.Contains(slashed, "/wp-content/uploads") ||
+				strings.HasSuffix(slashed, "wp-content/plugins") ||
+				strings.HasSuffix(slashed, "wp-content/uploads") {
 				return filepath.SkipDir
 			}
 			return nil
