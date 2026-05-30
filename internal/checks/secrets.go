@@ -2,10 +2,12 @@ package checks
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -132,6 +134,11 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 		".ini":  true,
 	}
 
+	// Resolve git status once. A secrets scanner's job is to catch
+	// secrets that version control will carry, so git — not the filename
+	// — is the authority on what's in scope when we're inside a repo.
+	git := loadGitStatus(ctx.RootDir)
+
 	var findings []secretFinding
 	maxFileSize := int64(1024 * 1024) // 1 MB
 	filesScanned := 0
@@ -182,17 +189,36 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 			return nil
 		}
 
-		// Skip example env files - they shouldn't have real values
+		// Skip example/sample files regardless of git status — they hold
+		// placeholders, not real values, and are committed on purpose.
 		if strings.Contains(baseName, ".example") || strings.Contains(baseName, ".sample") {
 			return nil
 		}
 
-		// Skip local env files - these are meant to have secrets and shouldn't be committed
-		if strings.HasSuffix(baseName, ".local") ||
-			baseName == ".env.local" ||
-			baseName == ".env.development.local" ||
-			baseName == ".env.test.local" ||
-			baseName == ".env.production.local" {
+		// Decide scope. Inside a git repo, git is authoritative: a file
+		// that's ignored AND untracked will never be committed, so it's
+		// allowed to hold real secrets. Everything else is in scope —
+		// including a tracked file that happens to be listed in
+		// .gitignore (git keeps tracking files added before the ignore
+		// rule), which is the dangerous case a plain .gitignore-text
+		// check would miss.
+		rel := filepath.ToSlash(relPath(ctx.RootDir, path))
+		state := ""
+		if git.inRepo {
+			tracked := git.tracked[rel]
+			if git.ignored[rel] && !tracked {
+				return nil
+			}
+			if tracked {
+				state = "tracked"
+			} else {
+				// Untracked and not ignored: `git add .` would commit it.
+				state = "committable"
+			}
+		} else if strings.HasSuffix(baseName, ".local") {
+			// Not a git repo: fall back to filename convention. The
+			// .env*.local family is meant to hold real secrets and is
+			// never committed.
 			return nil
 		}
 
@@ -200,6 +226,9 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 		fileFindings, scanErr := scanFileForSecrets(path, patterns)
 		if scanErr != nil {
 			filesErrored++
+		}
+		for i := range fileFindings {
+			fileFindings[i].gitState = state
 		}
 		findings = append(findings, fileFindings...)
 		filesScanned++
@@ -226,7 +255,10 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 	}
 
 	if len(findings) == 0 {
-		message := "No secrets detected in tracked files"
+		message := "No secrets detected in committable files"
+		if !git.inRepo {
+			message = "No secrets detected"
+		}
 		if filesErrored > 0 {
 			message = fmt.Sprintf("No secrets detected (%s)", scanSummary)
 		}
@@ -247,11 +279,18 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 
 	var displayMessages []string
 	for _, f := range displayFindings {
-		relPath, err := filepath.Rel(ctx.RootDir, f.file)
+		rp, err := filepath.Rel(ctx.RootDir, f.file)
 		if err != nil {
-			relPath = f.file
+			rp = f.file
 		}
-		displayMessages = append(displayMessages, fmt.Sprintf("%s:%d (%s)", relPath, f.line, f.secretType))
+		tag := ""
+		switch f.gitState {
+		case "tracked":
+			tag = " [tracked by git]"
+		case "committable":
+			tag = " [not gitignored]"
+		}
+		displayMessages = append(displayMessages, fmt.Sprintf("%s:%d (%s)%s", rp, f.line, f.secretType, tag))
 	}
 
 	suffix := ""
@@ -284,6 +323,61 @@ type secretFinding struct {
 	line        int
 	secretType  string
 	fingerprint string // "sha256:<hex>" of the matched secret value
+	gitState    string // "tracked", "committable", or "" (not a git repo)
+}
+
+// gitStatus captures which project-relative paths git is tracking and
+// which untracked paths it ignores. Paths use forward slashes.
+type gitStatus struct {
+	inRepo  bool
+	tracked map[string]bool
+	ignored map[string]bool
+}
+
+// loadGitStatus shells out to git once to learn the tracked and
+// ignored-untracked file sets for root. If root isn't a git work tree
+// (or git isn't installed), inRepo is false and callers fall back to
+// filename heuristics. Paths are reported relative to root because every
+// git invocation runs with -C root.
+func loadGitStatus(root string) gitStatus {
+	st := gitStatus{tracked: map[string]bool{}, ignored: map[string]bool{}}
+
+	out, err := runGit(root, "rev-parse", "--is-inside-work-tree")
+	if err != nil || strings.TrimSpace(out) != "true" {
+		return st
+	}
+	st.inRepo = true
+
+	if out, err := runGit(root, "ls-files", "-z"); err == nil {
+		for _, p := range strings.Split(out, "\x00") {
+			if p != "" {
+				st.tracked[filepath.ToSlash(p)] = true
+			}
+		}
+	}
+	// --others limits to untracked files; --ignored --exclude-standard
+	// restricts that to the ones the standard ignore rules exclude. A
+	// tracked-but-ignored file therefore never lands here, which is what
+	// keeps it in scope above.
+	if out, err := runGit(root, "ls-files", "--others", "--ignored", "--exclude-standard", "-z"); err == nil {
+		for _, p := range strings.Split(out, "\x00") {
+			if p != "" {
+				st.ignored[filepath.ToSlash(p)] = true
+			}
+		}
+	}
+	return st
+}
+
+// runGit runs `git -C root <args...>` and returns stdout. Stderr is
+// discarded; callers only care whether the command succeeded.
+func runGit(root string, args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = nil
+	err := cmd.Run()
+	return stdout.String(), err
 }
 
 // fingerprintSecret returns "sha256:<hex>" for a matched secret value.

@@ -2,6 +2,7 @@ package checks
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -188,6 +189,106 @@ func TestSecrets_SkipsSymlinks(t *testing.T) {
 	res := runSecretsCheck(t, root, &config.SecretsConfig{Enabled: true})
 	if !res.Passed {
 		t.Fatalf("expected no findings — symlink should be skipped — got: %s", res.Message)
+	}
+}
+
+// initGitRepo turns root into a git work tree with a deterministic
+// identity so commits don't depend on the host's git config. Skips the
+// test if git isn't available.
+func initGitRepo(t *testing.T, root string) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	for _, args := range [][]string{
+		{"init"},
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "Test"},
+	} {
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+}
+
+func gitCommit(t *testing.T, root string, paths ...string) {
+	t.Helper()
+	add := exec.Command("git", append([]string{"-C", root, "add", "--"}, paths...)...)
+	if out, err := add.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	commit := exec.Command("git", "-C", root, "commit", "-m", "x")
+	if out, err := commit.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+}
+
+// Bucket 1 (the trap): a file listed in .gitignore but already tracked
+// is still carried by git, so it must FAIL even though .gitignore names
+// it. A naive .gitignore-text check would wrongly clear this.
+func TestSecrets_TrackedButGitignoredStillAlerts(t *testing.T) {
+	root := t.TempDir()
+	initGitRepo(t, root)
+	writeFile(t, root, ".env.development", "STRIPE=sk_test_"+strings.Repeat("a", 24)+"\n")
+	gitCommit(t, root, ".env.development")
+	// Add the ignore rule *after* committing — git keeps tracking it.
+	writeFile(t, root, ".gitignore", ".env.development\n")
+	gitCommit(t, root, ".gitignore")
+
+	res := runSecretsCheck(t, root, &config.SecretsConfig{Enabled: true})
+	if res.Passed {
+		t.Fatalf("expected alert: tracked file is committed regardless of .gitignore, got pass: %s", res.Message)
+	}
+	if !strings.Contains(res.Message, "[tracked by git]") {
+		t.Fatalf("expected [tracked by git] tag, got: %s", res.Message)
+	}
+}
+
+// Bucket 2: an untracked file covered by .gitignore will never be
+// committed, so it's allowed to hold real secrets — PASS.
+func TestSecrets_GitignoredUntrackedSkipped(t *testing.T) {
+	root := t.TempDir()
+	initGitRepo(t, root)
+	writeFile(t, root, ".gitignore", ".env.development\n")
+	gitCommit(t, root, ".gitignore")
+	// Never added — untracked and ignored.
+	writeFile(t, root, ".env.development", "STRIPE=sk_test_"+strings.Repeat("a", 24)+"\n")
+
+	res := runSecretsCheck(t, root, &config.SecretsConfig{Enabled: true})
+	if !res.Passed {
+		t.Fatalf("expected pass: ignored+untracked file is safe, got alert: %s", res.Message)
+	}
+}
+
+// Bucket 3: an untracked file that is NOT ignored would be committed by
+// `git add .`, so it must FAIL and be flagged as committable.
+func TestSecrets_UntrackedNotIgnoredAlerts(t *testing.T) {
+	root := t.TempDir()
+	initGitRepo(t, root)
+	writeFile(t, root, ".env.development", "STRIPE=sk_test_"+strings.Repeat("a", 24)+"\n")
+
+	res := runSecretsCheck(t, root, &config.SecretsConfig{Enabled: true})
+	if res.Passed {
+		t.Fatalf("expected alert: untracked + not ignored is committable, got pass: %s", res.Message)
+	}
+	if !strings.Contains(res.Message, "[not gitignored]") {
+		t.Fatalf("expected [not gitignored] tag, got: %s", res.Message)
+	}
+}
+
+// Inside a git repo, git status overrides the filename convention: a
+// tracked .env.local (committed by mistake) must alert even though the
+// non-git fallback would skip the .local family.
+func TestSecrets_TrackedEnvLocalAlertsInRepo(t *testing.T) {
+	root := t.TempDir()
+	initGitRepo(t, root)
+	writeFile(t, root, ".env.local", "STRIPE=sk_test_"+strings.Repeat("a", 24)+"\n")
+	gitCommit(t, root, ".env.local")
+
+	res := runSecretsCheck(t, root, &config.SecretsConfig{Enabled: true})
+	if res.Passed {
+		t.Fatalf("expected alert: a tracked .env.local is a real leak, got pass: %s", res.Message)
 	}
 }
 
