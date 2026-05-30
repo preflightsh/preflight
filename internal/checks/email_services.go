@@ -419,8 +419,8 @@ func envFileHasPrefix(path, prefix string) bool {
 // `env('MAILGUN_SECRET')`) rather than holding the value. Spans CMSs and hosts
 // so detection isn't tied to one stack.
 var envRefConfigFiles = []string{
-	"config/project/project.yaml", // Craft CMS (committed project config)
-	"wp-config.php",               // WordPress
+	"config/project/project.yaml",                         // Craft CMS (committed project config)
+	"wp-config.php",                                       // WordPress
 	"config/services.yaml", "config/packages/mailer.yaml", // Symfony
 	"render.yaml", "fly.toml", "vercel.json", "netlify.toml", "app.yaml",
 	"app.json", "Procfile", "docker-compose.yml", "docker-compose.yaml",

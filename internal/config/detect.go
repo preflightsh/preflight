@@ -1527,7 +1527,9 @@ func detectIndexNowDynamic(rootDir string) (bool, string) {
 	found := false
 	key := ""
 
-	walkErr := filepath.Walk(rootDir, func(path string, fi os.FileInfo, err error) error {
+	// errStopIndexNowWalk from the callback just halts the walk early; both
+	// outcomes return (found, key), so the walk's error is intentionally ignored.
+	_ = filepath.Walk(rootDir, func(path string, fi os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -1559,9 +1561,6 @@ func detectIndexNowDynamic(rootDir string) (bool, string) {
 		}
 		return nil
 	})
-	if walkErr != nil && walkErr != errStopIndexNowWalk {
-		return found, key
-	}
 	return found, key
 }
 
