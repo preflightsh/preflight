@@ -391,6 +391,14 @@ func DetectServices(rootDir string) map[string]bool {
 	// Check for IndexNow key files in web roots
 	detectIndexNowKeyFile(rootDir, services)
 
+	// Check for a dynamically served IndexNow integration (route/handler serving
+	// the key, or a deploy script pinging the API) when no static key file exists.
+	if !services["indexnow"] {
+		if found, _ := detectIndexNowDynamic(rootDir); found {
+			services["indexnow"] = true
+		}
+	}
+
 	return services
 }
 
@@ -1433,4 +1441,140 @@ func detectIndexNowKeyFile(rootDir string, services map[string]bool) {
 			}
 		}
 	}
+}
+
+// indexNowSourceExts are file types worth scanning for a dynamically wired-up
+// IndexNow integration: a route/handler serving the key, or a deploy script
+// pinging the IndexNow API. Kept broad so detection is stack-agnostic.
+var indexNowSourceExts = map[string]bool{
+	".go": true, ".rb": true, ".php": true, ".py": true, ".js": true,
+	".ts": true, ".jsx": true, ".tsx": true, ".mjs": true, ".cjs": true,
+	".cs": true, ".ex": true, ".exs": true, ".rs": true, ".java": true,
+	".kt": true, ".scala": true, ".sh": true, ".bash": true, ".yml": true,
+	".yaml": true, ".toml": true, ".cr": true, ".dart": true,
+}
+
+// indexNowSkipDirs are directories never worth walking when looking for a
+// dynamic IndexNow integration: dependency trees and build outputs.
+var indexNowSkipDirs = map[string]bool{
+	"node_modules": true, ".git": true, "vendor": true, "testdata": true,
+	"dist": true, "build": true, "out": true, "target": true, ".next": true,
+	".nuxt": true, ".svelte-kit": true, "coverage": true, "tmp": true, ".cache": true,
+}
+
+var (
+	// indexNowKeyFileRe matches the served filename form, e.g. "abc...def.txt".
+	indexNowKeyFileRe = regexp.MustCompile(`([a-f0-9]{32})\.txt`)
+	// indexNowKeyAssignRe matches an assignment whose name mentions IndexNow,
+	// e.g. INDEXNOW_KEY="abc...def" or `const indexNowKey = "abc...def"`.
+	indexNowKeyAssignRe = regexp.MustCompile(`(?i)index[_]?now[_a-z0-9]*["']?\s*[:=]\s*["']?([a-f0-9]{32})`)
+	// indexNowKeyNamedRe matches an assignment to an identifier ending in "key",
+	// e.g. `KEY = "abc...def"`, `apiKey: "abc...def"` (Rails/Next style).
+	indexNowKeyNamedRe = regexp.MustCompile(`(?i)key["']?\s*[:=]\s*["']?([a-f0-9]{32})`)
+	// hex32Re matches a standalone 32-char hex token. Word boundaries prevent
+	// matching a 32-char slice of a longer hash (sha1/sha256).
+	hex32Re = regexp.MustCompile(`\b([a-f0-9]{32})\b`)
+)
+
+// extractIndexNowKey pulls the 32-char hex IndexNow key out of a source/script
+// file's content, trying the most authoritative signal first: the served
+// {key}.txt filename, then an IndexNow-named assignment, then a generic "key"
+// assignment, and finally a single unambiguous hex token in a file already known
+// to reference IndexNow. Returns the lowercased key, or "" if none is confident.
+func extractIndexNowKey(content string) string {
+	lower := strings.ToLower(content)
+	if m := indexNowKeyFileRe.FindStringSubmatch(lower); m != nil {
+		return m[1]
+	}
+	if m := indexNowKeyAssignRe.FindStringSubmatch(content); m != nil {
+		return strings.ToLower(m[1])
+	}
+	if m := indexNowKeyNamedRe.FindStringSubmatch(content); m != nil {
+		return strings.ToLower(m[1])
+	}
+	// Last resort: one unambiguous hex token in an IndexNow file is the key.
+	// More than one (e.g. an asset hash is also present) is too risky to guess.
+	seen := map[string]bool{}
+	var uniq []string
+	for _, m := range hex32Re.FindAllString(lower, -1) {
+		if !seen[m] {
+			seen[m] = true
+			uniq = append(uniq, m)
+		}
+	}
+	if len(uniq) == 1 {
+		return uniq[0]
+	}
+	return ""
+}
+
+// maxIndexNowScanBytes caps the size of a file read during dynamic IndexNow
+// detection so a walk never slurps a compiled binary (e.g. bin/<app>) or other
+// large artifact. Source files and deploy scripts are far smaller.
+const maxIndexNowScanBytes = 256 * 1024
+
+// errStopIndexNowWalk halts the detection walk once both the integration and a
+// key have been found; filepath.Walk treats a non-nil error as a stop signal.
+var errStopIndexNowWalk = errors.New("indexnow: found")
+
+// detectIndexNowDynamic walks the project for an IndexNow integration that has
+// no key file on disk: a route/handler serving {key}.txt, the key as a source
+// constant, or a deploy script pinging api.indexnow.org. It is stack-agnostic,
+// scanning source and script files across the whole tree (skipping dependency
+// and build dirs). Returns whether such an integration was found and, when
+// extractable, the lowercased 32-char hex key.
+func detectIndexNowDynamic(rootDir string) (bool, string) {
+	found := false
+	key := ""
+
+	walkErr := filepath.Walk(rootDir, func(path string, fi os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if fi.IsDir() {
+			if path != rootDir && indexNowSkipDirs[fi.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !isIndexNowScannable(fi.Name()) || fi.Size() > maxIndexNowScanBytes {
+			return nil
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		lower := strings.ToLower(string(content))
+		// "indexnow" also covers the api.indexnow.org ping; "index_now" covers
+		// snake_cased identifiers (Rails/Python service or job names).
+		if !strings.Contains(lower, "indexnow") && !strings.Contains(lower, "index_now") {
+			return nil
+		}
+		found = true
+		if key == "" {
+			key = extractIndexNowKey(string(content))
+		}
+		if found && key != "" {
+			return errStopIndexNowWalk
+		}
+		return nil
+	})
+	if walkErr != nil && walkErr != errStopIndexNowWalk {
+		return found, key
+	}
+	return found, key
+}
+
+// isIndexNowScannable reports whether a filename is worth reading when looking
+// for a dynamic IndexNow integration: a known source/config extension, or an
+// extensionless file (deploy scripts like bin/deploy, Dockerfile, Makefile).
+func isIndexNowScannable(name string) bool {
+	ext := strings.ToLower(filepath.Ext(name))
+	return indexNowSourceExts[ext] || ext == ""
+}
+
+// DetectIndexNowDynamic is the exported entry point for callers outside this
+// package (e.g. init key pre-fill). See detectIndexNowDynamic.
+func DetectIndexNowDynamic(rootDir string) (bool, string) {
+	return detectIndexNowDynamic(rootDir)
 }

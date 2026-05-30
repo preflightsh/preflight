@@ -892,6 +892,13 @@ func detectIndexNowKey(cwd string) string {
 		}
 	}
 
+	// Finally, look for a dynamically served key (source constant, route serving
+	// {key}.txt, or a deploy script pinging the API) when no env var or key file
+	// exists. Covers apps that serve the key from a handler rather than a file.
+	if _, key := config.DetectIndexNowDynamic(cwd); key != "" {
+		return key
+	}
+
 	return ""
 }
 
