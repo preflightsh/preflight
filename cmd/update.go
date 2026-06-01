@@ -16,6 +16,11 @@ import (
 
 const updateCheckInterval = 24 * time.Hour
 
+// noUpdateCheckEnv disables the update check entirely when set to a non-empty
+// value. It is also set on the re-exec'd process after an in-place upgrade so
+// the freshly launched binary doesn't immediately prompt again.
+const noUpdateCheckEnv = "PREFLIGHT_NO_UPDATE_CHECK"
+
 type githubRelease struct {
 	TagName string `json:"tag_name"`
 }
@@ -25,6 +30,12 @@ type githubRelease struct {
 func CheckForUpdates() {
 	// Skip in CI mode or if version is dev
 	if version == "dev" {
+		return
+	}
+
+	// Allow opting out, and avoid re-prompting on the process we re-exec
+	// after an in-place upgrade.
+	if os.Getenv(noUpdateCheckEnv) != "" {
 		return
 	}
 
@@ -69,7 +80,12 @@ func CheckForUpdates() {
 		// Require explicit Y; default (empty input) is No.
 		response = strings.TrimSpace(strings.ToLower(response))
 		if response == "y" || response == "yes" {
-			runUpgrade(upgradeCmd)
+			if runUpgrade(upgradeCmd) {
+				// The current process still holds the pre-upgrade binary in
+				// memory; without handing off, the rest of this invocation
+				// runs stale logic. This does not return on success.
+				relaunchAfterUpgrade()
+			}
 		} else {
 			fmt.Printf("   To upgrade later: %s\n", upgradeCmd)
 		}
@@ -111,23 +127,23 @@ func markUpdateChecked() {
 	_ = os.WriteFile(checkFile, []byte(time.Now().UTC().Format(time.RFC3339)), 0644)
 }
 
-// runUpgrade executes an already-vetted upgrade command. The caller is
-// responsible for gating any `curl | sh` style commands, which this
-// function will refuse for safety.
-func runUpgrade(upgradeCmd string) {
+// runUpgrade executes an already-vetted upgrade command and reports whether it
+// succeeded. The caller is responsible for gating any `curl | sh` style
+// commands, which this function will refuse for safety.
+func runUpgrade(upgradeCmd string) bool {
 	if strings.Contains(upgradeCmd, "|") {
 		// Defense in depth: CheckForUpdates is supposed to filter these
 		// out already, but make sure we never pipe untrusted bytes into
 		// a shell from this code path.
 		fmt.Printf("   ✗ Refusing to auto-run piped shell command: %s\n", upgradeCmd)
-		return
+		return false
 	}
 
 	fmt.Printf("   Running: %s\n", upgradeCmd)
 	parts := strings.Fields(upgradeCmd)
 	if len(parts) == 0 {
 		fmt.Println("   ✗ Could not determine upgrade command")
-		return
+		return false
 	}
 
 	cmd := exec.Command(parts[0], parts[1:]...)
@@ -135,10 +151,46 @@ func runUpgrade(upgradeCmd string) {
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		fmt.Printf("   ✗ Upgrade failed: %v\n", err)
-		return
+		return false
 	}
 
 	fmt.Println("   ✓ Upgrade complete!")
+	return true
+}
+
+// relaunchAfterUpgrade hands the user's original command off to the
+// just-installed binary. The current process still has the pre-upgrade binary
+// loaded in memory, so without this the rest of the invocation keeps running
+// stale logic (e.g. service detection from before a fix). On Unix this re-execs
+// in place and never returns; if re-exec is unsupported (Windows) or fails, it
+// prints a re-run hint and exits so we never silently continue on old code.
+func relaunchAfterUpgrade() {
+	fmt.Println("   ↻ Restarting with the new version...")
+	fmt.Println()
+	if err := execNewBinary(); err != nil {
+		fmt.Println("   Please re-run your command to use the new version.")
+	}
+	os.Exit(0)
+}
+
+// resolveNewBinary returns an absolute path to the preflight binary to re-exec
+// after an upgrade. It prefers a fresh PATH lookup of the invoked name because
+// os.Executable() can point at the previous version's install directory (e.g. a
+// Homebrew Cellar/<old-version> path) that the upgrade just deleted; the PATH
+// entry (a symlink/shim) already targets the newly installed binary.
+func resolveNewBinary() (string, error) {
+	if name := os.Args[0]; name != "" {
+		if bin, err := exec.LookPath(name); err == nil {
+			if abs, err := filepath.Abs(bin); err == nil {
+				return abs, nil
+			}
+		}
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Abs(exe)
 }
 
 func fetchLatestVersion() (string, error) {
