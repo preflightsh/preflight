@@ -167,6 +167,11 @@ func scanEnvFile(path string, keys []string, foundKeys map[string]bool) {
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
+	// Default Scanner cap is 64KB per line; an .env file with a longer
+	// inline value would silently abort the scan and report later keys
+	// as missing. Read errors are treated like an unreadable file
+	// (best-effort skip, same as the os.Open path above).
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := strings.ToUpper(scanner.Text())
 		for _, key := range keys {
@@ -175,4 +180,5 @@ func scanEnvFile(path string, keys []string, foundKeys map[string]bool) {
 			}
 		}
 	}
+	_ = scanner.Err()
 }

@@ -406,11 +406,16 @@ func envFileHasPrefix(path, prefix string) bool {
 	}
 	defer file.Close()
 	scanner := bufio.NewScanner(file)
+	// Default Scanner cap is 64KB per line; a longer inline value would
+	// silently abort the scan before reaching a real match. Read errors
+	// degrade to "not found", same as the os.Open path above.
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		if strings.HasPrefix(strings.ToUpper(scanner.Text()), prefix) {
 			return true
 		}
 	}
+	_ = scanner.Err()
 	return false
 }
 

@@ -142,9 +142,10 @@ func (c SEOMetadataCheck) Run(ctx Context) (CheckResult, error) {
 	// we report each env separately.
 	staticMissing := missing
 	if summary, prodPassed := RunPerEnv(ctx, func(html string) []string {
+		doc := parseRenderedHTML(html)
 		var stillMissing []string
 		for _, name := range staticMissing {
-			if !renderedHasSEOTag(html, name) {
+			if !renderedHasSEOTag(doc, name) {
 				stillMissing = append(stillMissing, name)
 			}
 		}
@@ -185,19 +186,17 @@ func (c SEOMetadataCheck) Run(ctx Context) (CheckResult, error) {
 	}, nil
 }
 
-// renderedHasSEOTag reports whether the rendered HTML contains the named
-// SEO element. Accepts attributes in either order and either quote style.
-func renderedHasSEOTag(html, name string) bool {
+// renderedHasSEOTag reports whether the parsed rendered HTML contains the
+// named SEO element.
+func renderedHasSEOTag(doc renderedDoc, name string) bool {
 	switch name {
 	case "title":
-		return regexp.MustCompile(`(?i)<title[^>]*>[^<]+</title>`).MatchString(html)
+		return doc.title != ""
 	case "description":
-		return regexp.MustCompile(`(?i)<meta[^>]+name\s*=\s*["']description["']`).MatchString(html) ||
-			regexp.MustCompile(`(?i)<meta[^>]+content\s*=\s*["'][^"']*["'][^>]+name\s*=\s*["']description["']`).MatchString(html)
+		_, ok := doc.metaName["description"]
+		return ok
 	case "og:title", "og:description":
-		quoted := regexp.QuoteMeta(name)
-		return regexp.MustCompile(`(?i)<meta[^>]+property\s*=\s*["']`+quoted+`["']`).MatchString(html) ||
-			regexp.MustCompile(`(?i)<meta[^>]+content\s*=\s*["'][^"']*["'][^>]+property\s*=\s*["']`+quoted+`["']`).MatchString(html)
+		return doc.hasMeta(name)
 	}
 	return false
 }

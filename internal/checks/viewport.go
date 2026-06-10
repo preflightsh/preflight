@@ -106,7 +106,7 @@ func (c ViewportCheck) Run(ctx Context) (CheckResult, error) {
 	// frameworks, etc.). Checks the actual served bytes, so it is
 	// stack-agnostic by construction.
 	if summary, prodPassed := RunPerEnv(ctx, func(html string) []string {
-		if hasViewportMeta(html, ctx.Config.Stack) {
+		if _, ok := parseRenderedHTML(html).metaName["viewport"]; ok {
 			return nil
 		}
 		return []string{"viewport"}

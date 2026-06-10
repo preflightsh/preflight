@@ -74,7 +74,7 @@ func (c CanonicalURLCheck) Run(ctx Context) (CheckResult, error) {
 
 	// Per-env rendered HTML fallback for CMS-generated canonical tags.
 	if summary, prodPassed := RunPerEnv(ctx, func(html string) []string {
-		if reCanonicalLink.MatchString(html) {
+		if parseRenderedHTML(html).hasLinkRel("canonical") {
 			return nil
 		}
 		return []string{"canonical"}
@@ -107,10 +107,6 @@ func (c CanonicalURLCheck) Run(ctx Context) (CheckResult, error) {
 		Suggestions: getCanonicalSuggestions(ctx.Config.Stack),
 	}, nil
 }
-
-// reCanonicalLink matches a <link rel="canonical"> tag in rendered HTML
-// with either attribute order.
-var reCanonicalLink = regexp.MustCompile(`(?i)<link[^>]+rel\s*=\s*["']canonical["']|<link[^>]+href\s*=\s*["'][^"']+["'][^>]+rel\s*=\s*["']canonical["']`)
 
 // canonicalPatterns covers the full set of template / framework idioms
 // we recognize as declaring a canonical URL. Compiled once so

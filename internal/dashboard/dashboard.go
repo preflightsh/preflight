@@ -150,12 +150,24 @@ func (c *Client) Poll(deviceCode string) (*PollStatus, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	var out struct {
-		Status string `json:"status"`
-		Token  string `json:"token"`
+	// The poll endpoint encodes state in the status code AND body:
+	// 200 approved, 202 pending, 410 expired. Anything else (5xx, proxy
+	// errors) is a real failure, surfaced as an error so callers don't
+	// mistake an outage for a pending approval.
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusAccepted, http.StatusGone:
+		var out struct {
+			Status string `json:"status"`
+			Token  string `json:"token"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			return nil, fmt.Errorf("auth poll: parse response: %w", err)
+		}
+		return &PollStatus{Status: out.Status, Token: out.Token}, nil
+	default:
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("auth poll failed: %s: %s", resp.Status, string(b))
 	}
-	_ = json.NewDecoder(resp.Body).Decode(&out)
-	return &PollStatus{Status: out.Status, Token: out.Token}, nil
 }
 
 // PublishRequest is the body posted to /api/runs.

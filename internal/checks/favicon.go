@@ -7,14 +7,6 @@ import (
 	"strings"
 )
 
-// Regexes for detecting icon and manifest links in rendered HTML. Loose
-// enough to accept either attribute order and either quote style.
-var (
-	reFaviconLink    = regexp.MustCompile(`(?i)<link[^>]+rel\s*=\s*["']?(?:shortcut\s+)?icon["']?`)
-	reAppleTouchLink = regexp.MustCompile(`(?i)<link[^>]+rel\s*=\s*["']?apple-touch-icon["']?`)
-	reManifestLink   = regexp.MustCompile(`(?i)<link[^>]+rel\s*=\s*["']?manifest["']?`)
-)
-
 type FaviconCheck struct{}
 
 func (c FaviconCheck) ID() string {
@@ -394,15 +386,16 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 	// (Craft+SEOmatic, WordPress, etc.) where icons live in a partial we
 	// haven't catalogued, or are emitted by a plugin at runtime.
 	if ctx.PageHTML != "" && len(missing) > 0 {
-		if !hasFavicon && reFaviconLink.MatchString(ctx.PageHTML) {
+		doc := parseRenderedHTML(ctx.PageHTML)
+		if !hasFavicon && doc.hasLinkRel("icon") {
 			hasFavicon = true
 			found = append(found, "favicon (in rendered HTML)")
 		}
-		if !hasAppleIcon && reAppleTouchLink.MatchString(ctx.PageHTML) {
+		if !hasAppleIcon && doc.hasLinkRel("apple-touch-icon") {
 			hasAppleIcon = true
 			found = append(found, "apple-touch-icon (in rendered HTML)")
 		}
-		if !hasManifest && reManifestLink.MatchString(ctx.PageHTML) {
+		if !hasManifest && doc.hasLinkRel("manifest") {
 			hasManifest = true
 			found = append(found, "manifest (in rendered HTML)")
 		}

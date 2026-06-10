@@ -96,7 +96,7 @@ func (c LangAttributeCheck) Run(ctx Context) (CheckResult, error) {
 	// server-rendered frameworks, etc.). Checks the actual served bytes, so
 	// it is stack-agnostic by construction.
 	if summary, prodPassed := RunPerEnv(ctx, func(html string) []string {
-		if hasLangAttribute(html, ctx.Config.Stack) {
+		if parseRenderedHTML(html).htmlLang != "" {
 			return nil
 		}
 		return []string{"lang"}

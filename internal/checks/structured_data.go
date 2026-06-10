@@ -28,7 +28,7 @@ func (c StructuredDataCheck) Run(ctx Context) (CheckResult, error) {
 	// fallback for offline scans or when the homepage isn't where the JSON-LD
 	// lives.
 	summary, prodPassed := RunPerEnv(ctx, func(html string) []string {
-		if reJSONLDScript.MatchString(html) || reSchemaContext.MatchString(html) {
+		if parseRenderedHTML(html).hasJSONLD || reSchemaContext.MatchString(html) {
 			return nil
 		}
 		return []string{"structured data"}
@@ -126,11 +126,9 @@ func (c StructuredDataCheck) Run(ctx Context) (CheckResult, error) {
 	}, nil
 }
 
-// Regexes for detecting JSON-LD in rendered HTML.
-var (
-	reJSONLDScript  = regexp.MustCompile(`(?i)<script[^>]+type\s*=\s*["']application/ld\+json["']`)
-	reSchemaContext = regexp.MustCompile(`(?i)["']@context["']\s*:\s*["']https?://schema\.org`)
-)
+// reSchemaContext detects schema.org JSON-LD payloads in rendered HTML by
+// their @context, catching documents the tag-level scan can't attribute.
+var reSchemaContext = regexp.MustCompile(`(?i)["']@context["']\s*:\s*["']https?://schema\.org`)
 
 func hasStructuredData(content, stack string) bool {
 	// Strip comments to avoid false positives on commented-out code

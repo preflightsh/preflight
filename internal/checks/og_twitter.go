@@ -199,9 +199,10 @@ func (c OGTwitterCheck) Run(ctx Context) (CheckResult, error) {
 	var perEnvProdPassed bool
 	if len(staticMissing) > 0 && (ctx.Config.URLs.Production != "" || ctx.Config.URLs.Staging != "") {
 		perEnvSummary, perEnvProdPassed = RunPerEnv(ctx, func(html string) []string {
+			doc := parseRenderedHTML(html)
 			var stillMissing []string
 			for _, name := range staticMissing {
-				if !renderedHasMetaTag(html, name) {
+				if !doc.hasMeta(name) {
 					stillMissing = append(stillMissing, name)
 				}
 			}
@@ -428,28 +429,6 @@ func (c OGTwitterCheck) Run(ctx Context) (CheckResult, error) {
 		Suggestions: suggestions,
 		Details:     details,
 	}, nil
-}
-
-// renderedHasMetaTag reports whether the given rendered HTML contains a
-// meta tag for the named OG/Twitter property. Accepts either attribute
-// order ("property=... content=..." or "content=... property=...") since
-// servers and CMS plugins emit both. The name passed in is the canonical
-// property (e.g. "og:image", "twitter:card") so the same matcher works
-// for both OG (property=) and Twitter (name=) tags.
-func renderedHasMetaTag(html, name string) bool {
-	attr := "property"
-	if strings.HasPrefix(name, "twitter:") {
-		attr = "name"
-	}
-	quoted := regexp.QuoteMeta(name)
-	// property/name first, then any other attributes
-	p1 := regexp.MustCompile(`(?i)<meta[^>]+` + attr + `\s*=\s*["']` + quoted + `["'][^>]*>`)
-	if p1.MatchString(html) {
-		return true
-	}
-	// content first, then property/name
-	p2 := regexp.MustCompile(`(?i)<meta[^>]+content\s*=\s*["'][^"']*["'][^>]+` + attr + `\s*=\s*["']` + quoted + `["']`)
-	return p2.MatchString(html)
 }
 
 // hasNextJSOGTwitterMeta checks for Next.js Metadata API OG/Twitter patterns

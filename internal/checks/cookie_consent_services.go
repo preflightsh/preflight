@@ -1,97 +1,36 @@
 package checks
 
 import (
-	"io"
 	"regexp"
-	"strings"
 )
 
 // CookieConsentJSCheck verifies CookieConsent JS library is properly set up
-type CookieConsentJSCheck struct{}
-
-func (c CookieConsentJSCheck) ID() string {
-	return "cookieconsent"
-}
-
-func (c CookieConsentJSCheck) Title() string {
-	return "CookieConsent"
-}
-
-func (c CookieConsentJSCheck) Run(ctx Context) (CheckResult, error) {
-	service, declared := ctx.Config.Services["cookieconsent"]
-	if !declared || !service.Declared {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  "Cookie Consent not declared, skipping",
-		}, nil
-	}
-
-	// Check live site for the consent script
-	livePatterns := []*regexp.Regexp{
+var CookieConsentJSCheck = ServiceCheck{
+	CheckID:    "cookieconsent",
+	CheckTitle: "CookieConsent",
+	LivePatterns: []*regexp.Regexp{
 		regexp.MustCompile(`(?i)cookieconsent\.min\.js`),
 		regexp.MustCompile(`(?i)cdn\.jsdelivr\.net.*cookieconsent`),
 		regexp.MustCompile(`(?i)osano.*cookieconsent`),
 		regexp.MustCompile(`(?i)CookieConsent\.run\(`),
 		regexp.MustCompile(`(?i)cc\.initialise\(`),
-	}
-
-	foundOnLive, liveURL := checkLiveSiteForPatterns(ctx, livePatterns)
-
-	if foundOnLive {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  "Cookie Consent script found on live site",
-		}, nil
-	}
-
-	// Fall back to checking codebase
-	codePatterns := []*regexp.Regexp{
+	},
+	CodePatterns: []*regexp.Regexp{
 		regexp.MustCompile(`cookieconsent`),
 		regexp.MustCompile(`CookieConsent`),
 		regexp.MustCompile(`cdn\.jsdelivr\.net.*cookieconsent`),
-	}
-
-	found := searchForPatterns(ctx.RootDir, ctx.Config.Stack, codePatterns)
-
-	if found {
-		if liveURL != "" {
-			return CheckResult{
-				ID:       c.ID(),
-				Title:    c.Title(),
-				Severity: SeverityWarn,
-				Passed:   false,
-				Message:  "Cookie Consent code found but not detected on live site",
-				Suggestions: []string{
-					"Ensure the consent banner script is loading in production",
-					"Check browser console for script errors",
-				},
-			}, nil
-		}
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  "Cookie Consent script found in codebase",
-		}, nil
-	}
-
-	return CheckResult{
-		ID:       c.ID(),
-		Title:    c.Title(),
-		Severity: SeverityWarn,
-		Passed:   false,
-		Message:  "Cookie Consent is declared but script not found",
-		Suggestions: []string{
-			"Add Cookie Consent script to your templates",
-		},
-	}, nil
+	},
+	LiveFoundMsg:   "Cookie Consent script found on live site",
+	CodeFoundMsg:   "Cookie Consent script found in codebase",
+	LiveMissingMsg: "Cookie Consent code found but not detected on live site",
+	NotFoundMsg:    "Cookie Consent is declared but script not found",
+	LiveMissingSuggestions: []string{
+		"Ensure the consent banner script is loading in production",
+		"Check browser console for script errors",
+	},
+	NotFoundSuggestions: []string{
+		"Add Cookie Consent script to your templates",
+	},
 }
 
 // CookiebotCheck verifies Cookiebot is properly set up
@@ -626,39 +565,4 @@ func (c IubendaCheck) Run(ctx Context) (CheckResult, error) {
 			"Add Iubenda cookie banner script to your templates",
 		},
 	}, nil
-}
-
-// checkLiveSiteForPatterns fetches the live site and checks for patterns
-// Returns (found, urlChecked) - urlChecked is empty if no URL was available
-func checkLiveSiteForPatterns(ctx Context, patterns []*regexp.Regexp) (bool, string) {
-	// Try production URL first, then staging
-	url := ctx.Config.URLs.Production
-	if url == "" {
-		url = ctx.Config.URLs.Staging
-	}
-	if url == "" || ctx.Client == nil {
-		return false, ""
-	}
-
-	resp, _, err := tryURL(ctx.reqContext(), ctx.Client, url)
-	if err != nil {
-		return false, url
-	}
-	defer resp.Body.Close()
-
-	// Read up to 1MB of response
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
-	if err != nil {
-		return false, url
-	}
-
-	content := strings.ToLower(string(body))
-
-	for _, pattern := range patterns {
-		if pattern.MatchString(content) {
-			return true, url
-		}
-	}
-
-	return false, url
 }

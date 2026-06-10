@@ -62,6 +62,11 @@ preflight scan -v  # short form
 # Run in CI mode with JSON output
 preflight scan --ci --format json
 
+# Run only specific checks, or skip some, for fast iteration
+# (one-off; unlike `preflight ignore` it doesn't change preflight.yml)
+preflight scan --only seoMeta,ogTwitter
+preflight scan --skip vulnerability,secrets
+
 # Silence a check
 preflight ignore sitemap
 
@@ -367,6 +372,24 @@ All services have validation checks that verify proper integration (env vars, SD
 | 0 | All checks passed |
 | 1 | Warnings only |
 | 2 | Errors found |
+| 130 | Scan cancelled (Ctrl-C / SIGTERM) |
+
+## Shell Completions
+
+Tab completion for commands, flags, and check IDs (including `--only` and `--skip` values):
+
+```bash
+# bash (add to ~/.bashrc)
+source <(preflight completion bash)
+
+# zsh (add to ~/.zshrc)
+source <(preflight completion zsh)
+
+# fish
+preflight completion fish | source
+```
+
+Output also respects the [`NO_COLOR`](https://no-color.org) environment variable.
 
 ## Supported Stacks
 

@@ -73,6 +73,17 @@ install() {
         info "Latest version: ${VERSION}"
     fi
 
+    # The version string ends up in URLs and the archive filename; reject
+    # anything that isn't a plain semver tag so a malformed or hostile API
+    # response can't smuggle paths or shell metacharacters into them.
+    case "$VERSION" in
+        v[0-9]*.[0-9]*.[0-9]* | [0-9]*.[0-9]*.[0-9]*) ;;
+        *) error "Unexpected version format: ${VERSION}";;
+    esac
+    case "$VERSION" in
+        *[!A-Za-z0-9.-]*) error "Unexpected version format: ${VERSION}";;
+    esac
+
     # Build download URL
     FILENAME="preflight_${VERSION#v}_${OS}_${ARCH}.tar.gz"
     if [ "$OS" = "windows" ]; then
@@ -95,9 +106,15 @@ install() {
 
     # Verify checksum (hard fail if anything is missing).
     cd "${TMP_DIR}"
-    expected=$(grep "${FILENAME}" checksums.txt | awk '{print $1}')
+    expected=$(grep -F "${FILENAME}" checksums.txt | awk '{print $1}' | head -n 1)
     if [ -z "$expected" ]; then
         error "No checksum entry for ${FILENAME} in checksums.txt"
+    fi
+    case "$expected" in
+        *[!a-f0-9]*) error "Malformed checksum entry for ${FILENAME}";;
+    esac
+    if [ "${#expected}" -ne 64 ]; then
+        error "Malformed checksum entry for ${FILENAME}"
     fi
     if command -v sha256sum >/dev/null 2>&1; then
         actual=$(sha256sum "${FILENAME}" | awk '{print $1}')

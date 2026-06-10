@@ -23,6 +23,8 @@ var (
 	formatFlag  string
 	verboseFlag bool
 	publishFlag bool
+	onlyFlag    []string
+	skipFlag    []string
 )
 
 var scanCmd = &cobra.Command{
@@ -40,6 +42,63 @@ func init() {
 	scanCmd.Flags().StringVar(&formatFlag, "format", "human", "Output format: human or json")
 	scanCmd.Flags().BoolVarP(&verboseFlag, "verbose", "v", false, "Show detailed information about each check")
 	scanCmd.Flags().BoolVar(&publishFlag, "publish", false, "Publish results to your Preflight dashboard (requires 'preflight auth login')")
+	scanCmd.Flags().StringSliceVar(&onlyFlag, "only", nil, "Run only these check/service IDs (comma-separated; see 'preflight checks')")
+	scanCmd.Flags().StringSliceVar(&skipFlag, "skip", nil, "Skip these check/service IDs for this run (comma-separated)")
+	_ = scanCmd.RegisterFlagCompletionFunc("only", completeCheckIDs)
+	_ = scanCmd.RegisterFlagCompletionFunc("skip", completeCheckIDs)
+}
+
+// completeCheckIDs offers every known check ID for --only / --skip shell
+// completion.
+func completeCheckIDs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	ids := make([]string, 0, len(checks.Registry))
+	for _, c := range checks.Registry {
+		ids = append(ids, c.ID())
+	}
+	return ids, cobra.ShellCompDirectiveNoFileComp
+}
+
+// filterChecksByFlags applies the one-off --only / --skip narrowing on top of
+// the config-driven enablement and ignore list. Unknown IDs are an error so a
+// typo doesn't silently scan nothing (or everything).
+func filterChecksByFlags(enabled []checks.Check, only, skip []string) ([]checks.Check, error) {
+	if len(only) == 0 && len(skip) == 0 {
+		return enabled, nil
+	}
+
+	known := make(map[string]bool, len(checks.Registry))
+	for _, c := range checks.Registry {
+		known[c.ID()] = true
+	}
+	for _, id := range append(append([]string(nil), only...), skip...) {
+		if !known[id] {
+			return nil, fmt.Errorf("unknown check ID %q (run 'preflight checks' to list IDs)", id)
+		}
+	}
+
+	onlySet := make(map[string]bool, len(only))
+	for _, id := range only {
+		onlySet[id] = true
+	}
+	skipSet := make(map[string]bool, len(skip))
+	for _, id := range skip {
+		skipSet[id] = true
+	}
+
+	var filtered []checks.Check
+	for _, c := range enabled {
+		if len(onlySet) > 0 && !onlySet[c.ID()] {
+			continue
+		}
+		if skipSet[c.ID()] {
+			continue
+		}
+		filtered = append(filtered, c)
+	}
+	if len(onlySet) > 0 && len(filtered) == 0 {
+		return nil, fmt.Errorf("no enabled checks match --only (the checks may not apply to this project's config)")
+	}
+	return filtered, nil
 }
 
 func runScan(cmd *cobra.Command, args []string) error {
@@ -176,6 +235,12 @@ func runScan(cmd *cobra.Command, args []string) error {
 		enabledChecks = filtered
 	}
 
+	// One-off narrowing via --only / --skip.
+	enabledChecks, err = filterChecksByFlags(enabledChecks, onlyFlag, skipFlag)
+	if err != nil {
+		return &ExitError{Code: 2, Err: err}
+	}
+
 	// Run all checks
 	var results []checks.CheckResult
 	for i, check := range enabledChecks {
@@ -234,6 +299,99 @@ func runScan(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// serviceChecks maps every declared-service check to its service ID, in
+// report order (payments, monitoring, email, marketing, analytics,
+// infrastructure, auth, communication, storage, search, AI, cookie consent).
+// Add new service checks here and in the checks package; nothing else.
+var serviceChecks = []struct {
+	id    string
+	check checks.Check
+}{
+	// Payments
+	{"paypal", checks.PayPalCheck},
+	{"braintree", checks.BraintreeCheck},
+	{"paddle", checks.PaddleCheck},
+	{"lemonsqueezy", checks.LemonSqueezyCheck},
+	// Error tracking & monitoring
+	{"sentry", checks.SentryCheck{}},
+	{"bugsnag", checks.BugsnagCheck},
+	{"rollbar", checks.RollbarCheck},
+	{"honeybadger", checks.HoneybadgerCheck},
+	{"datadog", checks.DatadogCheck},
+	{"newrelic", checks.NewRelicCheck},
+	{"logrocket", checks.LogRocketCheck},
+	// Email services
+	{"postmark", checks.PostmarkCheck{}},
+	{"sendgrid", checks.SendGridCheck{}},
+	{"mailgun", checks.MailgunCheck{}},
+	{"aws_ses", checks.AWSSESCheck{}},
+	{"resend", checks.ResendCheck{}},
+	// Email marketing
+	{"mailchimp", checks.MailchimpCheck},
+	{"convertkit", checks.ConvertKitCheck},
+	{"beehiiv", checks.BeehiivCheck},
+	{"aweber", checks.AWeberCheck},
+	{"activecampaign", checks.ActiveCampaignCheck},
+	{"campaignmonitor", checks.CampaignMonitorCheck},
+	{"drip", checks.DripCheck},
+	{"klaviyo", checks.KlaviyoCheck},
+	{"buttondown", checks.ButtondownCheck},
+	// Analytics
+	{"plausible", checks.PlausibleCheck{}},
+	{"fathom", checks.FathomCheck{}},
+	{"umami", checks.UmamiCheck},
+	{"google_analytics", checks.GoogleAnalyticsCheck{}},
+	{"fullres", checks.FullresCheck},
+	{"datafast", checks.DatafastCheck},
+	{"posthog", checks.PostHogCheck},
+	{"mixpanel", checks.MixpanelCheck},
+	{"amplitude", checks.AmplitudeCheck},
+	{"segment", checks.SegmentCheck},
+	{"hotjar", checks.HotjarCheck},
+	// Infrastructure
+	{"redis", checks.RedisCheck{}},
+	{"sidekiq", checks.SidekiqCheck{}},
+	{"rabbitmq", checks.RabbitMQCheck},
+	{"elasticsearch", checks.ElasticsearchCheck},
+	{"convex", checks.ConvexCheck},
+	// Auth
+	{"auth0", checks.Auth0Check},
+	{"clerk", checks.ClerkCheck},
+	{"workos", checks.WorkOSCheck},
+	{"firebase", checks.FirebaseCheck},
+	{"supabase", checks.SupabaseCheck},
+	// Communication
+	{"twilio", checks.TwilioCheck},
+	{"slack", checks.SlackCheck},
+	{"discord", checks.DiscordCheck},
+	{"intercom", checks.IntercomCheck},
+	{"crisp", checks.CrispCheck},
+	// Storage & CDN
+	{"aws_s3", checks.AWSS3Check},
+	{"cloudinary", checks.CloudinaryCheck},
+	{"cloudflare", checks.CloudflareCheck},
+	// Search
+	{"algolia", checks.AlgoliaCheck},
+	// AI
+	{"openai", checks.OpenAICheck},
+	{"anthropic", checks.AnthropicCheck},
+	{"google_ai", checks.GoogleAICheck},
+	{"mistral", checks.MistralCheck},
+	{"cohere", checks.CohereCheck},
+	{"replicate", checks.ReplicateCheck},
+	{"huggingface", checks.HuggingFaceCheck},
+	{"grok", checks.GrokCheck},
+	{"perplexity", checks.PerplexityCheck},
+	{"together_ai", checks.TogetherAICheck},
+	// Cookie consent
+	{"cookieconsent", checks.CookieConsentJSCheck},
+	{"cookiebot", checks.CookiebotCheck{}},
+	{"onetrust", checks.OneTrustCheck{}},
+	{"termly", checks.TermlyCheck{}},
+	{"cookieyes", checks.CookieYesCheck{}},
+	{"iubenda", checks.IubendaCheck{}},
+}
+
 func buildEnabledChecks(cfg *config.PreflightConfig, rootDir string) []checks.Check {
 	var enabledChecks []checks.Check
 
@@ -290,246 +448,16 @@ func buildEnabledChecks(cfg *config.PreflightConfig, rootDir string) []checks.Ch
 	}
 
 	// === Services ===
-	// Service checks are skipped if the service ID is in the ignore list
-
-	// Payments
+	// A service check runs when its service is declared in preflight.yml and
+	// its ID is not in the ignore list. Stripe is the one exception: it is
+	// gated on its own config block rather than a service declaration.
 	if cfg.Checks.StripeWebhook != nil && cfg.Checks.StripeWebhook.Enabled && !serviceIgnored("stripe") {
 		enabledChecks = append(enabledChecks, checks.StripeWebhookCheck{})
 	}
-	if cfg.Services["paypal"].Declared && !serviceIgnored("paypal") {
-		enabledChecks = append(enabledChecks, checks.PayPalCheck{})
-	}
-	if cfg.Services["braintree"].Declared && !serviceIgnored("braintree") {
-		enabledChecks = append(enabledChecks, checks.BraintreeCheck{})
-	}
-	if cfg.Services["paddle"].Declared && !serviceIgnored("paddle") {
-		enabledChecks = append(enabledChecks, checks.PaddleCheck{})
-	}
-	if cfg.Services["lemonsqueezy"].Declared && !serviceIgnored("lemonsqueezy") {
-		enabledChecks = append(enabledChecks, checks.LemonSqueezyCheck{})
-	}
-
-	// Error Tracking & Monitoring
-	if cfg.Services["sentry"].Declared && !serviceIgnored("sentry") {
-		enabledChecks = append(enabledChecks, checks.SentryCheck{})
-	}
-	if cfg.Services["bugsnag"].Declared && !serviceIgnored("bugsnag") {
-		enabledChecks = append(enabledChecks, checks.BugsnagCheck{})
-	}
-	if cfg.Services["rollbar"].Declared && !serviceIgnored("rollbar") {
-		enabledChecks = append(enabledChecks, checks.RollbarCheck{})
-	}
-	if cfg.Services["honeybadger"].Declared && !serviceIgnored("honeybadger") {
-		enabledChecks = append(enabledChecks, checks.HoneybadgerCheck{})
-	}
-	if cfg.Services["datadog"].Declared && !serviceIgnored("datadog") {
-		enabledChecks = append(enabledChecks, checks.DatadogCheck{})
-	}
-	if cfg.Services["newrelic"].Declared && !serviceIgnored("newrelic") {
-		enabledChecks = append(enabledChecks, checks.NewRelicCheck{})
-	}
-	if cfg.Services["logrocket"].Declared && !serviceIgnored("logrocket") {
-		enabledChecks = append(enabledChecks, checks.LogRocketCheck{})
-	}
-
-	// Email Services
-	if cfg.Services["postmark"].Declared && !serviceIgnored("postmark") {
-		enabledChecks = append(enabledChecks, checks.PostmarkCheck{})
-	}
-	if cfg.Services["sendgrid"].Declared && !serviceIgnored("sendgrid") {
-		enabledChecks = append(enabledChecks, checks.SendGridCheck{})
-	}
-	if cfg.Services["mailgun"].Declared && !serviceIgnored("mailgun") {
-		enabledChecks = append(enabledChecks, checks.MailgunCheck{})
-	}
-	if cfg.Services["aws_ses"].Declared && !serviceIgnored("aws_ses") {
-		enabledChecks = append(enabledChecks, checks.AWSSESCheck{})
-	}
-	if cfg.Services["resend"].Declared && !serviceIgnored("resend") {
-		enabledChecks = append(enabledChecks, checks.ResendCheck{})
-	}
-
-	// Email Marketing
-	if cfg.Services["mailchimp"].Declared && !serviceIgnored("mailchimp") {
-		enabledChecks = append(enabledChecks, checks.MailchimpCheck{})
-	}
-	if cfg.Services["convertkit"].Declared && !serviceIgnored("convertkit") {
-		enabledChecks = append(enabledChecks, checks.ConvertKitCheck{})
-	}
-	if cfg.Services["beehiiv"].Declared && !serviceIgnored("beehiiv") {
-		enabledChecks = append(enabledChecks, checks.BeehiivCheck{})
-	}
-	if cfg.Services["aweber"].Declared && !serviceIgnored("aweber") {
-		enabledChecks = append(enabledChecks, checks.AWeberCheck{})
-	}
-	if cfg.Services["activecampaign"].Declared && !serviceIgnored("activecampaign") {
-		enabledChecks = append(enabledChecks, checks.ActiveCampaignCheck{})
-	}
-	if cfg.Services["campaignmonitor"].Declared && !serviceIgnored("campaignmonitor") {
-		enabledChecks = append(enabledChecks, checks.CampaignMonitorCheck{})
-	}
-	if cfg.Services["drip"].Declared && !serviceIgnored("drip") {
-		enabledChecks = append(enabledChecks, checks.DripCheck{})
-	}
-	if cfg.Services["klaviyo"].Declared && !serviceIgnored("klaviyo") {
-		enabledChecks = append(enabledChecks, checks.KlaviyoCheck{})
-	}
-	if cfg.Services["buttondown"].Declared && !serviceIgnored("buttondown") {
-		enabledChecks = append(enabledChecks, checks.ButtondownCheck{})
-	}
-
-	// Analytics
-	if cfg.Services["plausible"].Declared && !serviceIgnored("plausible") {
-		enabledChecks = append(enabledChecks, checks.PlausibleCheck{})
-	}
-	if cfg.Services["fathom"].Declared && !serviceIgnored("fathom") {
-		enabledChecks = append(enabledChecks, checks.FathomCheck{})
-	}
-	if cfg.Services["umami"].Declared && !serviceIgnored("umami") {
-		enabledChecks = append(enabledChecks, checks.UmamiCheck{})
-	}
-	if cfg.Services["google_analytics"].Declared && !serviceIgnored("google_analytics") {
-		enabledChecks = append(enabledChecks, checks.GoogleAnalyticsCheck{})
-	}
-	if cfg.Services["fullres"].Declared && !serviceIgnored("fullres") {
-		enabledChecks = append(enabledChecks, checks.FullresCheck{})
-	}
-	if cfg.Services["datafast"].Declared && !serviceIgnored("datafast") {
-		enabledChecks = append(enabledChecks, checks.DatafastCheck{})
-	}
-	if cfg.Services["posthog"].Declared && !serviceIgnored("posthog") {
-		enabledChecks = append(enabledChecks, checks.PostHogCheck{})
-	}
-	if cfg.Services["mixpanel"].Declared && !serviceIgnored("mixpanel") {
-		enabledChecks = append(enabledChecks, checks.MixpanelCheck{})
-	}
-	if cfg.Services["amplitude"].Declared && !serviceIgnored("amplitude") {
-		enabledChecks = append(enabledChecks, checks.AmplitudeCheck{})
-	}
-	if cfg.Services["segment"].Declared && !serviceIgnored("segment") {
-		enabledChecks = append(enabledChecks, checks.SegmentCheck{})
-	}
-	if cfg.Services["hotjar"].Declared && !serviceIgnored("hotjar") {
-		enabledChecks = append(enabledChecks, checks.HotjarCheck{})
-	}
-
-	// Infrastructure
-	if cfg.Services["redis"].Declared && !serviceIgnored("redis") {
-		enabledChecks = append(enabledChecks, checks.RedisCheck{})
-	}
-	if cfg.Services["sidekiq"].Declared && !serviceIgnored("sidekiq") {
-		enabledChecks = append(enabledChecks, checks.SidekiqCheck{})
-	}
-	if cfg.Services["rabbitmq"].Declared && !serviceIgnored("rabbitmq") {
-		enabledChecks = append(enabledChecks, checks.RabbitMQCheck{})
-	}
-	if cfg.Services["elasticsearch"].Declared && !serviceIgnored("elasticsearch") {
-		enabledChecks = append(enabledChecks, checks.ElasticsearchCheck{})
-	}
-	if cfg.Services["convex"].Declared && !serviceIgnored("convex") {
-		enabledChecks = append(enabledChecks, checks.ConvexCheck{})
-	}
-
-	// Auth Services
-	if cfg.Services["auth0"].Declared && !serviceIgnored("auth0") {
-		enabledChecks = append(enabledChecks, checks.Auth0Check{})
-	}
-	if cfg.Services["clerk"].Declared && !serviceIgnored("clerk") {
-		enabledChecks = append(enabledChecks, checks.ClerkCheck{})
-	}
-	if cfg.Services["workos"].Declared && !serviceIgnored("workos") {
-		enabledChecks = append(enabledChecks, checks.WorkOSCheck{})
-	}
-	if cfg.Services["firebase"].Declared && !serviceIgnored("firebase") {
-		enabledChecks = append(enabledChecks, checks.FirebaseCheck{})
-	}
-	if cfg.Services["supabase"].Declared && !serviceIgnored("supabase") {
-		enabledChecks = append(enabledChecks, checks.SupabaseCheck{})
-	}
-
-	// Communication Services
-	if cfg.Services["twilio"].Declared && !serviceIgnored("twilio") {
-		enabledChecks = append(enabledChecks, checks.TwilioCheck{})
-	}
-	if cfg.Services["slack"].Declared && !serviceIgnored("slack") {
-		enabledChecks = append(enabledChecks, checks.SlackCheck{})
-	}
-	if cfg.Services["discord"].Declared && !serviceIgnored("discord") {
-		enabledChecks = append(enabledChecks, checks.DiscordCheck{})
-	}
-	if cfg.Services["intercom"].Declared && !serviceIgnored("intercom") {
-		enabledChecks = append(enabledChecks, checks.IntercomCheck{})
-	}
-	if cfg.Services["crisp"].Declared && !serviceIgnored("crisp") {
-		enabledChecks = append(enabledChecks, checks.CrispCheck{})
-	}
-
-	// Storage & CDN
-	if cfg.Services["aws_s3"].Declared && !serviceIgnored("aws_s3") {
-		enabledChecks = append(enabledChecks, checks.AWSS3Check{})
-	}
-	if cfg.Services["cloudinary"].Declared && !serviceIgnored("cloudinary") {
-		enabledChecks = append(enabledChecks, checks.CloudinaryCheck{})
-	}
-	if cfg.Services["cloudflare"].Declared && !serviceIgnored("cloudflare") {
-		enabledChecks = append(enabledChecks, checks.CloudflareCheck{})
-	}
-
-	// Search
-	if cfg.Services["algolia"].Declared && !serviceIgnored("algolia") {
-		enabledChecks = append(enabledChecks, checks.AlgoliaCheck{})
-	}
-
-	// AI Services
-	if cfg.Services["openai"].Declared && !serviceIgnored("openai") {
-		enabledChecks = append(enabledChecks, checks.OpenAICheck{})
-	}
-	if cfg.Services["anthropic"].Declared && !serviceIgnored("anthropic") {
-		enabledChecks = append(enabledChecks, checks.AnthropicCheck{})
-	}
-	if cfg.Services["google_ai"].Declared && !serviceIgnored("google_ai") {
-		enabledChecks = append(enabledChecks, checks.GoogleAICheck{})
-	}
-	if cfg.Services["mistral"].Declared && !serviceIgnored("mistral") {
-		enabledChecks = append(enabledChecks, checks.MistralCheck{})
-	}
-	if cfg.Services["cohere"].Declared && !serviceIgnored("cohere") {
-		enabledChecks = append(enabledChecks, checks.CohereCheck{})
-	}
-	if cfg.Services["replicate"].Declared && !serviceIgnored("replicate") {
-		enabledChecks = append(enabledChecks, checks.ReplicateCheck{})
-	}
-	if cfg.Services["huggingface"].Declared && !serviceIgnored("huggingface") {
-		enabledChecks = append(enabledChecks, checks.HuggingFaceCheck{})
-	}
-	if cfg.Services["grok"].Declared && !serviceIgnored("grok") {
-		enabledChecks = append(enabledChecks, checks.GrokCheck{})
-	}
-	if cfg.Services["perplexity"].Declared && !serviceIgnored("perplexity") {
-		enabledChecks = append(enabledChecks, checks.PerplexityCheck{})
-	}
-	if cfg.Services["together_ai"].Declared && !serviceIgnored("together_ai") {
-		enabledChecks = append(enabledChecks, checks.TogetherAICheck{})
-	}
-
-	// Cookie Consent Services
-	if cfg.Services["cookieconsent"].Declared && !serviceIgnored("cookieconsent") {
-		enabledChecks = append(enabledChecks, checks.CookieConsentJSCheck{})
-	}
-	if cfg.Services["cookiebot"].Declared && !serviceIgnored("cookiebot") {
-		enabledChecks = append(enabledChecks, checks.CookiebotCheck{})
-	}
-	if cfg.Services["onetrust"].Declared && !serviceIgnored("onetrust") {
-		enabledChecks = append(enabledChecks, checks.OneTrustCheck{})
-	}
-	if cfg.Services["termly"].Declared && !serviceIgnored("termly") {
-		enabledChecks = append(enabledChecks, checks.TermlyCheck{})
-	}
-	if cfg.Services["cookieyes"].Declared && !serviceIgnored("cookieyes") {
-		enabledChecks = append(enabledChecks, checks.CookieYesCheck{})
-	}
-	if cfg.Services["iubenda"].Declared && !serviceIgnored("iubenda") {
-		enabledChecks = append(enabledChecks, checks.IubendaCheck{})
+	for _, sc := range serviceChecks {
+		if cfg.Services[sc.id].Declared && !serviceIgnored(sc.id) {
+			enabledChecks = append(enabledChecks, sc.check)
+		}
 	}
 
 	// === Code Quality & Performance ===
