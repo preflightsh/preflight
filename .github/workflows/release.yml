@@ -27,6 +27,12 @@ jobs:
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: '1.25'
+          # Without this, setup-go takes any cached 1.25.x the runner
+          # image happens to ship and never looks for a newer patch, so
+          # the toolchain that builds a release is whatever the runner
+          # was baked with. That silently decides whether standard
+          # library CVEs land in published binaries.
+          check-latest: true
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0

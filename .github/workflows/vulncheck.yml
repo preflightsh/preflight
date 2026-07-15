@@ -24,12 +24,14 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Set up Go
-        # Same version the release build uses, so the standard library
-        # findings reflect what actually ships rather than whatever
-        # toolchain happens to be newest.
+        # Keep this spec and check-latest in step with release.yml.
+        # Standard library findings are relative to the toolchain doing
+        # the scanning, so if this drifts from the toolchain that builds
+        # releases, the scan stops describing the published binaries.
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: '1.25'
+          check-latest: true
           cache: true
 
       - name: Install govulncheck
