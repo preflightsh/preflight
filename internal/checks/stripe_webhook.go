@@ -97,8 +97,14 @@ func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {
 				return nil
 			}
 
+			// Match against code only. initPatterns are broad on purpose
+			// (`Stripe\(` alone counts), so a file whose only mention of
+			// Stripe is "// TODO: call Stripe() here once we sign up" would
+			// otherwise report the integration as present and configured.
+			code := stripCodeComments(string(content))
+
 			for _, pattern := range initPatterns {
-				if pattern.Match(content) {
+				if pattern.MatchString(code) {
 					initFound = true
 					return filepath.SkipAll
 				}
@@ -112,15 +118,18 @@ func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {
 		}
 	}
 
-	// Also check Gemfile and package.json
+	// Also check Gemfile and package.json. stripComments rather than
+	// stripCodeComments here: a Gemfile comments with "#", so a
+	// commented-out `# gem "stripe"` must not count as a dependency.
 	for _, depFile := range []string{"Gemfile", "Gemfile.lock", "package.json"} {
 		path := filepath.Join(ctx.RootDir, depFile)
 		content, err := os.ReadFile(path)
 		if err != nil {
 			continue
 		}
+		deps := stripComments(string(content))
 		for _, pattern := range initPatterns {
-			if pattern.Match(content) {
+			if pattern.MatchString(deps) {
 				initFound = true
 				break
 			}
