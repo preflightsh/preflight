@@ -16,6 +16,34 @@ import (
 	"github.com/preflightsh/preflight/internal/netutil"
 )
 
+// findProjectPath reports whether pattern (relative to rootDir) matches an
+// existing file or directory, returning the project-relative path it matched.
+//
+// The path tables in this file are mostly literal, but a few carry a "*" for
+// the app-name segment a framework layout embeds, e.g. Phoenix's
+// lib/<app>_web/controllers/. os.Stat treats "*" as a literal character, so
+// those entries can never match and the framework they cover goes undetected.
+func findProjectPath(rootDir, pattern string) (string, bool) {
+	full := filepath.Join(rootDir, pattern)
+	if !strings.ContainsAny(pattern, "*?[") {
+		if _, err := os.Stat(full); err == nil {
+			return pattern, true
+		}
+		return "", false
+	}
+	matches, err := filepath.Glob(full)
+	if err != nil {
+		return "", false
+	}
+	for _, m := range matches {
+		if _, err := os.Stat(m); err == nil {
+			// Report where it actually is, not the pattern that found it.
+			return relPath(rootDir, m), true
+		}
+	}
+	return "", false
+}
+
 // probeStaticFileOverHTTP probes baseURL+path against the configured
 // staging or production URL. Returns true if the response is 200 with
 // non-empty content. Used as a fallback for files commonly generated
@@ -626,15 +654,14 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 		"Controllers/SitemapController.cs",
 	}
 
-	for _, path := range dynamicSitemapPaths {
-		fullPath := filepath.Join(ctx.RootDir, path)
-		if _, err := os.Stat(fullPath); err == nil {
+	for _, pattern := range dynamicSitemapPaths {
+		if found, ok := findProjectPath(ctx.RootDir, pattern); ok {
 			return CheckResult{
 				ID:       c.ID(),
 				Title:    c.Title(),
 				Severity: SeverityInfo,
 				Passed:   true,
-				Message:  "sitemap.xml generated via " + path,
+				Message:  "sitemap.xml generated via " + found,
 			}, nil
 		}
 	}
@@ -1398,9 +1425,8 @@ func (c IndexNowCheck) Run(ctx Context) (CheckResult, error) {
 		"Services/IndexNowService.cs",
 	}
 
-	for _, path := range dynamicIndexNowPaths {
-		fullPath := filepath.Join(ctx.RootDir, path)
-		if _, err := os.Stat(fullPath); err == nil {
+	for _, pattern := range dynamicIndexNowPaths {
+		if path, ok := findProjectPath(ctx.RootDir, pattern); ok {
 			return CheckResult{
 				ID:       c.ID(),
 				Title:    c.Title(),

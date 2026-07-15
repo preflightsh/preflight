@@ -3,7 +3,10 @@ package checks
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/preflightsh/preflight/internal/config"
@@ -212,4 +215,104 @@ func TestConfiguredProbeBaseURL(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The path tables carry a "*" for the app-name segment Phoenix embeds
+// (lib/<app>_web/...). os.Stat treats "*" literally, so those entries could
+// never match and Phoenix projects were told the file was missing.
+func TestFindProjectPath(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite := func(rel string) {
+		t.Helper()
+		full := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustWrite("lib/myapp_web/controllers/sitemap_controller.ex")
+	mustWrite("handlers/sitemap.go")
+
+	t.Run("literal path matches", func(t *testing.T) {
+		got, ok := findProjectPath(dir, "handlers/sitemap.go")
+		if !ok || got != "handlers/sitemap.go" {
+			t.Errorf("got (%q, %v), want (handlers/sitemap.go, true)", got, ok)
+		}
+	})
+
+	t.Run("literal path absent", func(t *testing.T) {
+		if _, ok := findProjectPath(dir, "handlers/nope.go"); ok {
+			t.Error("ok = true for a path that does not exist")
+		}
+	})
+
+	t.Run("glob matches and reports the real path", func(t *testing.T) {
+		got, ok := findProjectPath(dir, "lib/*/controllers/sitemap_controller.ex")
+		if !ok {
+			t.Fatal("ok = false, want true: the glob should expand")
+		}
+		if got != "lib/myapp_web/controllers/sitemap_controller.ex" {
+			t.Errorf("got %q, want the resolved path rather than the pattern", got)
+		}
+	})
+
+	t.Run("glob with no match", func(t *testing.T) {
+		if _, ok := findProjectPath(dir, "lib/*/services/nothing.ex"); ok {
+			t.Error("ok = true for a glob matching nothing")
+		}
+	})
+
+	t.Run("glob does not match across separators", func(t *testing.T) {
+		if _, ok := findProjectPath(dir, "lib/*/sitemap_controller.ex"); ok {
+			t.Error("ok = true: a single star must not span directory separators")
+		}
+	})
+}
+
+// End-to-end: a Phoenix project with a real sitemap controller.
+func TestSitemapCheckFindsPhoenixController(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "lib", "myapp_web", "controllers")
+	if err := os.MkdirAll(p, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(p, "sitemap_controller.ex"), []byte("defmodule X do\nend\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := SitemapCheck{}.Run(Context{RootDir: dir, Config: &config.PreflightConfig{Stack: "elixir"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Passed {
+		t.Errorf("Phoenix sitemap_controller.ex present but reported %q", res.Message)
+	}
+	if !strings.Contains(res.Message, "myapp_web") {
+		t.Errorf("message %q should name the resolved path, not the glob", res.Message)
+	}
+}
+
+func TestIndexNowCheckFindsPhoenixService(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "lib", "myapp_web", "services")
+	if err := os.MkdirAll(p, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(p, "index_now.ex"), []byte("defmodule X do\nend\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := IndexNowCheck{}.Run(Context{
+		RootDir: dir,
+		Config: &config.PreflightConfig{
+			Stack:  "elixir",
+			Checks: config.ChecksConfig{IndexNow: &config.IndexNowConfig{Enabled: true, Key: "abc123"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("phoenix index_now.ex -> passed=%v msg=%q", res.Passed, res.Message)
 }
