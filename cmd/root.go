@@ -31,6 +31,23 @@ func init() {
 	rootCmd.SilenceErrors = true
 }
 
+// Exit codes are a contract: CI pipelines branch on them and the README
+// documents them, so they are named here rather than written as bare
+// integers at each return.
+//
+// ExitUsage is deliberately distinct from ExitFail. Both mean "non-zero",
+// but conflating them tells a pipeline that a mistyped path or an
+// unreadable preflight.yml is the same event as a project that genuinely
+// failed its checks. 64 follows the sysexits.h EX_USAGE convention, and
+// like 130 (128 + SIGINT) it stays clear of the 0-2 result range.
+const (
+	ExitOK       = 0
+	ExitWarn     = 1
+	ExitFail     = 2
+	ExitUsage    = 64
+	ExitCanceled = 130
+)
+
 // ExitError is an error that carries a specific exit code
 type ExitError struct {
 	Code int

@@ -31,7 +31,8 @@ var scanCmd = &cobra.Command{
 	Short: "Scan your project for launch readiness",
 	Long: `Run all enabled checks against your project and report results.
 If path is provided, scans that directory. Otherwise scans current directory.
-Exits with code 0 for success, 1 for warnings only, 2 for errors.`,
+Exits 0 on success, 1 for warnings only, 2 when checks find errors,
+and 64 when preflight could not run (bad path or unreadable config).`,
 	RunE: runScan,
 }
 
@@ -112,10 +113,10 @@ func runScan(cmd *cobra.Command, args []string) error {
 		// Validate the provided path
 		info, err := os.Stat(projectDir)
 		if err != nil {
-			return &ExitError{Code: 2, Err: fmt.Errorf("path does not exist: %s", projectDir)}
+			return &ExitError{Code: ExitUsage, Err: fmt.Errorf("path does not exist: %s", projectDir)}
 		}
 		if !info.IsDir() {
-			return &ExitError{Code: 2, Err: fmt.Errorf("path is not a directory: %s", projectDir)}
+			return &ExitError{Code: ExitUsage, Err: fmt.Errorf("path is not a directory: %s", projectDir)}
 		}
 	} else {
 		var err error
@@ -132,7 +133,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 		if !ciMode {
 			msg += "\nRun 'preflight init' to create a configuration file."
 		}
-		return &ExitError{Code: 2, Err: fmt.Errorf("%s", msg)}
+		return &ExitError{Code: ExitUsage, Err: fmt.Errorf("%s", msg)}
 	}
 
 	// Create HTTP client with timeout. SafeHTTPClient refuses to dial
@@ -247,7 +248,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	// One-off narrowing via --only / --skip.
 	enabledChecks, err = filterChecksByFlags(enabledChecks, onlyFlag, skipFlag)
 	if err != nil {
-		return &ExitError{Code: 2, Err: err}
+		return &ExitError{Code: ExitUsage, Err: err}
 	}
 
 	// Run all checks
@@ -258,7 +259,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 		if scanCtx.Err() != nil {
 			spinner.Stop()
 			fmt.Fprintln(os.Stderr, "\nScan cancelled.")
-			return &ExitError{Code: 130}
+			return &ExitError{Code: ExitCanceled}
 		}
 		spinner.Update(fmt.Sprintf("Running %s (%d/%d)", check.Title(), i+1, len(enabledChecks)))
 		result, err := check.Run(ctx)
@@ -512,12 +513,12 @@ func determineExitCode(results []checks.CheckResult) int {
 	}
 
 	if hasError {
-		return 2
+		return ExitFail
 	}
 	if hasWarning {
-		return 1
+		return ExitWarn
 	}
-	return 0
+	return ExitOK
 }
 
 // canAutoDetectLayout checks if a layout file can be auto-detected for SEO checks

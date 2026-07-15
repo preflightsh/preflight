@@ -372,7 +372,12 @@ All services have validation checks that verify proper integration (env vars, SD
 | 0 | All checks passed |
 | 1 | Warnings only |
 | 2 | Errors found |
+| 64 | Preflight could not run (bad path, unreadable config, unknown check ID) |
 | 130 | Scan cancelled (Ctrl-C / SIGTERM) |
+
+Codes 1 and 2 mean the scan ran and reported something. Code 64 means it
+never got that far, so CI can tell "this project has problems" apart from
+"this invocation was wrong".
 
 ## Shell Completions
 
