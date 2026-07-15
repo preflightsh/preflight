@@ -3,6 +3,7 @@ package output
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/preflightsh/preflight/internal/checks"
@@ -25,7 +26,19 @@ type JSONCheckResult struct {
 	Suggestions []string `json:"suggestions,omitempty"`
 }
 
-func (j JSONOutputter) Output(projectName string, results []checks.CheckResult) {
+func (j JSONOutputter) Output(w io.Writer, projectName string, results []checks.CheckResult) {
+	output := BuildJSONOutput(projectName, results)
+
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(output); err != nil {
+		fmt.Fprintf(os.Stderr, "Error encoding JSON: %v\n", err)
+	}
+}
+
+// BuildJSONOutput maps check results onto the wire format. Kept separate
+// from the encoding so the contract can be asserted without doing I/O.
+func BuildJSONOutput(projectName string, results []checks.CheckResult) JSONOutput {
 	output := JSONOutput{
 		Project: projectName,
 		Summary: CalculateSummary(results),
@@ -43,9 +56,5 @@ func (j JSONOutputter) Output(projectName string, results []checks.CheckResult) 
 		}
 	}
 
-	encoder := json.NewEncoder(os.Stdout)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(output); err != nil {
-		fmt.Fprintf(os.Stderr, "Error encoding JSON: %v\n", err)
-	}
+	return output
 }

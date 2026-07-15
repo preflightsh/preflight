@@ -284,7 +284,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 		outputter = output.HumanOutputter{Verbose: verboseFlag}
 	}
 
-	outputter.Output(cfg.ProjectName, results)
+	outputter.Output(os.Stdout, cfg.ProjectName, results)
 
 	// Publish to the dashboard if requested. Best-effort: it never changes the
 	// scan's exit code and prints to stderr so JSON output stays clean.

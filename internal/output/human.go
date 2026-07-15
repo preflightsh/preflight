@@ -2,6 +2,7 @@ package output
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -52,12 +53,12 @@ type HumanOutputter struct {
 	Verbose bool
 }
 
-func (h HumanOutputter) Output(projectName string, results []checks.CheckResult) {
+func (h HumanOutputter) Output(w io.Writer, projectName string, results []checks.CheckResult) {
 	// Header
-	fmt.Println()
-	fmt.Printf("%s%s ✈  Preflight Scan Results%s\n", colorBold, colorCyan, colorReset)
-	fmt.Printf("%s   Project: %s%s\n", colorGray, projectName, colorReset)
-	fmt.Println()
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "%s%s ✈  Preflight Scan Results%s\n", colorBold, colorCyan, colorReset)
+	fmt.Fprintf(w, "%s   Project: %s%s\n", colorGray, projectName, colorReset)
+	fmt.Fprintln(w)
 
 	// Category icons
 	categoryIcons := map[string]string{
@@ -220,27 +221,27 @@ func (h HumanOutputter) Output(projectName string, results []checks.CheckResult)
 		status := formatStatus(r)
 		categoryLabel := fmt.Sprintf("%s  %-10s", icon, category)
 
-		fmt.Printf("  %s %s%-45s%s %s\n", categoryLabel, colorReset, r.Title, colorReset, status)
+		fmt.Fprintf(w, "  %s %s%-45s%s %s\n", categoryLabel, colorReset, r.Title, colorReset, status)
 
 		// Show message for failed checks, or for passed checks with useful info
 		if r.Message != "" {
 			if !r.Passed {
-				fmt.Printf("  %s                  └─ %s%s\n", colorGray, r.Message, colorReset)
+				fmt.Fprintf(w, "  %s                  └─ %s%s\n", colorGray, r.Message, colorReset)
 			} else if hasUsefulPassedMessage(r.Message) {
-				fmt.Printf("  %s                  └─ %s%s\n", colorGray, r.Message, colorReset)
+				fmt.Fprintf(w, "  %s                  └─ %s%s\n", colorGray, r.Message, colorReset)
 			}
 		}
 
 		// Show verbose details if enabled
 		if h.Verbose && len(r.Details) > 0 {
 			for _, detail := range r.Details {
-				fmt.Printf("  %s                  │  %s%s\n", colorGray, detail, colorReset)
+				fmt.Fprintf(w, "  %s                  │  %s%s\n", colorGray, detail, colorReset)
 			}
 		}
 
 		// Add subtle divider between checks (except after the last one)
 		if !isLast {
-			fmt.Printf("  %s· · · · · · · · · · · · · · · · · · · · · · · · · · · ·%s\n", colorGray, colorReset)
+			fmt.Fprintf(w, "  %s· · · · · · · · · · · · · · · · · · · · · · · · · · · ·%s\n", colorGray, colorReset)
 		}
 	}
 
@@ -253,12 +254,12 @@ func (h HumanOutputter) Output(projectName string, results []checks.CheckResult)
 	// Print service check results under a heading
 	if len(serviceResults) > 0 {
 		if len(coreResults) > 0 {
-			fmt.Println()
-			fmt.Printf("  %s────────────────────────────────────────────────────────%s\n", colorGray, colorReset)
+			fmt.Fprintln(w)
+			fmt.Fprintf(w, "  %s────────────────────────────────────────────────────────%s\n", colorGray, colorReset)
 		}
-		fmt.Println()
-		fmt.Printf("%s%s 🔌 Checked Services%s\n", colorBold, colorCyan, colorReset)
-		fmt.Println()
+		fmt.Fprintln(w)
+		fmt.Fprintf(w, "%s%s 🔌 Checked Services%s\n", colorBold, colorCyan, colorReset)
+		fmt.Fprintln(w)
 
 		for i, r := range serviceResults {
 			isLast := i == len(serviceResults)-1
@@ -268,30 +269,30 @@ func (h HumanOutputter) Output(projectName string, results []checks.CheckResult)
 
 	// Summary
 	summary := CalculateSummary(results)
-	fmt.Println()
-	fmt.Printf("  %s────────────────────────────────────────────────────────%s\n", colorGray, colorReset)
-	fmt.Println()
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "  %s────────────────────────────────────────────────────────%s\n", colorGray, colorReset)
+	fmt.Fprintln(w)
 
 	// Summary with icons
-	fmt.Printf("  %s✓ Passed:%s  %s%d%s", colorGreen, colorReset, colorBold, summary.OK, colorReset)
+	fmt.Fprintf(w, "  %s✓ Passed:%s  %s%d%s", colorGreen, colorReset, colorBold, summary.OK, colorReset)
 	if summary.Warn > 0 {
-		fmt.Printf("    %s⚠ Warnings:%s %s%d%s", colorYellow, colorReset, colorBold, summary.Warn, colorReset)
+		fmt.Fprintf(w, "    %s⚠ Warnings:%s %s%d%s", colorYellow, colorReset, colorBold, summary.Warn, colorReset)
 	}
 	if summary.Fail > 0 {
-		fmt.Printf("    %s✗ Failed:%s  %s%d%s", colorRed, colorReset, colorBold, summary.Fail, colorReset)
+		fmt.Fprintf(w, "    %s✗ Failed:%s  %s%d%s", colorRed, colorReset, colorBold, summary.Fail, colorReset)
 	}
-	fmt.Println()
-	fmt.Println()
+	fmt.Fprintln(w)
+	fmt.Fprintln(w)
 
 	// Final verdict
 	if summary.Fail > 0 {
-		fmt.Printf("  %s%s✗ Not ready for launch%s\n", colorBold, colorRed, colorReset)
+		fmt.Fprintf(w, "  %s%s✗ Not ready for launch%s\n", colorBold, colorRed, colorReset)
 	} else if summary.Warn > 0 {
-		fmt.Printf("  %s%s⚠ Review warnings before launch%s\n", colorBold, colorYellow, colorReset)
+		fmt.Fprintf(w, "  %s%s⚠ Review warnings before launch%s\n", colorBold, colorYellow, colorReset)
 	} else {
-		fmt.Printf("  %s%s✓ Ready for launch!%s\n", colorBold, colorGreen, colorReset)
+		fmt.Fprintf(w, "  %s%s✓ Ready for launch!%s\n", colorBold, colorGreen, colorReset)
 	}
-	fmt.Println()
+	fmt.Fprintln(w)
 }
 
 // hasUsefulPassedMessage returns true if the message contains info worth showing

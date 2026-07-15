@@ -1,9 +1,17 @@
 package output
 
-import "github.com/preflightsh/preflight/internal/checks"
+import (
+	"io"
 
+	"github.com/preflightsh/preflight/internal/checks"
+)
+
+// Outputter renders scan results to w. Taking the writer as a parameter
+// rather than reaching for os.Stdout is what makes the rendering
+// testable: JSONOutput in particular is the run-data contract the
+// dashboard ingests, so it needs to be assertable byte for byte.
 type Outputter interface {
-	Output(projectName string, results []checks.CheckResult)
+	Output(w io.Writer, projectName string, results []checks.CheckResult)
 }
 
 type Summary struct {
