@@ -91,3 +91,69 @@ func TestFetchImageDimensionsMalformedWebP(t *testing.T) {
 		})
 	}
 }
+
+// og:image and twitter:image are almost always absolute (crawlers have to
+// be able to fetch them without a base), and the "//" in the scheme used
+// to be eaten by the comment stripper before this value was read. The tag
+// still looked present, so the check reported a clean pass while the
+// dimension validation below it silently never ran.
+func TestExtractMetaContentAbsoluteURL(t *testing.T) {
+	cases := []struct {
+		name string
+		html string
+		attr string
+		want string
+	}{
+		{
+			name: "og:image https",
+			html: `<meta property="og:image" content="https://cdn.example.com/og.png">`,
+			attr: `property=["']og:image["']`,
+			want: "https://cdn.example.com/og.png",
+		},
+		{
+			name: "og:image http",
+			html: `<meta property="og:image" content="http://cdn.example.com/og.png">`,
+			attr: `property=["']og:image["']`,
+			want: "http://cdn.example.com/og.png",
+		},
+		{
+			name: "twitter:image protocol-relative",
+			html: `<meta name="twitter:image" content="//cdn.example.com/t.png">`,
+			attr: `name=["']twitter:image["']`,
+			want: "//cdn.example.com/t.png",
+		},
+		{
+			name: "og:image relative path",
+			html: `<meta property="og:image" content="/og.png">`,
+			attr: `property=["']og:image["']`,
+			want: "/og.png",
+		},
+		{
+			name: "og:image in a multi-tag head",
+			html: "<head>\n  <meta property=\"og:image\" content=\"https://x.com/o.png\">\n  <meta name=\"twitter:card\" content=\"summary\">\n</head>",
+			attr: `property=["']og:image["']`,
+			want: "https://x.com/o.png",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := extractMetaContent(stripComments(tc.html), tc.attr)
+			if got != tc.want {
+				t.Errorf("extractMetaContent = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// resolveImageURL keys off the "http://" prefix to decide absolute vs
+// relative, so a truncated scheme silently turned an absolute URL into a
+// relative one and appended it to the site's base URL.
+func TestResolveImageURLKeepsAbsoluteAfterStrip(t *testing.T) {
+	html := `<meta property="og:image" content="https://cdn.example.com/og.png">`
+	raw := extractMetaContent(stripComments(html), `property=["']og:image["']`)
+	got := resolveImageURL(raw, "https://example.com")
+	want := "https://cdn.example.com/og.png"
+	if got != want {
+		t.Errorf("resolveImageURL = %q, want %q (absolute URL must not be rebased)", got, want)
+	}
+}

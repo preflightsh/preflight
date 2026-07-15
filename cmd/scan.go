@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -138,16 +137,26 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 	// Create HTTP client with timeout. SafeHTTPClient refuses to dial
 	// private/loopback/metadata IPs so a hostile preflight.yml cannot
-	// coerce checks into probing internal services. We fall back to a
-	// plain client when the user explicitly configured a local dev URL
-	// (localhost, *.local, *.test, *.ddev.site etc.) — that's a
-	// trusted-config workflow, not the hostile-repo threat model.
-	var httpClient *http.Client
-	if checks.IsLocalURL(cfg.URLs.Production) || checks.IsLocalURL(cfg.URLs.Staging) {
-		httpClient = &http.Client{Timeout: 2 * time.Second}
-	} else {
-		httpClient = netutil.SafeHTTPClient(2 * time.Second)
+	// coerce checks into probing internal services.
+	//
+	// Configuring a local dev URL (localhost, *.local, *.test,
+	// *.ddev.site etc.) is a trusted-config workflow, so we exempt those
+	// targets, but only those exact host:port pairs. The scan reaches
+	// plenty of URLs the config never vouched for (og:image and
+	// twitter:image are taken verbatim from page content), so exempting
+	// per-target rather than swapping in a wide-open client keeps a
+	// local production URL from also unlocking the metadata endpoint or
+	// a Redis port for the rest of the run.
+	var localAddrs []string
+	for _, raw := range []string{cfg.URLs.Production, cfg.URLs.Staging} {
+		if raw == "" || !checks.IsLocalURL(raw) {
+			continue
+		}
+		if addr := netutil.AddrFromURL(raw); addr != "" {
+			localAddrs = append(localAddrs, addr)
+		}
 	}
+	httpClient := netutil.SafeHTTPClientAllowing(2*time.Second, localAddrs)
 
 	// Spinner gives the user something to watch while checks run. Off in
 	// CI and JSON modes (which expect quiet/structured output) and on

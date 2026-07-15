@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 )
 
 type LangAttributeCheck struct{}
@@ -132,7 +131,7 @@ func (c LangAttributeCheck) Run(ctx Context) (CheckResult, error) {
 
 func hasLangAttribute(content, stack string) bool {
 	// Strip comments to avoid false positives on commented-out code
-	content = stripCommentsLang(content)
+	content = stripCodeComments(content)
 
 	// Standard HTML lang attribute: <html lang="en">
 	htmlLang := regexp.MustCompile(`(?i)<html[^>]+lang=["'][a-z]{2}(-[A-Za-z]{2,})?["']`)
@@ -286,31 +285,4 @@ func getLangSuggestions(stack string) []string {
 			"Use appropriate language code (en, es, fr, de, etc.)",
 		}
 	}
-}
-
-// stripCommentsLang removes comments from code to avoid false positives
-func stripCommentsLang(content string) string {
-	// Remove single-line comments (// ...) but protect URL protocols (e.g. http://)
-	content = strings.ReplaceAll(content, "://", "\x00PROTO\x00")
-	singleLine := regexp.MustCompile(`//[^\n]*`)
-	content = singleLine.ReplaceAllString(content, "")
-	content = strings.ReplaceAll(content, "\x00PROTO\x00", "://")
-
-	// Remove multi-line comments (/* ... */) including JSX inline comments
-	multiLine := regexp.MustCompile(`(?s)/\*.*?\*/`)
-	content = multiLine.ReplaceAllString(content, "")
-
-	// Remove HTML comments (<!-- ... -->)
-	htmlComments := regexp.MustCompile(`(?s)<!--.*?-->`)
-	content = htmlComments.ReplaceAllString(content, "")
-
-	// Remove Twig/Jinja comments ({# ... #})
-	twigComments := regexp.MustCompile(`(?s)\{#.*?#\}`)
-	content = twigComments.ReplaceAllString(content, "")
-
-	// Remove ERB comments (<%# ... %>)
-	erbComments := regexp.MustCompile(`(?s)<%#.*?%>`)
-	content = erbComments.ReplaceAllString(content, "")
-
-	return content
 }

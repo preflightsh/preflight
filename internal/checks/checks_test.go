@@ -129,6 +129,49 @@ func TestStripComments(t *testing.T) {
 			in:   "#{not_a_comment}",
 			want: "#{not_a_comment}",
 		},
+		// The "//" in a URL is not a comment. Truncating the line here
+		// silently blinds every downstream pattern: the tag is still
+		// present but its attributes are gone.
+		{
+			name: "https URL in attribute survives",
+			in:   `<link rel="canonical" href="https://example.com/page">`,
+			want: `<link rel="canonical" href="https://example.com/page">`,
+		},
+		{
+			name: "http URL in attribute survives",
+			in:   `<meta property="og:image" content="http://cdn.example.com/og.png">`,
+			want: `<meta property="og:image" content="http://cdn.example.com/og.png">`,
+		},
+		{
+			name: "protocol-relative URL survives",
+			in:   `<script src="//cdn.example.com/x.js"></script>`,
+			want: `<script src="//cdn.example.com/x.js"></script>`,
+		},
+		{
+			name: "minified tags with URLs survive",
+			in:   `<link rel="canonical" href="https://x.com/"><meta property="og:image" content="https://x.com/o.png">`,
+			want: `<link rel="canonical" href="https://x.com/"><meta property="og:image" content="https://x.com/o.png">`,
+		},
+		{
+			name: "real comment after a URL is still stripped",
+			in:   `const u = "https://x.com/api"; // call it later`,
+			want: `const u = "https://x.com/api"; `,
+		},
+		{
+			name: "commented-out line containing a URL is still stripped",
+			in:   "// <link rel=\"canonical\" href=\"https://x.com/\">\nreal();",
+			want: "\nreal();",
+		},
+		{
+			name: "block comment containing a URL is still stripped",
+			in:   "/* see https://x.com/docs */\nfn();",
+			want: "\nfn();",
+		},
+		{
+			name: "HTML comment containing a URL is still stripped",
+			in:   `<p>hi</p><!-- <link rel="canonical" href="https://x.com/"> -->`,
+			want: `<p>hi</p>`,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -389,7 +389,38 @@ var (
 	reTwigComment       = regexp.MustCompile(`(?s)\{#.*?#\}`)
 	reERBComment        = regexp.MustCompile(`(?s)<%#.*?%>`)
 	reHashLineComment   = regexp.MustCompile(`(?m)^\s*#[^{].*$`)
+
+	// reProtocolRelative matches the leading "//" of a protocol-relative
+	// URL (src="//cdn.example.com/x.js"). Unlike a scheme, the only thing
+	// marking it as a URL rather than a comment is the quote or "=" that
+	// introduces it.
+	reProtocolRelative = regexp.MustCompile(`([="'])//`)
 )
+
+// URL slashes are indistinguishable from a "//" line comment to a regex:
+// without protection, reSingleLineComment turns
+//
+//	<link rel="canonical" href="https://example.com/">
+//
+// into `<link rel="canonical" href="https:` and every downstream pattern
+// silently stops matching. Hide the slashes behind sentinels for the
+// duration of the strip and restore them afterwards. NUL bytes never
+// appear in the templates we scan, so the sentinels cannot collide with
+// real content.
+const (
+	urlSchemeSentinel = "\x00preflight-scheme\x00"
+	urlSlashSentinel  = "\x00preflight-slashes\x00"
+)
+
+func protectURLSlashes(content string) string {
+	content = strings.ReplaceAll(content, "://", urlSchemeSentinel)
+	return reProtocolRelative.ReplaceAllString(content, "${1}"+urlSlashSentinel)
+}
+
+func restoreURLSlashes(content string) string {
+	content = strings.ReplaceAll(content, urlSchemeSentinel, "://")
+	return strings.ReplaceAll(content, urlSlashSentinel, "//")
+}
 
 // stripComments removes common comment syntax from code to avoid false
 // positives when pattern matching. Supports JS/TS, HTML, Twig/Jinja,
@@ -405,10 +436,11 @@ func stripComments(content string) string {
 // which makes it safer for content that legitimately uses `#` at line
 // starts (CSS selectors, YAML keys, etc.).
 func stripCodeComments(content string) string {
+	content = protectURLSlashes(content)
 	content = reSingleLineComment.ReplaceAllString(content, "")
 	content = reMultiLineComment.ReplaceAllString(content, "")
 	content = reHTMLComment.ReplaceAllString(content, "")
 	content = reTwigComment.ReplaceAllString(content, "")
 	content = reERBComment.ReplaceAllString(content, "")
-	return content
+	return restoreURLSlashes(content)
 }
