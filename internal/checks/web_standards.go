@@ -3,12 +3,15 @@ package checks
 import (
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"golang.org/x/net/publicsuffix"
 
 	"github.com/preflightsh/preflight/internal/netutil"
 )
@@ -52,25 +55,49 @@ func probeStaticFileWithParents(ctx Context, path string) (string, bool) {
 
 // parentBaseURLs walks up from a production URL's host to its parent domain(s):
 // app.example.com -> [https://example.com]. It strips one subdomain label at a
-// time and stops at two labels so it never probes a bare TLD. Returns nil when
-// no URL is given or the host is already apex (two labels).
+// time and stops at the registrable domain, so it never probes a host the user
+// has no relationship with. Returns nil when no URL is given, the host is an IP,
+// or the host is already the registrable domain.
+//
+// The stopping rule has to come from the public suffix list rather than a label
+// count: counting labels stops "example.com" correctly but walks
+// "example.co.uk" up to "co.uk", a public suffix nobody owns, and every UK site
+// is one of those.
 func parentBaseURLs(rawURL string) []string {
 	if rawURL == "" {
 		return nil
 	}
 	u, err := url.Parse(rawURL)
-	if err != nil || u.Hostname() == "" {
+	if err != nil {
+		return nil
+	}
+	host := u.Hostname()
+	if host == "" {
+		return nil
+	}
+	// An IP address has no parent domain. Walking its labels would invent
+	// hostnames belonging to someone else entirely (192.168.1.5 -> 168.1.5).
+	if net.ParseIP(host) != nil {
+		return nil
+	}
+	// No registrable domain (localhost, a bare label) means nothing to walk up to.
+	apex, err := publicsuffix.EffectiveTLDPlusOne(host)
+	if err != nil || apex == host {
 		return nil
 	}
 	scheme := u.Scheme
 	if scheme == "" {
 		scheme = "https"
 	}
-	labels := strings.Split(u.Hostname(), ".")
 	var out []string
-	for len(labels) > 2 {
+	labels := strings.Split(host, ".")
+	for len(labels) > 1 {
 		labels = labels[1:]
-		out = append(out, scheme+"://"+strings.Join(labels, "."))
+		candidate := strings.Join(labels, ".")
+		out = append(out, scheme+"://"+candidate)
+		if candidate == apex {
+			break
+		}
 	}
 	return out
 }
