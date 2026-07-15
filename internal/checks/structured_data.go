@@ -159,8 +159,13 @@ func hasStructuredData(content, stack string) bool {
 		return true
 	}
 
-	// WordPress Yoast/RankMath
-	wpSEO := regexp.MustCompile(`(?i)wpseo|rank_math|schema.*graph`)
+	// WordPress Yoast/RankMath. Yoast marks its block with the
+	// class "yoast-schema-graph" and both emit an "@graph" array, so match
+	// those literally. An earlier `schema.*graph` caught the same markers
+	// but also fired on any line mentioning both words, which ordinary
+	// GraphQL setup does (`makeExecutableSchema` … `@graphql-tools`),
+	// passing the check for pages with no Schema.org markup at all.
+	wpSEO := regexp.MustCompile(`(?i)wpseo|rank_math|yoast-schema-graph|["']@graph["']\s*:`)
 	if wpSEO.MatchString(content) {
 		return true
 	}
