@@ -15,9 +15,11 @@ import (
 //     env files
 //  3. pass when any LivePatterns matches the live homepage (production
 //     first, then staging)
-//  4. CodePatterns found in the codebase: warn when a live page was checked
-//     in step 3 and matched nothing (integrated in code but not live),
-//     otherwise pass
+//  4. CodePatterns found in the codebase: warn when a live page was actually
+//     fetched in step 3 and matched nothing (integrated in code but not
+//     live), otherwise pass. "Otherwise" covers no URL configured and a URL
+//     that could not be reached: neither says anything about what the live
+//     page contains.
 //  5. warn: declared but nothing found
 //
 // Steps 2 and 3 are skipped when their pattern lists are empty. Checks that
@@ -94,7 +96,16 @@ func (c ServiceCheck) Run(ctx Context) (CheckResult, error) {
 
 // checkLiveSiteForPatterns fetches the live site (production URL first, then
 // staging) and matches the lowercased body against patterns. Returns (found,
-// urlChecked); urlChecked is empty when no URL was available to fetch.
+// urlInspected).
+//
+// urlInspected is empty unless a page was actually fetched and read, which is
+// what lets callers tell "the live page doesn't have this" apart from "there
+// was no live page to look at". They report the former as a warning, so
+// returning a URL for a site that was never reached would claim an
+// integration is missing from a page nobody looked at. A site that is down,
+// a DNS name that doesn't resolve yet, or a CI runner with no egress is not
+// evidence about the page's contents, and pre-launch projects (the ones this
+// tool is for) hit all three.
 func checkLiveSiteForPatterns(ctx Context, patterns []*regexp.Regexp) (bool, string) {
 	url := ctx.Config.URLs.Production
 	if url == "" {
@@ -106,13 +117,13 @@ func checkLiveSiteForPatterns(ctx Context, patterns []*regexp.Regexp) (bool, str
 
 	resp, _, err := tryURL(ctx.reqContext(), ctx.Client, url)
 	if err != nil {
-		return false, url
+		return false, ""
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
 	if err != nil {
-		return false, url
+		return false, ""
 	}
 
 	content := strings.ToLower(string(body))
