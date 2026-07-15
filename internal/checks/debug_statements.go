@@ -356,7 +356,10 @@ func scanForDebugStatements(rootDir string, ignore []string) []string {
 		// Check each line for patterns
 		lines := strings.Split(string(content), "\n")
 		for lineNum, line := range lines {
-			// Skip commented lines (basic check)
+			// Skip commented lines (basic check). This only catches whole-line
+			// comments; hash-style ones in particular have to be handled here,
+			// because stripCodeComments deliberately leaves "#" alone (it is a
+			// CSS selector and a YAML key as often as it is a comment).
 			trimmedLine := strings.TrimSpace(line)
 			if strings.HasPrefix(trimmedLine, "//") ||
 				strings.HasPrefix(trimmedLine, "#") ||
@@ -366,6 +369,13 @@ func scanForDebugStatements(rootDir string, ignore []string) []string {
 				strings.HasPrefix(trimmedLine, "<!--") {
 				continue
 			}
+
+			// A debug statement named in a trailing comment is not a debug
+			// statement: `doWork(); // console.log(x) if this breaks` is real
+			// code plus a note. The prefix check above can't see those, so
+			// strip inline comments before matching. stripCodeComments leaves
+			// URLs intact, so a logged https:// link keeps its line.
+			line = stripCodeComments(line)
 
 			for _, p := range patterns {
 				// Check if this pattern applies to this file type
