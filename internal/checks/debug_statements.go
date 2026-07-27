@@ -255,6 +255,9 @@ func scanForDebugStatements(rootDir string, ignore []string) []string {
 		".config.ts",
 		"webpack.config",
 		"vite.config",
+		// Build scripts log to the terminal by design and never ship.
+		"gulpfile",
+		"gruntfile",
 		"jest.config",
 		"vitest.config",
 		"tailwind.config",
