@@ -203,7 +203,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				ctx.PageHTMLStaging = checks.FetchPageHTML(scanCtx, httpClient, cfg.URLs.Staging)
+				ctx.PageHTMLStaging, ctx.PageFetchStaging = checks.FetchPage(scanCtx, httpClient, cfg.URLs.Staging)
 			}()
 		}
 		if cfg.URLs.Production != "" {
@@ -214,7 +214,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 				if checks.IsLocalURL(cfg.URLs.Production) {
 					prodClient = httpClient
 				}
-				ctx.PageHTMLProduction = checks.FetchPageHTML(scanCtx, prodClient, cfg.URLs.Production)
+				ctx.PageHTMLProduction, ctx.PageFetchProduction = checks.FetchPage(scanCtx, prodClient, cfg.URLs.Production)
 			}()
 		}
 		wg.Wait()

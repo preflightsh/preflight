@@ -65,6 +65,15 @@ type Context struct {
 	// OG/Twitter) report each env separately.
 	PageHTMLStaging    string
 	PageHTMLProduction string
+	// PageFetchStaging and PageFetchProduction carry everything else the
+	// homepage request returned: the status, the response headers and the
+	// URL actually requested. They let checks tell a host that refused the
+	// scan (bot protection answering 403, an auth wall, a rate limit) from
+	// one that is genuinely unreachable, and let a check that would
+	// otherwise re-request the homepage reuse this one instead, so every
+	// row agrees about a host that is slow, blocked or down.
+	PageFetchStaging    PageFetch
+	PageFetchProduction PageFetch
 	// PageHTML is the first-available rendered homepage HTML (staging
 	// preferred). Convenience for env-agnostic checks like favicon
 	// detection that don't care which environment the markup came from.
@@ -236,6 +245,34 @@ func IsLocalURL(rawURL string) bool {
 	return false
 }
 
+// blockedStatus reports whether a status means the host refused to serve
+// the scanner rather than the site being down. Bot protection (Cloudflare
+// answers 403 with a cf-mitigated challenge page), auth walls and rate
+// limits all return a real response whose headers and markup belong to the
+// edge rather than to the app, so checks must report them as blocked
+// instead of measuring the block page.
+func blockedStatus(status int) bool {
+	switch status {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests:
+		return true
+	}
+	return false
+}
+
+// fetchFailure renders the per-env note for a fetch that produced no usable
+// page, naming the status so "the WAF is blocking us" doesn't read as "the
+// site is down".
+func fetchFailure(status int) string {
+	switch {
+	case status == 0:
+		return "unreachable"
+	case blockedStatus(status):
+		return fmt.Sprintf("blocked (HTTP %d)", status)
+	default:
+		return fmt.Sprintf("unreachable (HTTP %d)", status)
+	}
+}
+
 // PerEnvResult is one environment's outcome from a per-env check.
 type PerEnvResult struct {
 	Name    string   // "prod" or "staging"
@@ -253,15 +290,16 @@ type PerEnvResult struct {
 // verbatim but never flip authoritativePassed to true.
 func RunPerEnv(ctx Context, scanRenderedHTML func(html string) []string) (summary string, authoritativePassed bool) {
 	type envR struct {
-		name string
-		html string
+		name   string
+		html   string
+		status int
 	}
 	var envs []envR
 	if ctx.Config.URLs.Production != "" {
-		envs = append(envs, envR{name: "prod", html: ctx.PageHTMLProduction})
+		envs = append(envs, envR{name: "prod", html: ctx.PageHTMLProduction, status: ctx.PageFetchProduction.Status})
 	}
 	if ctx.Config.URLs.Staging != "" {
-		envs = append(envs, envR{name: "staging", html: ctx.PageHTMLStaging})
+		envs = append(envs, envR{name: "staging", html: ctx.PageHTMLStaging, status: ctx.PageFetchStaging.Status})
 	}
 	if len(envs) == 0 {
 		return "", false
@@ -269,7 +307,7 @@ func RunPerEnv(ctx Context, scanRenderedHTML func(html string) []string) (summar
 	var lines []string
 	for i, e := range envs {
 		if e.html == "" {
-			lines = append(lines, fmt.Sprintf("%s: unreachable", e.name))
+			lines = append(lines, fmt.Sprintf("%s: %s", e.name, fetchFailure(e.status)))
 			continue
 		}
 		missing := scanRenderedHTML(e.html)
@@ -285,32 +323,61 @@ func RunPerEnv(ctx Context, scanRenderedHTML func(html string) []string) (summar
 	return strings.Join(lines, "\n                    └─ "), authoritativePassed
 }
 
-// FetchPageHTML fetches a single URL's body. Returns empty string on
-// any error. Body is capped at netutil.MaxResponseBody. The caller picks
-// the client so SafeHTTPClient can guard fetches to production URLs
-// while a relaxed client can reach local dev URLs. A nil ctx is treated
-// as context.Background().
-func FetchPageHTML(ctx context.Context, client *http.Client, rawURL string) string {
+// PageFetch describes how a homepage request went, apart from the body.
+// A zero value means no request was made; Attempted separates that from a
+// request that was made and got nothing back.
+type PageFetch struct {
+	// URL actually requested, with the protocol resolved for local URLs
+	// that were configured without one.
+	URL string
+	// Status is the HTTP status, or 0 when nothing answered.
+	Status int
+	// Headers is nil unless a response arrived.
+	Headers http.Header
+}
+
+// Attempted reports whether a request was made for this environment,
+// however it went. Checks use it to avoid re-requesting a page the scan
+// already failed to fetch.
+func (f PageFetch) Attempted() bool { return f.URL != "" }
+
+// FetchPage fetches a single URL's body and reports how the request went.
+// html is empty unless the response was usable, so callers can separate
+// "nothing there" from "the host answered but refused us". Body is capped
+// at netutil.MaxResponseBody. The caller picks the client so
+// SafeHTTPClient can guard fetches to production URLs while a relaxed
+// client can reach local dev URLs. A nil ctx is treated as
+// context.Background().
+func FetchPage(ctx context.Context, client *http.Client, rawURL string) (html string, fetch PageFetch) {
 	if rawURL == "" {
-		return ""
+		return "", PageFetch{}
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	baseURL := strings.TrimSuffix(rawURL, "/")
-	resp, _, err := tryURL(ctx, client, baseURL+"/")
+	resp, requested, err := tryURL(ctx, client, baseURL+"/")
+	fetch = PageFetch{URL: requested}
 	if err != nil {
-		return ""
+		return "", fetch
 	}
 	defer resp.Body.Close()
+	fetch.Status = resp.StatusCode
+	fetch.Headers = resp.Header
 	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
-		return ""
+		return "", fetch
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, netutil.MaxResponseBody))
 	if err != nil {
-		return ""
+		return "", fetch
 	}
-	return string(body)
+	return string(body), fetch
+}
+
+// FetchPageHTML is FetchPage for callers that only need the body.
+func FetchPageHTML(ctx context.Context, client *http.Client, rawURL string) string {
+	html, _ := FetchPage(ctx, client, rawURL)
+	return html
 }
 
 // doGet performs an HTTP GET with a User-Agent header. A nil ctx is

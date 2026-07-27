@@ -37,9 +37,15 @@ func (c SecurityHeadersCheck) Run(ctx Context) (CheckResult, error) {
 
 	// Check production if configured
 	if prodURL != "" {
-		missing, err := c.checkURL(ctx, prodURL, true)
+		missing, status, err := c.checkURL(ctx, prodURL, ctx.PageFetchProduction)
 		if err != nil {
 			results = append(results, "prod: unreachable")
+			hasFailure = true
+		} else if blockedStatus(status) {
+			// The headers on a bot-protection or auth-wall response are the
+			// edge's, not the site's. Reporting them would invent missing
+			// headers for a site we never actually reached.
+			results = append(results, fmt.Sprintf("prod: %s", fetchFailure(status)))
 			hasFailure = true
 		} else if len(missing) > 0 {
 			results = append(results, fmt.Sprintf("prod missing: %s", strings.Join(missing, ", ")))
@@ -52,9 +58,12 @@ func (c SecurityHeadersCheck) Run(ctx Context) (CheckResult, error) {
 
 	// Check staging if configured
 	if stagingURL != "" {
-		missing, err := c.checkURL(ctx, stagingURL, false)
+		missing, status, err := c.checkURL(ctx, stagingURL, ctx.PageFetchStaging)
 		if err != nil {
 			results = append(results, "staging: unreachable")
+			hasFailure = true
+		} else if blockedStatus(status) {
+			results = append(results, fmt.Sprintf("staging: %s", fetchFailure(status)))
 			hasFailure = true
 		} else if len(missing) > 0 {
 			results = append(results, fmt.Sprintf("staging missing: %s", strings.Join(missing, ", ")))
@@ -107,13 +116,30 @@ func (c SecurityHeadersCheck) Run(ctx Context) (CheckResult, error) {
 	}, nil
 }
 
-// checkURL checks security headers for a single URL and returns missing headers
-func (c SecurityHeadersCheck) checkURL(ctx Context, url string, isProd bool) ([]string, error) {
-	resp, actualURL, err := tryURL(ctx.reqContext(), ctx.Client, url)
-	if err != nil {
-		return nil, fmt.Errorf("fetch %s: %w", url, err)
+// checkURL checks security headers for a single URL and returns the missing
+// headers alongside the status the host answered with, so the caller can
+// discard the results of a response that never came from the app.
+//
+// The scan already fetched each environment's homepage, so prefetched is
+// reused when it holds a response: one request per environment means this
+// row can't disagree with the SEO and metadata rows about whether the host
+// answered, which it otherwise would whenever a slow host beat the timeout
+// on one request but not the other. Only a check invoked outside a scan
+// (no prefetch) makes its own request.
+func (c SecurityHeadersCheck) checkURL(ctx Context, url string, prefetched PageFetch) ([]string, int, error) {
+	headers, status, actualURL := prefetched.Headers, prefetched.Status, prefetched.URL
+	if !prefetched.Attempted() {
+		resp, requested, err := tryURL(ctx.reqContext(), ctx.Client, url)
+		if err != nil {
+			return nil, 0, fmt.Errorf("fetch %s: %w", url, err)
+		}
+		defer resp.Body.Close()
+		headers, status, actualURL = resp.Header, resp.StatusCode, requested
 	}
-	defer resp.Body.Close()
+	if headers == nil {
+		// The scan tried this environment and nothing answered.
+		return nil, 0, fmt.Errorf("fetch %s: no response", url)
+	}
 
 	// Check if we're using HTTPS (HSTS only makes sense over HTTPS)
 	isHTTPS := strings.HasPrefix(actualURL, "https://")
@@ -132,10 +158,10 @@ func (c SecurityHeadersCheck) checkURL(ctx Context, url string, isProd bool) ([]
 
 	var missing []string
 	for _, header := range requiredHeaders {
-		if resp.Header.Get(header) == "" {
+		if headers.Get(header) == "" {
 			missing = append(missing, header)
 		}
 	}
 
-	return missing, nil
+	return missing, status, nil
 }

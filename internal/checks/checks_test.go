@@ -238,6 +238,67 @@ func TestFetchPageHTML(t *testing.T) {
 	})
 }
 
+func TestFetchFailure(t *testing.T) {
+	cases := []struct {
+		status int
+		want   string
+	}{
+		{0, "unreachable"},
+		{http.StatusUnauthorized, "blocked (HTTP 401)"},
+		{http.StatusForbidden, "blocked (HTTP 403)"},
+		{http.StatusTooManyRequests, "blocked (HTTP 429)"},
+		{http.StatusNotFound, "unreachable (HTTP 404)"},
+		{http.StatusInternalServerError, "unreachable (HTTP 500)"},
+	}
+	for _, tc := range cases {
+		if got := fetchFailure(tc.status); got != tc.want {
+			t.Errorf("fetchFailure(%d) = %q, want %q", tc.status, got, tc.want)
+		}
+	}
+}
+
+func TestFetchPageReportsStatus(t *testing.T) {
+	t.Run("bot protection status is reported alongside empty HTML", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// What Cloudflare's managed challenge does to a scanner.
+			w.Header().Set("cf-mitigated", "challenge")
+			w.WriteHeader(http.StatusForbidden)
+		}))
+		defer srv.Close()
+
+		html, fetch := FetchPage(context.Background(), srv.Client(), srv.URL)
+		if html != "" {
+			t.Errorf("FetchPage html = %q, want empty", html)
+		}
+		if fetch.Status != http.StatusForbidden {
+			t.Errorf("FetchPage status = %d, want 403", fetch.Status)
+		}
+		if fetch.Headers.Get("cf-mitigated") != "challenge" {
+			t.Errorf("FetchPage did not capture the response headers: %v", fetch.Headers)
+		}
+	})
+
+	t.Run("a host that never answers is attempted with status 0", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+		client := srv.Client()
+		srv.Close()
+
+		_, fetch := FetchPage(context.Background(), client, srv.URL)
+		if fetch.Status != 0 || fetch.Headers != nil {
+			t.Errorf("FetchPage = %+v, want status 0 and no headers for a dead host", fetch)
+		}
+		if !fetch.Attempted() {
+			t.Error("FetchPage Attempted() = false, want true so checks don't re-request a dead host")
+		}
+	})
+
+	t.Run("an unconfigured URL is not attempted", func(t *testing.T) {
+		if _, fetch := FetchPage(context.Background(), http.DefaultClient, ""); fetch.Attempted() {
+			t.Errorf("FetchPage(empty) = %+v, want an unattempted zero value", fetch)
+		}
+	})
+}
+
 func TestRunPerEnv(t *testing.T) {
 	const sentinel = "<meta name=\"og:title\" content=\"x\">"
 	scanRendered := func(html string) []string {
@@ -283,6 +344,24 @@ func TestRunPerEnv(t *testing.T) {
 		_, ok := RunPerEnv(ctx, scanRendered)
 		if ok {
 			t.Errorf("RunPerEnv with unreachable prod authoritativePassed = true, want false")
+		}
+	})
+
+	t.Run("a blocked production reports the status, not 'unreachable'", func(t *testing.T) {
+		ctx := Context{
+			Config: &config.PreflightConfig{
+				URLs: config.URLConfig{Production: "https://prod", Staging: "https://staging"},
+			},
+			PageHTMLProduction:  "",
+			PageFetchProduction: PageFetch{URL: "https://prod/", Status: http.StatusForbidden, Headers: http.Header{}},
+			PageHTMLStaging:     sentinel,
+		}
+		summary, ok := RunPerEnv(ctx, scanRendered)
+		if ok {
+			t.Errorf("RunPerEnv with blocked prod authoritativePassed = true, want false")
+		}
+		if !strings.Contains(summary, "prod: blocked (HTTP 403)") {
+			t.Errorf("RunPerEnv summary = %q, want it to contain 'prod: blocked (HTTP 403)'", summary)
 		}
 	})
 
