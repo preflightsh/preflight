@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -314,9 +316,17 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 		filesToCheck := []string{}
 
 		// Add main layout if configured
-		if ctx.Config.Checks.SEOMeta != nil && ctx.Config.Checks.SEOMeta.MainLayout != "" {
-			filesToCheck = append(filesToCheck, ctx.Config.Checks.SEOMeta.MainLayout)
+		mainLayout := ""
+		if ctx.Config.Checks.SEOMeta != nil {
+			mainLayout = ctx.Config.Checks.SEOMeta.MainLayout
 		}
+		if mainLayout != "" {
+			filesToCheck = append(filesToCheck, mainLayout)
+		}
+		// Layouts rarely hold the legal links themselves: they include a
+		// footer that does. Follow those includes so a link in, say, Craft's
+		// templates/globals/_footer.twig counts as the page existing.
+		filesToCheck = append(filesToCheck, layoutChrome(ctx.RootDir, mainLayout)...)
 
 		// Common footer/partial files that often contain legal links
 		commonPartials := []string{
@@ -328,6 +338,10 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 			"app/components/Footer.tsx", "app/components/footer.tsx",
 			"templates/_footer.twig", "templates/partials/footer.twig",
 			"templates/_partials/footer.twig", "templates/footer.twig",
+			"templates/partials/_footer.twig", "templates/_partials/_footer.twig",
+			"templates/globals/_footer.twig", "templates/globals/footer.twig",
+			"templates/_globals/_footer.twig", "templates/_includes/_footer.twig",
+			"templates/_includes/footer.twig", "templates/components/footer.twig",
 			"resources/views/partials/footer.blade.php",
 			"resources/views/layouts/partials/footer.blade.php",
 			"app/views/layouts/_footer.html.erb", "app/views/shared/_footer.html.erb",
@@ -401,6 +415,121 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 			"Add terms of service page (e.g., /terms)",
 		},
 	}, nil
+}
+
+// templateIncludeRE matches the quoted template name in the include-style
+// tags of the layout languages Preflight parses: Twig and Nunjucks
+// ({% include %}, {% embed %}, {{ include() }}), Blade (@include), Liquid
+// ({% render %}, {% section %}) and ERB (<%= render %>). Word boundaries
+// keep JavaScript's includes() from matching.
+var templateIncludeRE = regexp.MustCompile(`(?i)\b(?:include|includeif|includewhen|embed|render|section|component)\b(?:\s*\(\s*|\s+)['"]([^'"\n]+)['"]`)
+
+// conventionalLayouts are the layout files to walk when preflight.yml
+// doesn't name one, covering the stacks whose include syntax we parse.
+var conventionalLayouts = []string{
+	"templates/_layout.twig",
+	"templates/_layout/index.twig",
+	"resources/views/layouts/app.blade.php",
+	"app/views/layouts/application.html.erb",
+	"_layouts/default.html",
+	"layouts/default.vue",
+}
+
+// layoutChrome returns the site-wide template files reachable from the main
+// layout through include tags, relative to rootDir. Depth and file count are
+// capped: the goal is the layout's chrome (header, footer, nav), not a walk
+// of the whole template tree.
+func layoutChrome(rootDir, mainLayout string) []string {
+	const (
+		maxDepth = 3
+		maxFiles = 40
+		// Cap per-file matches so a layout with a wall of inline JS can't
+		// turn every include-shaped string into a directory probe.
+		maxIncludes = 60
+	)
+
+	seen := map[string]bool{}
+	var queue []string
+	for _, layout := range append([]string{mainLayout}, conventionalLayouts...) {
+		if layout == "" {
+			continue
+		}
+		abs := filepath.Join(rootDir, filepath.FromSlash(layout))
+		if seen[abs] {
+			continue
+		}
+		if info, err := os.Stat(abs); err != nil || info.IsDir() {
+			continue
+		}
+		seen[abs] = true
+		queue = append(queue, abs)
+	}
+
+	var found []string
+	for depth := 0; depth < maxDepth && len(queue) > 0; depth++ {
+		var next []string
+		for _, file := range queue {
+			content, err := os.ReadFile(file)
+			if err != nil {
+				continue
+			}
+			fromDir := relPath(rootDir, filepath.Dir(file))
+			for _, match := range templateIncludeRE.FindAllStringSubmatch(string(content), maxIncludes) {
+				resolved := resolveTemplate(rootDir, fromDir, match[1])
+				if resolved == "" || seen[resolved] {
+					continue
+				}
+				seen[resolved] = true
+				found = append(found, relPath(rootDir, resolved))
+				next = append(next, resolved)
+				if len(found) >= maxFiles {
+					return found
+				}
+			}
+		}
+		queue = next
+	}
+	return found
+}
+
+// resolveTemplate maps an include target as written in a template to a file
+// on disk, covering the directory roots and extensions of the template
+// languages we parse. Blade's dotted names and the leading underscore Craft
+// and Rails give partials are both tried. Returns "" when nothing matches,
+// including for dynamic targets we can't resolve statically.
+func resolveTemplate(rootDir, fromDir, target string) string {
+	target = strings.TrimSpace(strings.Trim(strings.TrimSpace(target), "/"))
+	if target == "" || strings.ContainsAny(target, "{}$~*") || strings.Contains(target, "..") {
+		return ""
+	}
+	target = strings.TrimPrefix(target, "./")
+
+	names := []string{target}
+	// Blade addresses templates as partials.footer rather than partials/footer.
+	if !strings.Contains(target, "/") && strings.Contains(target, ".") {
+		names = append(names, strings.ReplaceAll(target, ".", "/"))
+	}
+	for _, name := range names[:len(names):len(names)] {
+		dir, base := path.Split(name)
+		if !strings.HasPrefix(base, "_") {
+			names = append(names, dir+"_"+base)
+		}
+	}
+
+	exts := []string{"", ".twig", ".html.twig", ".njk", ".liquid", ".blade.php", ".php", ".html", ".html.erb", ".erb", ".vue"}
+	dirs := []string{fromDir, "templates", "resources/views", "views", "app/views", "src", "."}
+
+	for _, dir := range dirs {
+		for _, name := range names {
+			for _, ext := range exts {
+				candidate := filepath.Join(rootDir, dir, filepath.FromSlash(name)+ext)
+				if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+					return candidate
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // isSameDomainRedirect checks if a redirect Location stays on the same domain
