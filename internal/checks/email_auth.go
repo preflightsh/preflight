@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"golang.org/x/net/publicsuffix"
 )
 
 type EmailAuthCheck struct{}
@@ -31,7 +33,7 @@ func (c EmailAuthCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	domain, err := extractDomain(ctx.Config.URLs.Production)
+	host, err := extractDomain(ctx.Config.URLs.Production)
 	if err != nil {
 		return CheckResult{
 			ID:       c.ID(),
@@ -42,8 +44,18 @@ func (c EmailAuthCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	hasSPF, spfRecord, spfErr := checkSPF(domain)
-	hasDMARC, dmarcRecord, dmarcErr := checkDMARC(domain)
+	// Mail authentication lives on the organizational domain: www.example.com
+	// is usually a CNAME with no TXT records of its own while example.com
+	// carries the SPF and DMARC records. DMARC mandates this fallback (RFC
+	// 7489 section 6.6.3), so checking only the host would report a domain
+	// with p=reject as unprotected.
+	domains := mailDomainCandidates(host)
+	// The domain to name in advice is the organizational one, since that's
+	// where a missing record belongs.
+	domain := domains[len(domains)-1]
+
+	hasSPF, spfRecord, spfDomain, spfErr := lookupFirst(domains, checkSPF)
+	hasDMARC, dmarcRecord, dmarcDomain, dmarcErr := lookupFirst(domains, checkDMARC)
 
 	// If DNS lookups failed, report the error instead of claiming records are missing
 	if spfErr != nil || dmarcErr != nil {
@@ -76,12 +88,21 @@ func (c EmailAuthCheck) Run(ctx Context) (CheckResult, error) {
 	}
 
 	if len(missing) == 0 {
+		if spfDomain != dmarcDomain {
+			return CheckResult{
+				ID:       c.ID(),
+				Title:    c.Title(),
+				Severity: SeverityInfo,
+				Passed:   true,
+				Message:  fmt.Sprintf("SPF configured for %s, DMARC for %s", spfDomain, dmarcDomain),
+			}, nil
+		}
 		return CheckResult{
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
 			Passed:   true,
-			Message:  fmt.Sprintf("SPF and DMARC configured for %s", domain),
+			Message:  fmt.Sprintf("SPF and DMARC configured for %s", spfDomain),
 		}, nil
 	}
 
@@ -105,6 +126,42 @@ func (c EmailAuthCheck) Run(ctx Context) (CheckResult, error) {
 		Message:     fmt.Sprintf("Missing: %s", strings.Join(missing, ", ")),
 		Suggestions: suggestions,
 	}, nil
+}
+
+// mailDomainCandidates lists the domains to try for a host, most specific
+// first: the host itself, then its organizational domain when that differs.
+// Always returns at least one entry.
+func mailDomainCandidates(host string) []string {
+	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+	if host == "" {
+		return []string{host}
+	}
+	candidates := []string{host}
+	// EffectiveTLDPlusOne fails on hosts with no registrable domain (bare
+	// TLDs, "localhost", IP literals); the host is all we have then.
+	if org, err := publicsuffix.EffectiveTLDPlusOne(host); err == nil && org != host {
+		candidates = append(candidates, org)
+	}
+	return candidates
+}
+
+// lookupFirst runs a record lookup down the candidate domains and returns
+// the first hit along with the domain it was found on. An error is only
+// reported when no candidate produced a record, so a resolver hiccup on a
+// subdomain can't mask a record that exists on the parent.
+func lookupFirst(domains []string, lookup func(string) (bool, string, error)) (found bool, record, domain string, err error) {
+	var lastErr error
+	for _, d := range domains {
+		ok, rec, lookupErr := lookup(d)
+		if lookupErr != nil {
+			lastErr = lookupErr
+			continue
+		}
+		if ok {
+			return true, rec, d, nil
+		}
+	}
+	return false, "", "", lastErr
 }
 
 func extractDomain(rawURL string) (string, error) {
