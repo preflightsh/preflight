@@ -1,0 +1,25 @@
+version: 2
+
+updates:
+  # Action pins here are SHAs with the version in a trailing comment, and
+  # nothing re-reads them until a workflow starts failing. The Node 20
+  # deprecation arrived as a runner warning on every job for weeks before
+  # anyone looked; this turns that class of change into a PR instead.
+  # Dependabot updates the SHA and the comment together, so the pinning
+  # stays intact.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    # ci.yml, vulncheck.yml and release.yml pin the same checkout and
+    # setup-go SHAs on purpose: a scan that runs a different toolchain
+    # than the release build stops describing the published binaries.
+    # Ungrouped, each action arrives as its own PR and the three files
+    # only line up again once every one of them has merged. One grouped
+    # PR either keeps them in step or fails as a unit.
+    groups:
+      actions:
+        patterns:
+          - '*'
+    open-pull-requests-limit: 3
