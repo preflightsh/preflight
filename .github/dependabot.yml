@@ -23,3 +23,27 @@ updates:
         patterns:
           - '*'
     open-pull-requests-limit: 3
+
+  # Go modules. govulncheck runs weekly against known advisories, but it
+  # says nothing about plain drift: x/net, x/mod and x/crypto had each
+  # fallen several minor versions behind with no signal anywhere.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      go-deps:
+        patterns:
+          - '*'
+    open-pull-requests-limit: 3
+
+  # The Dockerfile pins alpine by digest for the CA bundle, and a digest
+  # pin never moves on its own. alpine:3.20 reached end of life while
+  # still pinned here.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 2
