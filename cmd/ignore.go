@@ -1,12 +1,15 @@
 package cmd
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/preflightsh/preflight/internal/catalog"
+	"github.com/preflightsh/preflight/internal/checks"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -37,118 +40,76 @@ func init() {
 func runIgnore(cmd *cobra.Command, args []string) error {
 	checkID := args[0]
 
-	cwd, err := os.Getwd()
+	configPath, root, err := loadConfigDocument()
 	if err != nil {
-		return fmt.Errorf("failed to get current directory: %w", err)
+		return err
 	}
 
-	configPath := filepath.Join(cwd, "preflight.yml")
-
-	// Read existing config
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("preflight.yml not found. Run 'preflight init' first")
-		}
-		return fmt.Errorf("failed to read config: %w", err)
-	}
-
-	// Parse as generic map to preserve structure
-	var cfg map[string]interface{}
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return fmt.Errorf("failed to parse preflight.yml: %w", err)
-	}
-
-	// Two-arg form: `preflight ignore secrets <path>` → append an
-	// allowlist entry instead of silencing the whole check.
+	// Two-arg form: `preflight ignore secrets <path>` appends an allowlist
+	// entry instead of silencing the whole check.
 	if len(args) == 2 {
 		if checkID != "secrets" {
-			return fmt.Errorf("per-path ignore is only supported for 'secrets' (got %q)", checkID)
+			return &ExitError{Code: ExitUsage, Err: fmt.Errorf("per-path ignore is only supported for 'secrets' (got %q)", checkID)}
 		}
-		return addSecretsAllowlistEntry(configPath, cfg, args[1])
+		return addSecretsAllowlistEntry(configPath, root, args[1])
 	}
 
-	// Get or create ignore list
-	var ignoreList []string
-	if existing, ok := cfg["ignore"]; ok {
-		if list, ok := existing.([]interface{}); ok {
-			for _, item := range list {
-				if s, ok := item.(string); ok {
-					ignoreList = append(ignoreList, s)
-				}
-			}
-		}
+	// A typo used to be accepted and written to the file, so `preflight
+	// ignore sitemapp` reported success and silenced nothing. The list
+	// also holds file globs for the debug-statements scan, which are let
+	// through by shape.
+	if !checks.KnownID(checkID) && !looksLikeGlob(checkID) {
+		return &ExitError{Code: ExitUsage, Err: fmt.Errorf("unknown check ID %q (run 'preflight checks' to list IDs)", checkID)}
 	}
 
-	// Check if already ignored
-	for _, id := range ignoreList {
-		if id == checkID {
+	ignoreList := ensureSequence(root, "ignore")
+	for _, item := range ignoreList.Content {
+		if item.Value == checkID {
 			fmt.Printf("'%s' is already in the ignore list\n", checkID)
 			return nil
 		}
 	}
+	ignoreList.Content = append(ignoreList.Content, scalarNode(checkID))
 
-	// Add to ignore list
-	ignoreList = append(ignoreList, checkID)
-	cfg["ignore"] = ignoreList
-
-	// Write back
-	newData, err := yaml.Marshal(cfg)
-	if err != nil {
-		return fmt.Errorf("failed to serialize config: %w", err)
+	if err := writeConfigDocument(configPath, root); err != nil {
+		return err
 	}
-
-	if err := os.WriteFile(configPath, newData, 0644); err != nil {
-		return fmt.Errorf("failed to write config: %w", err)
-	}
-
 	fmt.Printf("Added '%s' to ignore list\n", checkID)
 	return nil
 }
 
+// looksLikeGlob reports whether an ignore entry is a file pattern rather
+// than a check ID. Check IDs are bare identifiers; anything with a path
+// separator, a glob metacharacter or an extension is a pattern.
+func looksLikeGlob(s string) bool {
+	return strings.ContainsAny(s, "/*?[.")
+}
+
 // addSecretsAllowlistEntry appends {path: <path>} to
 // checks.secrets.allowlist in preflight.yml. It does not set a
-// fingerprint — users can edit the file to pin one (recommended; see
+// fingerprint; users can edit the file to pin one (recommended; see
 // README). Intermediate maps and lists are created as needed.
-func addSecretsAllowlistEntry(configPath string, cfg map[string]interface{}, path string) error {
-	checksRaw, _ := cfg["checks"].(map[string]interface{})
-	if checksRaw == nil {
-		checksRaw = map[string]interface{}{}
-		cfg["checks"] = checksRaw
+func addSecretsAllowlistEntry(configPath string, root *yaml.Node, path string) error {
+	secrets := ensureMapping(ensureMapping(root, "checks"), "secrets")
+	if mappingValue(secrets, "enabled") == nil {
+		secrets.Content = append(secrets.Content, scalarNode("enabled"), &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: "true"})
 	}
+	allowlist := ensureSequence(secrets, "allowlist")
 
-	secretsRaw, _ := checksRaw["secrets"].(map[string]interface{})
-	if secretsRaw == nil {
-		secretsRaw = map[string]interface{}{"enabled": true}
-		checksRaw["secrets"] = secretsRaw
-	}
-
-	var allowlist []interface{}
-	if existing, ok := secretsRaw["allowlist"].([]interface{}); ok {
-		allowlist = existing
-	}
-
-	// De-dupe: if an entry with the same path already exists, do nothing
-	for _, item := range allowlist {
-		if entry, ok := item.(map[string]interface{}); ok {
-			if p, _ := entry["path"].(string); p == path {
-				fmt.Printf("'%s' is already in the secrets allowlist\n", path)
-				return nil
-			}
+	for _, entry := range allowlist.Content {
+		if p := mappingValue(entry, "path"); p != nil && p.Value == path {
+			fmt.Printf("'%s' is already in the secrets allowlist\n", path)
+			return nil
 		}
 	}
+	allowlist.Content = append(allowlist.Content, &yaml.Node{
+		Kind:    yaml.MappingNode,
+		Content: []*yaml.Node{scalarNode("path"), scalarNode(path)},
+	})
 
-	allowlist = append(allowlist, map[string]interface{}{"path": path})
-	secretsRaw["allowlist"] = allowlist
-
-	newData, err := yaml.Marshal(cfg)
-	if err != nil {
-		return fmt.Errorf("failed to serialize config: %w", err)
+	if err := writeConfigDocument(configPath, root); err != nil {
+		return err
 	}
-	if err := os.WriteFile(configPath, newData, 0644); err != nil {
-		return fmt.Errorf("failed to write config: %w", err)
-	}
-
 	fmt.Printf("Added '%s' to secrets allowlist. Consider adding a fingerprint to re-alert on key rotation (see README).\n", path)
 	return nil
 }
@@ -172,47 +133,23 @@ func init() {
 func runUnignore(cmd *cobra.Command, args []string) error {
 	checkID := args[0]
 
-	cwd, err := os.Getwd()
+	configPath, root, err := loadConfigDocument()
 	if err != nil {
-		return fmt.Errorf("failed to get current directory: %w", err)
+		return err
 	}
 
-	configPath := filepath.Join(cwd, "preflight.yml")
-
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("preflight.yml not found. Run 'preflight init' first")
-		}
-		return fmt.Errorf("failed to read config: %w", err)
-	}
-
-	var cfg map[string]interface{}
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return fmt.Errorf("failed to parse preflight.yml: %w", err)
-	}
-
-	// Get ignore list
-	var ignoreList []string
-	if existing, ok := cfg["ignore"]; ok {
-		if list, ok := existing.([]interface{}); ok {
-			for _, item := range list {
-				if s, ok := item.(string); ok {
-					ignoreList = append(ignoreList, s)
-				}
-			}
-		}
-	}
-
-	// Find and remove
+	ignoreList := mappingValue(root, "ignore")
 	found := false
-	var newList []string
-	for _, id := range ignoreList {
-		if id == checkID {
-			found = true
-		} else {
-			newList = append(newList, id)
+	if ignoreList != nil && ignoreList.Kind == yaml.SequenceNode {
+		kept := ignoreList.Content[:0]
+		for _, item := range ignoreList.Content {
+			if item.Value == checkID {
+				found = true
+				continue
+			}
+			kept = append(kept, item)
 		}
+		ignoreList.Content = kept
 	}
 
 	if !found {
@@ -220,24 +157,126 @@ func runUnignore(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Update or remove ignore key
-	if len(newList) > 0 {
-		cfg["ignore"] = newList
-	} else {
-		delete(cfg, "ignore")
+	if len(ignoreList.Content) == 0 {
+		removeMappingKey(root, "ignore")
 	}
 
-	newData, err := yaml.Marshal(cfg)
-	if err != nil {
-		return fmt.Errorf("failed to serialize config: %w", err)
+	if err := writeConfigDocument(configPath, root); err != nil {
+		return err
 	}
-
-	if err := os.WriteFile(configPath, newData, 0644); err != nil {
-		return fmt.Errorf("failed to write config: %w", err)
-	}
-
 	fmt.Printf("Removed '%s' from ignore list\n", checkID)
 	return nil
+}
+
+// The ignore commands edit preflight.yml as a yaml.Node tree rather than
+// decoding it into a map. A map round-trip drops every comment, sorts the
+// keys alphabetically and re-indents the file, so a one-line change
+// rewrote the user's whole config; the node tree keeps comments, key
+// order and formatting, and only the edited entries move.
+
+// loadConfigDocument reads ./preflight.yml and returns the root mapping
+// node, creating an empty one for an empty file.
+func loadConfigDocument() (string, *yaml.Node, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to get current directory: %w", err)
+	}
+	configPath := filepath.Join(cwd, "preflight.yml")
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil, &ExitError{Code: ExitUsage, Err: fmt.Errorf("preflight.yml not found. Run 'preflight init' first")}
+		}
+		return "", nil, &ExitError{Code: ExitUsage, Err: fmt.Errorf("failed to read config: %w", err)}
+	}
+
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return "", nil, &ExitError{Code: ExitUsage, Err: fmt.Errorf("failed to parse preflight.yml: %w", err)}
+	}
+	root := documentRoot(&doc)
+	if root.Kind != yaml.MappingNode {
+		return "", nil, &ExitError{Code: ExitUsage, Err: fmt.Errorf("preflight.yml is not a mapping")}
+	}
+	return configPath, root, nil
+}
+
+// documentRoot returns the top-level mapping of a parsed document, wiring
+// an empty mapping into an empty document so callers can append to it.
+func documentRoot(doc *yaml.Node) *yaml.Node {
+	if doc.Kind == 0 {
+		doc.Kind = yaml.DocumentNode
+	}
+	if len(doc.Content) == 0 {
+		doc.Content = []*yaml.Node{{Kind: yaml.MappingNode, Tag: "!!map"}}
+	}
+	return doc.Content[0]
+}
+
+func writeConfigDocument(configPath string, root *yaml.Node) error {
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(root); err != nil {
+		return fmt.Errorf("failed to serialize config: %w", err)
+	}
+	if err := enc.Close(); err != nil {
+		return fmt.Errorf("failed to serialize config: %w", err)
+	}
+	if err := os.WriteFile(configPath, buf.Bytes(), 0644); err != nil {
+		return fmt.Errorf("failed to write config: %w", err)
+	}
+	return nil
+}
+
+// mappingValue returns the value node for key in a mapping, or nil.
+func mappingValue(m *yaml.Node, key string) *yaml.Node {
+	if m == nil || m.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			return m.Content[i+1]
+		}
+	}
+	return nil
+}
+
+func removeMappingKey(m *yaml.Node, key string) {
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			m.Content = append(m.Content[:i], m.Content[i+2:]...)
+			return
+		}
+	}
+}
+
+// ensureMapping returns the mapping under key, creating it (appended at
+// the end, so existing keys keep their order) when absent.
+func ensureMapping(m *yaml.Node, key string) *yaml.Node {
+	if v := mappingValue(m, key); v != nil && v.Kind == yaml.MappingNode {
+		return v
+	}
+	removeMappingKey(m, key) // a scalar or null under this key is replaced
+	v := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	m.Content = append(m.Content, scalarNode(key), v)
+	return v
+}
+
+// ensureSequence is ensureMapping for a list-valued key.
+func ensureSequence(m *yaml.Node, key string) *yaml.Node {
+	if v := mappingValue(m, key); v != nil && v.Kind == yaml.SequenceNode {
+		return v
+	}
+	removeMappingKey(m, key)
+	v := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+	m.Content = append(m.Content, scalarNode(key), v)
+	return v
+}
+
+func scalarNode(value string) *yaml.Node {
+	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value}
 }
 
 // listChecksCmd prints every ignorable ID, grouped the way the catalog
