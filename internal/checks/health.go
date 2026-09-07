@@ -19,15 +19,14 @@ func (c HealthCheck) Title() string {
 func (c HealthCheck) Run(ctx Context) (CheckResult, error) {
 	cfg := ctx.Config.Checks.HealthEndpoint
 
-	// Get base URL to check - prefer staging/local for health checks
-	var baseURL string
-	if ctx.Config.URLs.Staging != "" {
-		baseURL = ctx.Config.URLs.Staging
-	} else if ctx.Config.URLs.Production != "" {
-		baseURL = ctx.Config.URLs.Production
+	// Prefer staging/local for health checks, but fall through to
+	// production: a local server that is not running says nothing about
+	// whether the site has a health endpoint.
+	configured := ctx.Config.URLs.Staging
+	if configured == "" {
+		configured = ctx.Config.URLs.Production
 	}
-
-	if baseURL == "" {
+	if configured == "" {
 		return CheckResult{
 			ID:       c.ID(),
 			Title:    c.Title(),
@@ -37,14 +36,14 @@ func (c HealthCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	// The scan already tried this host once. If nothing answered, report
-	// that now rather than waiting out the timeout on each health path
-	// and then the root.
-	if ctx.HostUnreachable(baseURL) {
-		return c.unreachable(baseURL), nil
+	// The scan already tried every configured host once. If none answered,
+	// report that now rather than waiting out the timeout on each health
+	// path and then the root.
+	baseURLs := ctx.probeBaseURLs()
+	if len(baseURLs) == 0 {
+		return c.unreachable(configured), nil
 	}
-
-	baseURLs := []string{baseURL}
+	baseURL := baseURLs[0]
 
 	// Determine which health paths to probe. If the user explicitly enabled
 	// the check with a specific path, only try that one. Otherwise try the

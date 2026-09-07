@@ -310,12 +310,13 @@ func (c OGTwitterCheck) Run(ctx Context) (CheckResult, error) {
 		})
 	}
 
-	// Check dimensions of images
+	// Check dimensions of images. Relative image URLs resolve against the
+	// first environment that answered the homepage prefetch, so a staging
+	// server that is not running does not stop production's og:image from
+	// being measured.
 	baseURL := ""
-	if ctx.Config.URLs.Staging != "" {
-		baseURL = ctx.Config.URLs.Staging
-	} else if ctx.Config.URLs.Production != "" {
-		baseURL = ctx.Config.URLs.Production
+	if bases := ctx.probeBaseURLs(); len(bases) > 0 {
+		baseURL = bases[0]
 	}
 
 	// Check OG image dimensions

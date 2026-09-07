@@ -45,31 +45,24 @@ func findProjectPath(rootDir, pattern string) (string, bool) {
 	return "", false
 }
 
-// probeStaticFileOverHTTP probes baseURL+path against the configured
-// staging or production URL. Returns true if the response is 200 with
-// non-empty content. Used as a fallback for files commonly generated
-// dynamically by CMS plugins (robots.txt, sitemap.xml) so they aren't
-// reported missing just because they don't exist on disk.
+// probeStaticFileOverHTTP probes path against each configured environment
+// (see probeBaseURLs) and reports the URL that served it. Used as a
+// fallback for files commonly generated dynamically by CMS plugins
+// (robots.txt, sitemap.xml) so they aren't reported missing just because
+// they don't exist on disk.
 func probeStaticFileOverHTTP(ctx Context, path string) (string, bool) {
-	base := configuredProbeBaseURL(ctx)
-	if base == "" {
-		return "", false
+	for _, base := range ctx.probeBaseURLs() {
+		if servedAt, ok := probeFileAtBase(ctx, base, path); ok {
+			return servedAt, true
+		}
 	}
-	return probeFileAtBase(ctx, base, path)
+	return "", false
 }
 
-// configuredProbeBaseURL returns the staging URL if set, otherwise production.
-func configuredProbeBaseURL(ctx Context) string {
-	if ctx.Config.URLs.Staging != "" {
-		return ctx.Config.URLs.Staging
-	}
-	return ctx.Config.URLs.Production
-}
-
-// probeStaticFileWithParents probes the configured URL for path and, when a
-// production URL is set, also walks up to its registrable parent domain(s)
-// (e.g. app.example.com -> example.com), so a file that legitimately lives on
-// the org's main site (sitemap.xml, llms.txt) still counts for a subdomain app.
+// probeStaticFileWithParents is probeStaticFileOverHTTP plus a walk up to
+// production's registrable parent domain(s) (app.example.com ->
+// example.com), so a file that legitimately lives on the org's main site
+// (sitemap.xml, llms.txt) still counts for a subdomain app.
 func probeStaticFileWithParents(ctx Context, path string) (string, bool) {
 	if servedAt, ok := probeStaticFileOverHTTP(ctx, path); ok {
 		return servedAt, true
@@ -179,14 +172,7 @@ func probeIndexNowKeyOverHTTP(ctx Context, key string) (string, bool) {
 	}
 	path := "/" + key + ".txt"
 
-	var bases []string
-	if ctx.Config.URLs.Staging != "" {
-		bases = append(bases, ctx.Config.URLs.Staging)
-	}
-	if ctx.Config.URLs.Production != "" {
-		bases = append(bases, ctx.Config.URLs.Production)
-	}
-	bases = append(bases, parentBaseURLs(ctx.Config.URLs.Production)...)
+	bases := append(ctx.probeBaseURLs(), parentBaseURLs(ctx.Config.URLs.Production)...)
 
 	seen := make(map[string]bool)
 	for _, base := range bases {

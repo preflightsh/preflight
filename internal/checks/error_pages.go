@@ -160,16 +160,17 @@ func probeCustom404OverHTTP(ctx Context) bool {
 	if ctx.Client == nil {
 		return false
 	}
-	var baseURL string
-	if ctx.Config.URLs.Staging != "" {
-		baseURL = ctx.Config.URLs.Staging
-	} else if ctx.Config.URLs.Production != "" {
-		baseURL = ctx.Config.URLs.Production
+	for _, baseURL := range ctx.probeBaseURLs() {
+		if servesHTML404(ctx, baseURL) {
+			return true
+		}
 	}
-	if baseURL == "" || ctx.HostUnreachable(baseURL) {
-		return false
-	}
-	baseURL = strings.TrimSuffix(baseURL, "/")
+	return false
+}
+
+// servesHTML404 requests a path that should not exist on baseURL and reports
+// whether the answer is an HTML 404 page.
+func servesHTML404(ctx Context, baseURL string) bool {
 	resp, _, err := tryURL(ctx.reqContext(), ctx.Client, baseURL+"/preflight-404-probe-please-do-not-exist")
 	if err != nil {
 		return false

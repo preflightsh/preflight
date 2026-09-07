@@ -270,6 +270,29 @@ func (c Context) HostUnreachable(rawURL string) bool {
 	return false
 }
 
+// probeBaseURLs returns the configured environments a check should probe
+// for a file or page, staging first (it is closer to what is about to ship)
+// then production, skipping any the homepage prefetch already found down.
+//
+// Every probe used to take the first configured URL only, so a developer
+// whose local staging server was not running was told sitemap.xml, the
+// legal pages or the health endpoint were missing while production served
+// all of them. Falling through to production answers the question the
+// user actually asked: does the site have this.
+func (c Context) probeBaseURLs() []string {
+	var bases []string
+	seen := map[string]bool{}
+	for _, raw := range []string{c.Config.URLs.Staging, c.Config.URLs.Production} {
+		base := strings.TrimSuffix(raw, "/")
+		if base == "" || seen[base] || c.HostUnreachable(base) {
+			continue
+		}
+		seen[base] = true
+		bases = append(bases, base)
+	}
+	return bases
+}
+
 // blockedStatus reports whether a status means the host refused to serve
 // the scanner rather than the site being down. Bot protection (Cloudflare
 // answers 403 with a cf-mitigated challenge page), auth walls and rate

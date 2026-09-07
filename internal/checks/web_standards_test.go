@@ -197,21 +197,29 @@ func TestProbeFileAtBase(t *testing.T) {
 	})
 }
 
-func TestConfiguredProbeBaseURL(t *testing.T) {
+func TestProbeBaseURLs(t *testing.T) {
 	cases := []struct {
 		name string
-		urls config.URLConfig
-		want string
+		ctx  Context
+		want []string
 	}{
-		{"staging preferred", config.URLConfig{Staging: "https://stg", Production: "https://prod"}, "https://stg"},
-		{"production when no staging", config.URLConfig{Production: "https://prod"}, "https://prod"},
-		{"neither", config.URLConfig{}, ""},
+		{"staging first, then production", Context{Config: &config.PreflightConfig{URLs: config.URLConfig{Staging: "https://stg/", Production: "https://prod"}}}, []string{"https://stg", "https://prod"}},
+		{"production alone", Context{Config: &config.PreflightConfig{URLs: config.URLConfig{Production: "https://prod"}}}, []string{"https://prod"}},
+		{"neither", Context{Config: &config.PreflightConfig{}}, nil},
+		{"same host twice is probed once", Context{Config: &config.PreflightConfig{URLs: config.URLConfig{Staging: "https://x", Production: "https://x/"}}}, []string{"https://x"}},
+		{
+			"a staging host the prefetch found down is skipped",
+			Context{
+				Config:           &config.PreflightConfig{URLs: config.URLConfig{Staging: "http://localhost:3000", Production: "https://prod"}},
+				PageFetchStaging: PageFetch{URL: "http://localhost:3000/", Status: 0},
+			},
+			[]string{"https://prod"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := configuredProbeBaseURL(Context{Config: &config.PreflightConfig{URLs: tc.urls}})
-			if got != tc.want {
-				t.Errorf("configuredProbeBaseURL = %q, want %q", got, tc.want)
+			if got := tc.ctx.probeBaseURLs(); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("probeBaseURLs = %v, want %v", got, tc.want)
 			}
 		})
 	}

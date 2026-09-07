@@ -42,20 +42,15 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 	hasTerms := false
 	var privacyPath, termsPath string
 
-	// First, try to check via HTTP if URLs are configured (handles CMS-generated pages)
-	baseURL := ctx.Config.URLs.Staging
-	if baseURL == "" {
-		baseURL = ctx.Config.URLs.Production
-	}
-	// Trim the trailing slash so baseURL+"/privacy" doesn't become "…//privacy",
-	// which servers 301-redirect (path cleaning) and would be miscounted as the
-	// page existing.
-	baseURL = strings.TrimSuffix(baseURL, "/")
-
-	// Skip the HTTP probing entirely when the homepage prefetch already
-	// found nothing listening: 25 candidate paths on a dead host is 25
-	// timeouts, and the filesystem checks below still run.
-	if baseURL != "" && !ctx.HostUnreachable(baseURL) {
+	// First, try over HTTP (handles CMS-generated pages), staging then
+	// production, until both pages are found. Trim the trailing slash so
+	// base+"/privacy" doesn't become "…//privacy", which servers
+	// 301-redirect (path cleaning) and would be miscounted as the page
+	// existing.
+	for _, baseURL := range ctx.probeBaseURLs() {
+		if hasPrivacy && hasTerms {
+			break
+		}
 		// Reuse ctx.Client (which already handles the local-vs-safe choice
 		// based on the configured URLs) but override CheckRedirect so 3xx
 		// is treated as "page exists" rather than followed. Copy the
@@ -82,40 +77,44 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 			}
 		}
 
-		privacyURLs := []string{
-			"/privacy", "/privacy-policy", "/privacypolicy",
-			"/legal/privacy", "/legal/privacy-policy",
-			"/policies/privacy", "/policies/privacy-policy",
-			"/privacy-notice", "/privacy-statement",
-			"/info/privacy", "/about/privacy",
-		}
-		if path, ok := probeFirstHit(ctx, client, baseURL, privacyURLs, accepting("privacy")); ok {
-			hasPrivacy = true
-			privacyPath = path + " (via HTTP)"
-		}
-
-		termsURLs := []string{
-			"/terms", "/terms-of-service", "/termsofservice", "/tos",
-			"/legal/terms", "/legal/terms-of-service", "/legal/tos",
-			"/policies/terms", "/policies/terms-of-service",
-			"/terms-and-conditions", "/terms-conditions",
-			"/info/terms", "/about/terms", "/eula",
-		}
-		if path, ok := probeFirstHit(ctx, client, baseURL, termsURLs, accepting("terms", "tos", "eula")); ok {
-			hasTerms = true
-			termsPath = path + " (via HTTP)"
+		if !hasPrivacy {
+			privacyURLs := []string{
+				"/privacy", "/privacy-policy", "/privacypolicy",
+				"/legal/privacy", "/legal/privacy-policy",
+				"/policies/privacy", "/policies/privacy-policy",
+				"/privacy-notice", "/privacy-statement",
+				"/info/privacy", "/about/privacy",
+			}
+			if path, ok := probeFirstHit(ctx, client, baseURL, privacyURLs, accepting("privacy")); ok {
+				hasPrivacy = true
+				privacyPath = path + " (via HTTP)"
+			}
 		}
 
-		// If we found both via HTTP, return early
-		if hasPrivacy && hasTerms {
-			return CheckResult{
-				ID:       c.ID(),
-				Title:    c.Title(),
-				Severity: SeverityInfo,
-				Passed:   true,
-				Message:  "Found privacy at " + privacyPath + ", terms at " + termsPath,
-			}, nil
+		if !hasTerms {
+			termsURLs := []string{
+				"/terms", "/terms-of-service", "/termsofservice", "/tos",
+				"/legal/terms", "/legal/terms-of-service", "/legal/tos",
+				"/policies/terms", "/policies/terms-of-service",
+				"/terms-and-conditions", "/terms-conditions",
+				"/info/terms", "/about/terms", "/eula",
+			}
+			if path, ok := probeFirstHit(ctx, client, baseURL, termsURLs, accepting("terms", "tos", "eula")); ok {
+				hasTerms = true
+				termsPath = path + " (via HTTP)"
+			}
 		}
+	}
+
+	// If we found both via HTTP, return early
+	if hasPrivacy && hasTerms {
+		return CheckResult{
+			ID:       c.ID(),
+			Title:    c.Title(),
+			Severity: SeverityInfo,
+			Passed:   true,
+			Message:  "Found privacy at " + privacyPath + ", terms at " + termsPath,
+		}, nil
 	}
 
 	// Common privacy policy paths/filenames
