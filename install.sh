@@ -136,6 +136,12 @@ install() {
         tar -xzf "${FILENAME}"
     fi
 
+    # Set the mode while we still own the file. When the temp dir is on a
+    # different filesystem (tmpfs), a sudo mv copies and the result is
+    # root-owned, so a chmod after the move fails and set -e aborts the
+    # script after the install already succeeded.
+    chmod +x "${BINARY_NAME}"
+
     # Install
     if [ -w "${INSTALL_DIR}" ]; then
         mv "${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"
@@ -143,8 +149,6 @@ install() {
         info "Requesting sudo access to install to ${INSTALL_DIR}"
         sudo mv "${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"
     fi
-
-    chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
 
     info "Installed ${BINARY_NAME} to ${INSTALL_DIR}/${BINARY_NAME}"
     info "Run 'preflight --help' to get started"
