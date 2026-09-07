@@ -49,9 +49,11 @@ EXAMPLES:
     $ preflight checks
 
 EXIT CODES:
-  0  All checks passed
-  1  Warnings only
-  2  Errors found
+  0    All checks passed
+  1    Warnings only
+  2    Errors found
+  64   Preflight could not run (bad path, unreadable config, unknown ID)
+  130  Scan cancelled (Ctrl-C)
 
 CONFIGURATION:
   Preflight uses a preflight.yml file in your project root.

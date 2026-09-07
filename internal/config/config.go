@@ -1,7 +1,10 @@
 package config
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -109,8 +112,14 @@ func Load(rootDir string) (*PreflightConfig, error) {
 		return nil, fmt.Errorf("failed to read config: %w", err)
 	}
 
+	// Unknown keys are an error. Without this a misspelled key such as
+	// healthEndpont: is silently ignored, the check quietly never runs,
+	// and nothing tells the user. Failing here maps to the usage exit
+	// code, which is the contract for "preflight could not run".
 	var cfg PreflightConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("failed to parse preflight.yml: %w", err)
 	}
 
