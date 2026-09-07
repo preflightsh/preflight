@@ -360,6 +360,13 @@ func runChecks(ctx context.Context, cctx checks.Context, list []checks.Check, wo
 		sem  = make(chan struct{}, workers)
 	)
 	for i, check := range list {
+		// Checked before the select: when both a free worker slot and a
+		// cancelled context are ready, select picks at random, and a scan
+		// interrupted before it started must never start a check.
+		if ctx.Err() != nil {
+			cancelled = true
+			break
+		}
 		select {
 		case sem <- struct{}{}:
 		case <-ctx.Done():
