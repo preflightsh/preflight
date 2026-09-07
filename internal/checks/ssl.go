@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"time"
 
@@ -66,13 +67,7 @@ func (c SSLCheck) Run(ctx Context) (CheckResult, error) {
 		MinVersion: tls.VersionTLS12,
 	}, 10*time.Second)
 	if err != nil {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityWarn,
-			Passed:   false,
-			Message:  sanitizeTLSDialError(err),
-		}, nil
+		return c.classifyDialError(ctx, host, err), nil
 	}
 	defer func() { _ = conn.Close() }()
 
@@ -87,24 +82,13 @@ func (c SSLCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	cert := certs[0]
-	now := time.Now()
+	return c.expiryResult(certs[0]), nil
+}
 
-	// Check expiration
-	daysUntilExpiry := int(cert.NotAfter.Sub(now).Hours() / 24)
-
-	if now.After(cert.NotAfter) {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityError,
-			Passed:   false,
-			Message:  "SSL certificate has expired",
-			Suggestions: []string{
-				"Renew your SSL certificate immediately",
-			},
-		}, nil
-	}
+// expiryResult grades a certificate that verified: failing hard inside a
+// week of expiry, warning inside a month.
+func (c SSLCheck) expiryResult(cert *x509.Certificate) CheckResult {
+	daysUntilExpiry := int(time.Until(cert.NotAfter).Hours() / 24)
 
 	if daysUntilExpiry <= 7 {
 		return CheckResult{
@@ -117,7 +101,7 @@ func (c SSLCheck) Run(ctx Context) (CheckResult, error) {
 				"Renew your SSL certificate soon",
 				"Consider enabling auto-renewal",
 			},
-		}, nil
+		}
 	}
 
 	if daysUntilExpiry <= 30 {
@@ -130,7 +114,7 @@ func (c SSLCheck) Run(ctx Context) (CheckResult, error) {
 			Suggestions: []string{
 				"Plan to renew your SSL certificate",
 			},
-		}, nil
+		}
 	}
 
 	return CheckResult{
@@ -139,24 +123,85 @@ func (c SSLCheck) Run(ctx Context) (CheckResult, error) {
 		Severity: SeverityInfo,
 		Passed:   true,
 		Message:  fmt.Sprintf("Valid, expires in %d days", daysUntilExpiry),
-	}, nil
+	}
 }
 
-// sanitizeTLSDialError formats a dial/TLS error for the user-visible
-// Message field without leaking internal hostnames learned from cert
-// subjects back to the caller. Both x509.HostnameError and Go 1.20+'s
-// tls.CertificateVerificationError can embed SANs in their string form.
-func sanitizeTLSDialError(err error) string {
+// classifyDialError turns a failed handshake into a result. A certificate
+// the handshake rejected is an error, not a warning: an expired or
+// self-signed cert on the production URL means browsers show an
+// interstitial, which is as launch-blocking as it gets.
+//
+// The handshake fails before the certificate can be inspected, so the
+// expired/mismatch/untrusted distinction comes from a second dial with
+// verification disabled. That dial still goes through SafeTLSDial (so it
+// can't be pointed at a private address) and nothing is sent over it; the
+// leaf is read and the connection closed.
+func (c SSLCheck) classifyDialError(ctx Context, host string, err error) CheckResult {
 	if errors.Is(err, netutil.ErrPrivateAddress) {
-		return "Refused to connect: production URL resolved to a private/loopback address"
-	}
-	var hostErr *x509.HostnameError
-	if errors.As(err, &hostErr) {
-		return "Certificate hostname mismatch"
+		return CheckResult{
+			ID:       c.ID(),
+			Title:    c.Title(),
+			Severity: SeverityWarn,
+			Passed:   false,
+			Message:  "Refused to connect: production URL resolved to a private/loopback address",
+		}
 	}
 	var verifyErr *tls.CertificateVerificationError
-	if errors.As(err, &verifyErr) {
-		return "Certificate verification failed"
+	if !errors.As(err, &verifyErr) {
+		return CheckResult{
+			ID:       c.ID(),
+			Title:    c.Title(),
+			Severity: SeverityWarn,
+			Passed:   false,
+			Message:  fmt.Sprintf("Could not connect: %v", err),
+		}
 	}
-	return fmt.Sprintf("Could not connect: %v", err)
+
+	message, suggestions := "Certificate verification failed", []string{"Check the certificate installed on your production host"}
+	if leaf := peekLeafCertificate(host); leaf != nil {
+		now := time.Now()
+		hostname, _, _ := net.SplitHostPort(host)
+		switch {
+		case now.After(leaf.NotAfter):
+			message = fmt.Sprintf("SSL certificate expired %d days ago", int(now.Sub(leaf.NotAfter).Hours()/24))
+			suggestions = []string{"Renew your SSL certificate immediately"}
+		case now.Before(leaf.NotBefore):
+			message = "SSL certificate is not valid yet"
+			suggestions = []string{"Check the clock on the host that issued the certificate"}
+		case leaf.VerifyHostname(hostname) != nil:
+			// Deliberately not naming the SANs on the cert, which can
+			// reveal internal hostnames.
+			message = "Certificate hostname mismatch"
+			suggestions = []string{"Issue a certificate that covers " + hostname}
+		default:
+			message = "Certificate is not trusted (self-signed or unknown issuer)"
+			suggestions = []string{"Use a certificate from a trusted CA such as Let's Encrypt"}
+		}
+	}
+	return CheckResult{
+		ID:          c.ID(),
+		Title:       c.Title(),
+		Severity:    SeverityError,
+		Passed:      false,
+		Message:     message,
+		Suggestions: suggestions,
+	}
+}
+
+// peekLeafCertificate fetches the leaf certificate a host presents without
+// verifying it. Returns nil when the host cannot be reached at all.
+func peekLeafCertificate(host string) *x509.Certificate {
+	conn, err := netutil.SafeTLSDial("tcp", host, &tls.Config{
+		MinVersion:         tls.VersionTLS12,
+		InsecureSkipVerify: true, //nolint:gosec // read-only peek to classify a cert the verified dial already rejected
+	}, 10*time.Second)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = conn.Close() }()
+	certs := conn.ConnectionState().PeerCertificates
+	if len(certs) == 0 {
+		return nil
+	}
+	return certs[0]
 }
