@@ -240,7 +240,7 @@ checks:
 
   stripeWebhook:
     enabled: true
-    url: "https://api.example.com/webhooks/stripe"
+    url: "https://api.example.com/webhooks/stripe"  # optional - probed with a GET; a 404 or no response is reported
 
   seoMeta:
     enabled: true
@@ -334,6 +334,19 @@ other lines in the same file.
 
 **Web Standard Files:**
 `favicon`, `robotsTxt`, `sitemap`, `llmsTxt`, `adsTxt` (opt-in), `humansTxt` (opt-in), `license` (opt-in)
+
+### A note on scanning code you don't trust
+
+Every check reads files; one runs a program. The `vulnerability` check
+executes your project's own package manager (`npm audit`, `yarn audit`,
+`composer audit`, `bundle audit`, `pip-audit`, `govulncheck`, `cargo audit`)
+inside the project directory, with a scrubbed environment and a temporary
+home so it cannot read your tokens. Package managers still honor
+project-local configuration, and some of that configuration can run code
+from the repository (a Yarn `yarnPath`, a Cargo alias, a Composer plugin).
+Scanning your own projects is what Preflight is for. When scanning a
+repository you don't trust, such as a fork's pull request in CI, add
+`--skip vulnerability`.
 
 ### Ignorable Service IDs
 
