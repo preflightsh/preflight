@@ -40,10 +40,11 @@ func init() {
 func runIgnore(cmd *cobra.Command, args []string) error {
 	checkID := args[0]
 
-	configPath, root, err := loadConfigDocument()
+	doc, err := loadConfigDocument()
 	if err != nil {
 		return err
 	}
+	root := doc.root
 
 	// Two-arg form: `preflight ignore secrets <path>` appends an allowlist
 	// entry instead of silencing the whole check.
@@ -51,7 +52,7 @@ func runIgnore(cmd *cobra.Command, args []string) error {
 		if checkID != "secrets" {
 			return &ExitError{Code: ExitUsage, Err: fmt.Errorf("per-path ignore is only supported for 'secrets' (got %q)", checkID)}
 		}
-		return addSecretsAllowlistEntry(configPath, root, args[1])
+		return addSecretsAllowlistEntry(doc, args[1])
 	}
 
 	// A typo used to be accepted and written to the file, so `preflight
@@ -71,7 +72,7 @@ func runIgnore(cmd *cobra.Command, args []string) error {
 	}
 	ignoreList.Content = append(ignoreList.Content, scalarNode(checkID))
 
-	if err := writeConfigDocument(configPath, root); err != nil {
+	if err := doc.write(); err != nil {
 		return err
 	}
 	fmt.Printf("Added '%s' to ignore list\n", checkID)
@@ -89,8 +90,8 @@ func looksLikeGlob(s string) bool {
 // checks.secrets.allowlist in preflight.yml. It does not set a
 // fingerprint; users can edit the file to pin one (recommended; see
 // README). Intermediate maps and lists are created as needed.
-func addSecretsAllowlistEntry(configPath string, root *yaml.Node, path string) error {
-	secrets := ensureMapping(ensureMapping(root, "checks"), "secrets")
+func addSecretsAllowlistEntry(doc *configDocument, path string) error {
+	secrets := ensureMapping(ensureMapping(doc.root, "checks"), "secrets")
 	if mappingValue(secrets, "enabled") == nil {
 		secrets.Content = append(secrets.Content, scalarNode("enabled"), &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: "true"})
 	}
@@ -107,7 +108,7 @@ func addSecretsAllowlistEntry(configPath string, root *yaml.Node, path string) e
 		Content: []*yaml.Node{scalarNode("path"), scalarNode(path)},
 	})
 
-	if err := writeConfigDocument(configPath, root); err != nil {
+	if err := doc.write(); err != nil {
 		return err
 	}
 	fmt.Printf("Added '%s' to secrets allowlist. Consider adding a fingerprint to re-alert on key rotation (see README).\n", path)
@@ -133,10 +134,11 @@ func init() {
 func runUnignore(cmd *cobra.Command, args []string) error {
 	checkID := args[0]
 
-	configPath, root, err := loadConfigDocument()
+	doc, err := loadConfigDocument()
 	if err != nil {
 		return err
 	}
+	root := doc.root
 
 	ignoreList := mappingValue(root, "ignore")
 	found := false
@@ -161,7 +163,7 @@ func runUnignore(cmd *cobra.Command, args []string) error {
 		removeMappingKey(root, "ignore")
 	}
 
-	if err := writeConfigDocument(configPath, root); err != nil {
+	if err := doc.write(); err != nil {
 		return err
 	}
 	fmt.Printf("Removed '%s' from ignore list\n", checkID)
@@ -174,57 +176,68 @@ func runUnignore(cmd *cobra.Command, args []string) error {
 // rewrote the user's whole config; the node tree keeps comments, key
 // order and formatting, and only the edited entries move.
 
-// loadConfigDocument reads ./preflight.yml and returns the root mapping
-// node, creating an empty one for an empty file.
-func loadConfigDocument() (string, *yaml.Node, error) {
+// configDocument is a parsed preflight.yml: the document node, its
+// top-level mapping (which is what the edits touch), and, for a file the
+// parser returned nothing for, the raw text. yaml.v3 yields no node at all
+// for a file that holds only comments, so the comment has no node to live
+// on and is kept as a preamble instead.
+type configDocument struct {
+	path     string
+	preamble string
+	doc      yaml.Node
+	root     *yaml.Node
+}
+
+// loadConfigDocument reads ./preflight.yml, wiring an empty mapping into an
+// empty document so callers can append to it.
+func loadConfigDocument() (*configDocument, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to get current directory: %w", err)
+		return nil, fmt.Errorf("failed to get current directory: %w", err)
 	}
-	configPath := filepath.Join(cwd, "preflight.yml")
+	d := &configDocument{path: filepath.Join(cwd, "preflight.yml")}
 
-	data, err := os.ReadFile(configPath)
+	data, err := os.ReadFile(d.path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", nil, &ExitError{Code: ExitUsage, Err: fmt.Errorf("preflight.yml not found. Run 'preflight init' first")}
+			return nil, &ExitError{Code: ExitUsage, Err: fmt.Errorf("preflight.yml not found. Run 'preflight init' first")}
 		}
-		return "", nil, &ExitError{Code: ExitUsage, Err: fmt.Errorf("failed to read config: %w", err)}
+		return nil, &ExitError{Code: ExitUsage, Err: fmt.Errorf("failed to read config: %w", err)}
 	}
 
-	var doc yaml.Node
-	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return "", nil, &ExitError{Code: ExitUsage, Err: fmt.Errorf("failed to parse preflight.yml: %w", err)}
+	if err := yaml.Unmarshal(data, &d.doc); err != nil {
+		return nil, &ExitError{Code: ExitUsage, Err: fmt.Errorf("failed to parse preflight.yml: %w", err)}
 	}
-	root := documentRoot(&doc)
-	if root.Kind != yaml.MappingNode {
-		return "", nil, &ExitError{Code: ExitUsage, Err: fmt.Errorf("preflight.yml is not a mapping")}
+	if d.doc.Kind == 0 {
+		d.doc.Kind = yaml.DocumentNode
+		if text := strings.TrimSpace(string(data)); text != "" {
+			d.preamble = text + "\n"
+		}
 	}
-	return configPath, root, nil
+	if len(d.doc.Content) == 0 {
+		d.doc.Content = []*yaml.Node{{Kind: yaml.MappingNode, Tag: "!!map"}}
+	}
+	d.root = d.doc.Content[0]
+	if d.root.Kind != yaml.MappingNode {
+		return nil, &ExitError{Code: ExitUsage, Err: fmt.Errorf("preflight.yml is not a mapping")}
+	}
+	return d, nil
 }
 
-// documentRoot returns the top-level mapping of a parsed document, wiring
-// an empty mapping into an empty document so callers can append to it.
-func documentRoot(doc *yaml.Node) *yaml.Node {
-	if doc.Kind == 0 {
-		doc.Kind = yaml.DocumentNode
-	}
-	if len(doc.Content) == 0 {
-		doc.Content = []*yaml.Node{{Kind: yaml.MappingNode, Tag: "!!map"}}
-	}
-	return doc.Content[0]
-}
-
-func writeConfigDocument(configPath string, root *yaml.Node) error {
+// write serializes the whole document back, so comments attached at the
+// document level survive along with those on the keys.
+func (d *configDocument) write() error {
 	var buf bytes.Buffer
+	buf.WriteString(d.preamble)
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
-	if err := enc.Encode(root); err != nil {
+	if err := enc.Encode(&d.doc); err != nil {
 		return fmt.Errorf("failed to serialize config: %w", err)
 	}
 	if err := enc.Close(); err != nil {
 		return fmt.Errorf("failed to serialize config: %w", err)
 	}
-	if err := os.WriteFile(configPath, buf.Bytes(), 0644); err != nil {
+	if err := os.WriteFile(d.path, buf.Bytes(), 0644); err != nil {
 		return fmt.Errorf("failed to write config: %w", err)
 	}
 	return nil

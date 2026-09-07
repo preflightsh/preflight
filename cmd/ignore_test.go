@@ -139,3 +139,16 @@ func TestIgnoreSecretsAllowlistEntry(t *testing.T) {
 		t.Error("re-adding the same path changed the file")
 	}
 }
+
+// A file that is only a comment has its comment on the document node, not
+// on a key. Re-encoding just the mapping dropped it.
+func TestIgnoreKeepsDocumentComment(t *testing.T) {
+	path := inTempProject(t, "# nothing configured yet\n")
+	if err := runIgnore(nil, []string{"sitemap"}); err != nil {
+		t.Fatal(err)
+	}
+	got := readFile(t, path)
+	if !strings.Contains(got, "# nothing configured yet") || !strings.Contains(got, "ignore:\n  - sitemap\n") {
+		t.Errorf("--- got ---\n%s", got)
+	}
+}
