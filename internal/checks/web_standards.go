@@ -1,6 +1,7 @@
 package checks
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -695,77 +696,33 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 		"project/urls.py",
 	}
 	for _, path := range djangoUrlsPaths {
-		fullPath := filepath.Join(ctx.RootDir, path)
-		if content, err := os.ReadFile(fullPath); err == nil {
-			if strings.Contains(string(content), "sitemap") {
-				return CheckResult{
-					ID:       c.ID(),
-					Title:    c.Title(),
-					Severity: SeverityInfo,
-					Passed:   true,
-					Message:  "sitemap.xml configured in Django urls",
-				}, nil
-			}
-		}
-	}
-
-	// Check for sitemap generation in package.json (Node/Next.js)
-	pkgPath := filepath.Join(ctx.RootDir, "package.json")
-	if content, err := os.ReadFile(pkgPath); err == nil {
-		if strings.Contains(string(content), "next-sitemap") ||
-			strings.Contains(string(content), "sitemap") {
+		if configMentions(ctx.RootDir, path, "sitemap") {
 			return CheckResult{
 				ID:       c.ID(),
 				Title:    c.Title(),
 				Severity: SeverityInfo,
 				Passed:   true,
-				Message:  "Sitemap generation configured via npm package",
+				Message:  "sitemap.xml configured in Django urls",
 			}, nil
 		}
 	}
 
-	// Check for sitemap in Gemfile (Rails)
-	gemfilePath := filepath.Join(ctx.RootDir, "Gemfile")
-	if content, err := os.ReadFile(gemfilePath); err == nil {
-		if strings.Contains(string(content), "sitemap_generator") ||
-			strings.Contains(string(content), "sitemap") {
+	// Dependency manifests: a package whose name mentions sitemap. The
+	// name, not the whole file, so a description or TODO can't pass the
+	// check; the substring, not an exact list, so new generators still do.
+	for _, dep := range []struct{ file, message string }{
+		{"package.json", "Sitemap generation configured via npm package"},
+		{"Gemfile", "Sitemap generation configured via Ruby gem"},
+		{"composer.json", "Sitemap generation configured via Composer package"},
+		{"requirements.txt", "Sitemap generation configured via Python package"},
+	} {
+		if hasDependencyMentioning(ctx.RootDir, dep.file, "sitemap") {
 			return CheckResult{
 				ID:       c.ID(),
 				Title:    c.Title(),
 				Severity: SeverityInfo,
 				Passed:   true,
-				Message:  "Sitemap generation configured via Ruby gem",
-			}, nil
-		}
-	}
-
-	// Check for sitemap in composer.json (Laravel/PHP)
-	composerPath := filepath.Join(ctx.RootDir, "composer.json")
-	if content, err := os.ReadFile(composerPath); err == nil {
-		if strings.Contains(string(content), "spatie/laravel-sitemap") ||
-			strings.Contains(string(content), "sitemap") {
-			return CheckResult{
-				ID:       c.ID(),
-				Title:    c.Title(),
-				Severity: SeverityInfo,
-				Passed:   true,
-				Message:  "Sitemap generation configured via Composer package",
-			}, nil
-		}
-	}
-
-	// Check for sitemap in requirements.txt (Python/Flask/Django)
-	requirementsPath := filepath.Join(ctx.RootDir, "requirements.txt")
-	if content, err := os.ReadFile(requirementsPath); err == nil {
-		if strings.Contains(string(content), "django-sitemap") ||
-			strings.Contains(string(content), "flask-sitemap") ||
-			strings.Contains(string(content), "sitemap") {
-			return CheckResult{
-				ID:       c.ID(),
-				Title:    c.Title(),
-				Severity: SeverityInfo,
-				Passed:   true,
-				Message:  "Sitemap generation configured via Python package",
+				Message:  dep.message,
 			}, nil
 		}
 	}
@@ -832,8 +789,13 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 		}
 	}
 
-	// Hugo: Check hugo config for sitemap settings (Hugo has built-in sitemap)
-	hugoConfigs := []string{"hugo.toml", "hugo.yaml", "hugo.json", "config.toml", "config.yaml"}
+	// Hugo generates a sitemap by default. hugo.toml/yaml/json is
+	// unambiguous; config.toml and config.yaml are every other tool's
+	// config file too, so those only count when the stack is Hugo.
+	hugoConfigs := []string{"hugo.toml", "hugo.yaml", "hugo.json"}
+	if ctx.Config.Stack == "hugo" {
+		hugoConfigs = append(hugoConfigs, "config.toml", "config.yaml")
+	}
 	for _, cfg := range hugoConfigs {
 		fullPath := filepath.Join(ctx.RootDir, cfg)
 		if _, err := os.Stat(fullPath); err == nil {
@@ -849,9 +811,8 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 	}
 
 	// Jekyll: Check for jekyll-sitemap in _config.yml or Gemfile
-	jekyllConfig := filepath.Join(ctx.RootDir, "_config.yml")
-	if content, err := os.ReadFile(jekyllConfig); err == nil {
-		if strings.Contains(string(content), "jekyll-sitemap") {
+	{
+		if configMentions(ctx.RootDir, "_config.yml", "jekyll-sitemap") {
 			return CheckResult{
 				ID:       c.ID(),
 				Title:    c.Title(),
@@ -863,9 +824,8 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 	}
 
 	// Gatsby: Check for gatsby-plugin-sitemap
-	gatsbyConfig := filepath.Join(ctx.RootDir, "gatsby-config.js")
-	if content, err := os.ReadFile(gatsbyConfig); err == nil {
-		if strings.Contains(string(content), "gatsby-plugin-sitemap") {
+	{
+		if configMentions(ctx.RootDir, "gatsby-config.js", "gatsby-plugin-sitemap") {
 			return CheckResult{
 				ID:       c.ID(),
 				Title:    c.Title(),
@@ -879,9 +839,8 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 	// Astro: Check for @astrojs/sitemap
 	astroConfigs := []string{"astro.config.mjs", "astro.config.ts", "astro.config.js"}
 	for _, cfg := range astroConfigs {
-		fullPath := filepath.Join(ctx.RootDir, cfg)
-		if content, err := os.ReadFile(fullPath); err == nil {
-			if strings.Contains(string(content), "@astrojs/sitemap") || strings.Contains(string(content), "sitemap") {
+		{
+			if configMentions(ctx.RootDir, cfg, "sitemap") {
 				return CheckResult{
 					ID:       c.ID(),
 					Title:    c.Title(),
@@ -896,9 +855,8 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 	// Nuxt: Check for @nuxtjs/sitemap module
 	nuxtConfigs := []string{"nuxt.config.ts", "nuxt.config.js"}
 	for _, cfg := range nuxtConfigs {
-		fullPath := filepath.Join(ctx.RootDir, cfg)
-		if content, err := os.ReadFile(fullPath); err == nil {
-			if strings.Contains(string(content), "@nuxtjs/sitemap") || strings.Contains(string(content), "sitemap") {
+		{
+			if configMentions(ctx.RootDir, cfg, "sitemap") {
 				return CheckResult{
 					ID:       c.ID(),
 					Title:    c.Title(),
@@ -911,9 +869,8 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 	}
 
 	// SvelteKit: Check for sitemap in svelte.config.js
-	svelteConfig := filepath.Join(ctx.RootDir, "svelte.config.js")
-	if content, err := os.ReadFile(svelteConfig); err == nil {
-		if strings.Contains(string(content), "sitemap") {
+	{
+		if configMentions(ctx.RootDir, "svelte.config.js", "sitemap") {
 			return CheckResult{
 				ID:       c.ID(),
 				Title:    c.Title(),
@@ -927,9 +884,8 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 	// Eleventy: Check for sitemap in .eleventy.js or eleventy.config.js
 	eleventyConfigs := []string{".eleventy.js", "eleventy.config.js", "eleventy.config.cjs", "eleventy.config.mjs"}
 	for _, cfg := range eleventyConfigs {
-		fullPath := filepath.Join(ctx.RootDir, cfg)
-		if content, err := os.ReadFile(fullPath); err == nil {
-			if strings.Contains(string(content), "sitemap") {
+		{
+			if configMentions(ctx.RootDir, cfg, "sitemap") {
 				return CheckResult{
 					ID:       c.ID(),
 					Title:    c.Title(),
@@ -1457,7 +1413,7 @@ func (c IndexNowCheck) Run(ctx Context) (CheckResult, error) {
 			if err != nil {
 				continue
 			}
-			contentStr := strings.ToLower(string(content))
+			contentStr := strings.ToLower(stripComments(string(content)))
 			if strings.Contains(contentStr, "indexnow") || strings.Contains(contentStr, "index_now") {
 				relPath := dir + "/" + entry.Name()
 				return CheckResult{
@@ -1483,7 +1439,7 @@ func (c IndexNowCheck) Run(ctx Context) (CheckResult, error) {
 		if err != nil {
 			continue
 		}
-		contentStr := strings.ToLower(string(content))
+		contentStr := strings.ToLower(stripComments(string(content)))
 		if strings.Contains(contentStr, "indexnow") || strings.Contains(contentStr, "index_now") {
 			return CheckResult{
 				ID:       c.ID(),
@@ -1543,45 +1499,20 @@ func (c IndexNowCheck) Run(ctx Context) (CheckResult, error) {
 		}
 	}
 
-	// Check for IndexNow packages in dependency files
-	// Gemfile (Rails)
-	gemfilePath := filepath.Join(ctx.RootDir, "Gemfile")
-	if content, err := os.ReadFile(gemfilePath); err == nil {
-		if strings.Contains(string(content), "indexnow") || strings.Contains(string(content), "index_now") {
+	// Dependency manifests: a package whose name mentions IndexNow (see
+	// dependencyNames for why the name and not the whole file).
+	for _, dep := range []struct{ file, message string }{
+		{"Gemfile", "IndexNow configured via Ruby gem"},
+		{"package.json", "IndexNow configured via npm package"},
+		{"composer.json", "IndexNow configured via Composer package"},
+	} {
+		if hasDependencyMentioning(ctx.RootDir, dep.file, "indexnow", "index_now", "index-now") {
 			return CheckResult{
 				ID:       c.ID(),
 				Title:    c.Title(),
 				Severity: SeverityInfo,
 				Passed:   true,
-				Message:  "IndexNow configured via Ruby gem",
-			}, nil
-		}
-	}
-
-	// package.json (Node.js)
-	pkgPath := filepath.Join(ctx.RootDir, "package.json")
-	if content, err := os.ReadFile(pkgPath); err == nil {
-		if strings.Contains(string(content), "indexnow") {
-			return CheckResult{
-				ID:       c.ID(),
-				Title:    c.Title(),
-				Severity: SeverityInfo,
-				Passed:   true,
-				Message:  "IndexNow configured via npm package",
-			}, nil
-		}
-	}
-
-	// composer.json (PHP/Laravel)
-	composerPath := filepath.Join(ctx.RootDir, "composer.json")
-	if content, err := os.ReadFile(composerPath); err == nil {
-		if strings.Contains(string(content), "indexnow") {
-			return CheckResult{
-				ID:       c.ID(),
-				Title:    c.Title(),
-				Severity: SeverityInfo,
-				Passed:   true,
-				Message:  "IndexNow configured via Composer package",
+				Message:  dep.message,
 			}, nil
 		}
 	}
@@ -1765,4 +1696,106 @@ func findMonorepoPublicFiles(rootDir, filename string) []string {
 	}
 
 	return paths
+}
+
+// dependencyNames extracts declared dependency names from a manifest so a
+// check can ask "is a package whose name mentions X installed" instead of
+// "does the file contain X anywhere". The second question is answered yes
+// by a description field or a TODO, which is how a project with no sitemap
+// passed the sitemap check. Matching on the name rather than an exact
+// package list keeps it loose enough for @nuxtjs/sitemap, next-sitemap,
+// sitemap_generator, spatie/laravel-sitemap and whatever ships next.
+//
+// Supported: package.json (all dependency blocks), composer.json (require
+// and require-dev), Gemfile (gem "name" lines) and requirements.txt.
+// Unknown manifests yield nothing.
+func dependencyNames(path string) []string {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	switch filepath.Base(path) {
+	case "package.json":
+		var pkg struct {
+			Dependencies         map[string]any `json:"dependencies"`
+			DevDependencies      map[string]any `json:"devDependencies"`
+			PeerDependencies     map[string]any `json:"peerDependencies"`
+			OptionalDependencies map[string]any `json:"optionalDependencies"`
+		}
+		if json.Unmarshal(content, &pkg) != nil {
+			return nil
+		}
+		return mapKeys(pkg.Dependencies, pkg.DevDependencies, pkg.PeerDependencies, pkg.OptionalDependencies)
+	case "composer.json":
+		var pkg struct {
+			Require    map[string]any `json:"require"`
+			RequireDev map[string]any `json:"require-dev"`
+		}
+		if json.Unmarshal(content, &pkg) != nil {
+			return nil
+		}
+		return mapKeys(pkg.Require, pkg.RequireDev)
+	case "Gemfile":
+		var names []string
+		for _, m := range gemLineRe.FindAllStringSubmatch(stripComments(string(content)), -1) {
+			names = append(names, m[1])
+		}
+		return names
+	case "requirements.txt":
+		var names []string
+		for _, line := range strings.Split(string(content), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "-") {
+				continue
+			}
+			// The name ends at the first version, extras, marker or URL token.
+			if i := strings.IndexAny(line, "=<>~![; @"); i >= 0 {
+				line = line[:i]
+			}
+			if line != "" {
+				names = append(names, line)
+			}
+		}
+		return names
+	}
+	return nil
+}
+
+// gemLineRe matches the gem name in a Gemfile line: gem "sitemap_generator".
+var gemLineRe = regexp.MustCompile(`(?m)^\s*gem\s+['"]([^'"]+)['"]`)
+
+func mapKeys(maps ...map[string]any) []string {
+	var keys []string
+	for _, m := range maps {
+		for k := range m {
+			keys = append(keys, k)
+		}
+	}
+	return keys
+}
+
+// hasDependencyMentioning reports whether the manifest at rootDir/file
+// declares a dependency whose name contains any of the substrings
+// (case-insensitive).
+func hasDependencyMentioning(rootDir, file string, substrs ...string) bool {
+	for _, name := range dependencyNames(filepath.Join(rootDir, file)) {
+		lower := strings.ToLower(name)
+		for _, sub := range substrs {
+			if strings.Contains(lower, sub) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// configMentions reports whether the config or source file at rootDir/file
+// mentions substr outside of comments. Framework config files are code,
+// so a commented-out module line or a TODO must not count.
+func configMentions(rootDir, file, substr string) bool {
+	content, err := os.ReadFile(filepath.Join(rootDir, file))
+	if err != nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(stripComments(string(content))), substr)
 }

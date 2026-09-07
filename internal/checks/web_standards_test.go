@@ -316,3 +316,86 @@ func TestIndexNowCheckFindsPhoenixService(t *testing.T) {
 	}
 	t.Logf("phoenix index_now.ex -> passed=%v msg=%q", res.Passed, res.Message)
 }
+
+func sitemapProject(t *testing.T, stack string, files map[string]string) Context {
+	t.Helper()
+	root := t.TempDir()
+	for name, body := range files {
+		full := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return Context{RootDir: root, Config: &config.PreflightConfig{Stack: stack}}
+}
+
+// The dependency-file branches used to pass on the substring "sitemap"
+// anywhere in the file, and the Hugo branch on any config.yaml. Each of
+// these projects has no sitemap and must not pass; each "has" variant
+// keeps a real setup passing.
+func TestSitemapDependencyMatching(t *testing.T) {
+	cases := []struct {
+		name  string
+		stack string
+		files map[string]string
+		pass  bool
+	}{
+		{"config.yaml in a Go project is not Hugo", "go", map[string]string{"config.yaml": "server:\n  port: 8080\n"}, false},
+		{"config.yaml in a Hugo project", "hugo", map[string]string{"config.yaml": "baseURL: https://x\n"}, true},
+		{"hugo.toml anywhere", "unknown", map[string]string{"hugo.toml": "baseURL = 'x'\n"}, true},
+		{"package.json description mention", "node", map[string]string{"package.json": `{"description": "TODO: add a sitemap", "dependencies": {}}`}, false},
+		{"package.json next-sitemap dependency", "next", map[string]string{"package.json": `{"devDependencies": {"next-sitemap": "^4"}}`}, true},
+		{"package.json scoped sitemap dependency", "node", map[string]string{"package.json": `{"dependencies": {"@nuxtjs/sitemap": "^5"}}`}, true},
+		{"Gemfile commented-out gem", "rails", map[string]string{"Gemfile": "# gem 'sitemap_generator'\ngem 'rails'\n"}, false},
+		{"Gemfile sitemap_generator", "rails", map[string]string{"Gemfile": "gem 'rails'\ngem \"sitemap_generator\"\n"}, true},
+		{"composer.json description mention", "laravel", map[string]string{"composer.json": `{"description": "sitemap coming soon", "require": {}}`}, false},
+		{"composer.json spatie/laravel-sitemap", "laravel", map[string]string{"composer.json": `{"require": {"spatie/laravel-sitemap": "^7"}}`}, true},
+		{"requirements.txt comment", "django", map[string]string{"requirements.txt": "# sitemap later\ndjango==5.0\n"}, false},
+		{"requirements.txt django-sitemap", "django", map[string]string{"requirements.txt": "django==5.0\ndjango-sitemap>=1.0\n"}, true},
+		{"nuxt.config commented module", "nuxt", map[string]string{"nuxt.config.ts": "export default {\n  // modules: ['@nuxtjs/sitemap'],\n}\n"}, false},
+		{"nuxt.config sitemap module", "nuxt", map[string]string{"nuxt.config.ts": "export default { modules: ['@nuxtjs/sitemap'] }\n"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := SitemapCheck{}.Run(sitemapProject(t, tc.stack, tc.files))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Passed != tc.pass {
+				t.Errorf("passed=%v, want %v (%s)", res.Passed, tc.pass, res.Message)
+			}
+		})
+	}
+}
+
+func TestIndexNowDependencyMatching(t *testing.T) {
+	const key = "0123456789abcdef0123456789abcdef"
+	cases := []struct {
+		name  string
+		files map[string]string
+		pass  bool
+	}{
+		{"composer.json description mention", map[string]string{"composer.json": `{"description": "we do not use indexnow", "require": {}}`}, false},
+		{"composer.json indexnow package", map[string]string{"composer.json": `{"require": {"vendor/craft-indexnow": "^1"}}`}, true},
+		{"package.json description mention", map[string]string{"package.json": `{"description": "indexnow someday"}`}, false},
+		{"package.json indexnow package", map[string]string{"package.json": `{"dependencies": {"indexnow-js": "1.0.0"}}`}, true},
+		{"routes.rb commented reference", map[string]string{"config/routes.rb": "# get 'indexnow', to: 'seo#key'\n"}, false},
+		{"routes.rb live reference", map[string]string{"config/routes.rb": "get 'indexnow', to: 'seo#key'\n"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := sitemapProject(t, "unknown", tc.files)
+			ctx.Config.Checks.IndexNow = &config.IndexNowConfig{Enabled: true, Key: key}
+			res, err := IndexNowCheck{}.Run(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Passed != tc.pass {
+				t.Errorf("passed=%v, want %v (%s)", res.Passed, tc.pass, res.Message)
+			}
+		})
+	}
+}
