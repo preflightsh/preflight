@@ -201,7 +201,8 @@ func sanitize(s string) string {
 		r, size := utf8.DecodeRuneInString(s[i:])
 		// A lone invalid byte is dropped too: 0x9b on its own is not valid
 		// UTF-8, but a terminal in 8-bit mode still reads it as CSI.
-		if !isTerminalControl(r) && !(r == utf8.RuneError && size == 1) {
+		invalidByte := r == utf8.RuneError && size == 1
+		if !isTerminalControl(r) && !invalidByte {
 			b.WriteString(s[i : i+size])
 		}
 		i += size

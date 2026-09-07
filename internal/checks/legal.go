@@ -69,13 +69,13 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 		// A redirect counts as "found" only if it stays on the same
 		// domain, isn't a login/auth bounce, and actually lands on a
 		// matching URL (not a path-clean or homepage bounce).
-		accepting := func(keywords ...string) func(*http.Response) bool {
-			return func(resp *http.Response) bool {
-				if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		accepting := func(keywords ...string) func(int, http.Header) bool {
+			return func(status int, header http.Header) bool {
+				if status >= 200 && status < 300 {
 					return true
 				}
-				if resp.StatusCode >= 300 && resp.StatusCode < 400 {
-					loc := resp.Header.Get("Location")
+				if status >= 300 && status < 400 {
+					loc := header.Get("Location")
 					return isSameDomainRedirect(baseURL, loc) && !isAuthRedirect(loc) && redirectMentions(loc, keywords...)
 				}
 				return false
@@ -582,12 +582,12 @@ func redirectMentions(location string, keywords ...string) bool {
 const legalProbeBatch = 5
 
 // probeFirstHit requests candidate paths in batches, concurrently within a
-// batch, and returns the first path in list order whose response accept
-// approves. Batching keeps the common case (an early candidate exists) to
+// batch, and returns the first path in list order whose response status
+// and headers accept approves. Batching keeps the common case (an early candidate exists) to
 // one round of requests, while a miss no longer costs one timeout per
 // candidate in series: on a slow host, 14 sequential probes at the scan
 // timeout was over two minutes for one check.
-func probeFirstHit(ctx Context, client *http.Client, baseURL string, paths []string, accept func(*http.Response) bool) (string, bool) {
+func probeFirstHit(ctx Context, client *http.Client, baseURL string, paths []string, accept func(status int, header http.Header) bool) (string, bool) {
 	for start := 0; start < len(paths); start += legalProbeBatch {
 		end := min(start+legalProbeBatch, len(paths))
 		hits := make([]bool, end-start)
@@ -601,7 +601,7 @@ func probeFirstHit(ctx Context, client *http.Client, baseURL string, paths []str
 					return
 				}
 				resp.Body.Close()
-				hits[i] = accept(resp)
+				hits[i] = accept(resp.StatusCode, resp.Header)
 			}(i, path)
 		}
 		wg.Wait()

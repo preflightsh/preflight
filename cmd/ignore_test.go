@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -107,7 +108,8 @@ func TestIgnoreRejectsUnknownID(t *testing.T) {
 	if err == nil {
 		t.Fatal("ignore accepted an unknown ID")
 	}
-	if exit, ok := err.(*ExitError); !ok || exit.Code != ExitUsage {
+	var exit *ExitError
+	if !errors.As(err, &exit) || exit.Code != ExitUsage {
 		t.Errorf("want ExitUsage, got %v", err)
 	}
 	if strings.Contains(readFile(t, path), "sitemapp") {
