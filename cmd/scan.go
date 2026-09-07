@@ -3,6 +3,8 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -26,6 +28,18 @@ var (
 	onlyFlag    []string
 	skipFlag    []string
 )
+
+// scanHTTPTimeout bounds each request the scan makes. Two seconds was too
+// short: cold starts on Vercel, Render, Fly and Cloud Run routinely take
+// longer, and the homepage prefetch is the first request the host sees, so
+// a healthy site was reported "unreachable" by every network check at once.
+const scanHTTPTimeout = 10 * time.Second
+
+// scanWorkers is how many checks run at once. Most of a scan's wall time is
+// network checks waiting on the same host one after another; four in
+// flight collapses most of that waiting while keeping the load on the host
+// modest.
+const scanWorkers = 4
 
 var scanCmd = &cobra.Command{
 	Use:   "scan [path]",
@@ -67,12 +81,8 @@ func filterChecksByFlags(enabled []checks.Check, only, skip []string) ([]checks.
 		return enabled, nil
 	}
 
-	known := make(map[string]bool, len(checks.Registry))
-	for _, c := range checks.Registry {
-		known[c.ID()] = true
-	}
 	for _, id := range append(append([]string(nil), only...), skip...) {
-		if !known[id] {
+		if !checks.KnownID(id) {
 			return nil, fmt.Errorf("unknown check ID %q (run 'preflight checks' to list IDs)", id)
 		}
 	}
@@ -102,44 +112,106 @@ func filterChecksByFlags(enabled []checks.Check, only, skip []string) ([]checks.
 	return filtered, nil
 }
 
+// scanOptions is everything runScan gathers from flags and arguments before
+// handing off to executeScan, which does the work against explicit writers
+// so a test can drive a whole scan and read the report back.
+type scanOptions struct {
+	ProjectDir string
+	CI         bool
+	Format     string
+	Verbose    bool
+	Publish    bool
+	Only       []string
+	Skip       []string
+	// Quiet disables the progress spinner: CI, JSON output, tests.
+	Quiet bool
+}
+
 func runScan(cmd *cobra.Command, args []string) error {
-	if !ciMode {
+	// The update notice is interactive output. It is skipped for JSON so
+	// nothing can land in front of the document, and for CI, which has
+	// nobody to prompt.
+	if !ciMode && formatFlag != "json" {
 		CheckForUpdates()
 	}
 
-	// Use provided path or current directory
-	var projectDir string
-	if len(args) > 0 {
-		projectDir = args[0]
-		// Validate the provided path
-		info, err := os.Stat(projectDir)
-		if err != nil {
-			return &ExitError{Code: ExitUsage, Err: fmt.Errorf("path does not exist: %s", projectDir)}
-		}
-		if !info.IsDir() {
-			return &ExitError{Code: ExitUsage, Err: fmt.Errorf("path is not a directory: %s", projectDir)}
-		}
-	} else {
-		var err error
-		projectDir, err = os.Getwd()
-		if err != nil {
-			return fmt.Errorf("failed to get current directory: %w", err)
-		}
+	projectDir, err := resolveProjectDir(args)
+	if err != nil {
+		return err
 	}
 
-	// Load config
-	cfg, err := config.Load(projectDir)
+	// Scan-wide cancellation context. SIGINT (Ctrl-C) or SIGTERM cancels
+	// the context, which propagates to every in-flight HTTP request via
+	// http.NewRequestWithContext and lets checks return promptly instead
+	// of leaving the process hung on a long timeout.
+	scanCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+
+	exitCode, err := executeScan(scanCtx, scanOptions{
+		ProjectDir: projectDir,
+		CI:         ciMode,
+		Format:     formatFlag,
+		Verbose:    verboseFlag,
+		Publish:    publishFlag,
+		Only:       onlyFlag,
+		Skip:       skipFlag,
+		Quiet:      ciMode || formatFlag == "json",
+	}, os.Stdout, os.Stderr)
+	if err != nil {
+		return err
+	}
+
+	// Show star message on first scan (only in human format, not JSON)
+	if formatFlag != "json" && isFirstRun("scan_done") {
+		fmt.Println()
+		showStarMessage()
+		markFirstRunComplete("scan_done")
+	}
+
+	if exitCode != ExitOK {
+		return &ExitError{Code: exitCode}
+	}
+	return nil
+}
+
+// resolveProjectDir validates the optional path argument, defaulting to the
+// current directory. A bad path is a usage error, not a failed scan.
+func resolveProjectDir(args []string) (string, error) {
+	if len(args) == 0 {
+		dir, err := os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("failed to get current directory: %w", err)
+		}
+		return dir, nil
+	}
+	dir := args[0]
+	info, err := os.Stat(dir)
+	if err != nil {
+		return "", &ExitError{Code: ExitUsage, Err: fmt.Errorf("path does not exist: %s", dir)}
+	}
+	if !info.IsDir() {
+		return "", &ExitError{Code: ExitUsage, Err: fmt.Errorf("path is not a directory: %s", dir)}
+	}
+	return dir, nil
+}
+
+// executeScan loads the config, runs the enabled checks and writes the
+// report to stdout. It returns the exit code the results earn. The error
+// is reserved for "preflight could not run" (a usage error) and for
+// cancellation; a project that fails its checks is not an error here.
+func executeScan(ctx context.Context, opts scanOptions, stdout, stderr io.Writer) (int, error) {
+	cfg, err := config.Load(opts.ProjectDir)
 	if err != nil {
 		msg := fmt.Sprintf("Error: %v", err)
-		if !ciMode {
+		if !opts.CI {
 			msg += "\nRun 'preflight init' to create a configuration file."
 		}
-		return &ExitError{Code: ExitUsage, Err: fmt.Errorf("%s", msg)}
+		return ExitUsage, &ExitError{Code: ExitUsage, Err: fmt.Errorf("%s", msg)}
 	}
 
-	// Create HTTP client with timeout. SafeHTTPClient refuses to dial
-	// private/loopback/metadata IPs so a hostile preflight.yml cannot
-	// coerce checks into probing internal services.
+	// SafeHTTPClient refuses to dial private/loopback/metadata IPs so a
+	// hostile preflight.yml cannot coerce checks into probing internal
+	// services.
 	//
 	// Configuring a local dev URL (localhost, *.local, *.test,
 	// *.ddev.site etc.) is a trusted-config workflow, so we exempt those
@@ -158,78 +230,28 @@ func runScan(cmd *cobra.Command, args []string) error {
 			localAddrs = append(localAddrs, addr)
 		}
 	}
-	httpClient := netutil.SafeHTTPClientAllowing(2*time.Second, localAddrs)
+	httpClient := netutil.SafeHTTPClientAllowing(scanHTTPTimeout, localAddrs)
 
-	// Spinner gives the user something to watch while checks run. Off in
-	// CI and JSON modes (which expect quiet/structured output) and on
-	// non-TTY stdout. The Spinner type handles its own no-op when
-	// disabled, so we can call its methods unconditionally below.
-	var spinner *output.Spinner
-	if !ciMode && formatFlag != "json" {
+	// The spinner gives the user something to watch while checks run. The
+	// zero value is a no-op, so the methods below can be called
+	// unconditionally.
+	spinner := &output.Spinner{}
+	if !opts.Quiet {
 		spinner = output.NewSpinner()
 		spinner.Start("Preparing scan...")
 		defer spinner.Stop()
-	} else {
-		spinner = &output.Spinner{} // no-op
 	}
 
-	// Scan-wide cancellation context. SIGINT (Ctrl-C) or SIGTERM cancels
-	// the context, which propagates to every in-flight HTTP request via
-	// http.NewRequestWithContext and lets checks return promptly instead
-	// of leaving the process hung on a long timeout.
-	scanCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stopSignals()
-
-	// Create check context. Pre-fetch the homepage once so checks that
-	// need to scan rendered HTML (OG/Twitter and favicon detection for
-	// CMS-driven sites) can share a single request.
-	ctx := checks.Context{
-		Ctx:     scanCtx,
-		RootDir: projectDir,
+	cctx := checks.Context{
+		Ctx:     ctx,
+		RootDir: opts.ProjectDir,
 		Config:  cfg,
 		Client:  httpClient,
-		Verbose: verboseFlag,
+		Verbose: opts.Verbose,
 	}
-	// Fetch staging and production homepage HTML in parallel. Staging
-	// uses the chosen httpClient (which is the relaxed client when
-	// staging is a local dev URL like *.lndo.site). Production always
-	// uses SafeHTTPClient as defense-in-depth, since a typo or hostile
-	// preflight.yml could otherwise point production at an internal IP.
-	// If the user has only configured production and it's a local URL,
-	// reuse the relaxed client for that too.
-	if cfg.URLs.Staging != "" || cfg.URLs.Production != "" {
-		spinner.Update("Fetching homepages...")
-		var wg sync.WaitGroup
-		if cfg.URLs.Staging != "" {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				ctx.PageHTMLStaging, ctx.PageFetchStaging = checks.FetchPage(scanCtx, httpClient, cfg.URLs.Staging)
-			}()
-		}
-		if cfg.URLs.Production != "" {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				prodClient := netutil.SafeHTTPClient(2 * time.Second)
-				if checks.IsLocalURL(cfg.URLs.Production) {
-					prodClient = httpClient
-				}
-				ctx.PageHTMLProduction, ctx.PageFetchProduction = checks.FetchPage(scanCtx, prodClient, cfg.URLs.Production)
-			}()
-		}
-		wg.Wait()
-		// PageHTML is the first-available rendered HTML, for env-agnostic
-		// checks like favicon detection.
-		if ctx.PageHTMLStaging != "" {
-			ctx.PageHTML = ctx.PageHTMLStaging
-		} else {
-			ctx.PageHTML = ctx.PageHTMLProduction
-		}
-	}
+	prefetchHomepages(ctx, &cctx, httpClient, spinner)
 
-	// Build list of enabled checks
-	enabledChecks := buildEnabledChecks(cfg, projectDir)
+	enabledChecks := buildEnabledChecks(cfg, opts.ProjectDir)
 
 	// Filter out ignored checks
 	if len(cfg.Ignore) > 0 {
@@ -247,67 +269,143 @@ func runScan(cmd *cobra.Command, args []string) error {
 	}
 
 	// One-off narrowing via --only / --skip.
-	enabledChecks, err = filterChecksByFlags(enabledChecks, onlyFlag, skipFlag)
+	enabledChecks, err = filterChecksByFlags(enabledChecks, opts.Only, opts.Skip)
 	if err != nil {
-		return &ExitError{Code: ExitUsage, Err: err}
+		return ExitUsage, &ExitError{Code: ExitUsage, Err: err}
 	}
 
-	// Run all checks
-	var results []checks.CheckResult
-	for i, check := range enabledChecks {
-		// Honor Ctrl-C / SIGTERM between checks so a long scan can be
-		// stopped cleanly instead of being killed mid-request.
-		if scanCtx.Err() != nil {
-			spinner.Stop()
-			fmt.Fprintln(os.Stderr, "\nScan cancelled.")
-			return &ExitError{Code: ExitCanceled}
-		}
-		spinner.Update(fmt.Sprintf("Running %s (%d/%d)", check.Title(), i+1, len(enabledChecks)))
-		result, err := check.Run(ctx)
-		if err != nil {
-			// Convert error to failed check result
-			result = checks.CheckResult{
-				ID:       check.ID(),
-				Title:    check.Title(),
-				Severity: checks.SeverityError,
-				Passed:   false,
-				Message:  fmt.Sprintf("Check failed: %v", err),
-			}
-		}
-		results = append(results, result)
-	}
+	total := len(enabledChecks)
+	results, cancelled := runChecks(ctx, cctx, enabledChecks, scanWorkers, func(done int, title string) {
+		spinner.Update(fmt.Sprintf("Running checks (%d/%d), finished %s", done, total, title))
+	})
 	spinner.Stop()
+	if cancelled {
+		fmt.Fprintln(stderr, "\nScan cancelled.")
+		return ExitCanceled, &ExitError{Code: ExitCanceled}
+	}
 
-	// Output results
 	var outputter output.Outputter
-	if formatFlag == "json" {
+	if opts.Format == "json" {
 		outputter = output.JSONOutputter{}
 	} else {
-		outputter = output.HumanOutputter{Verbose: verboseFlag}
+		outputter = output.HumanOutputter{Verbose: opts.Verbose}
+	}
+	outputter.Output(stdout, cfg.ProjectName, results)
+
+	// Publish to the dashboard if requested. Best-effort: it never changes
+	// the scan's exit code and prints to stderr so JSON output stays clean.
+	if opts.Publish {
+		_ = publishScanResults(cfg, opts.ProjectDir, results)
 	}
 
-	outputter.Output(os.Stdout, cfg.ProjectName, results)
+	return determineExitCode(results), nil
+}
 
-	// Publish to the dashboard if requested. Best-effort: it never changes the
-	// scan's exit code and prints to stderr so JSON output stays clean.
-	if publishFlag {
-		_ = publishScanResults(cfg, projectDir, results)
+// prefetchHomepages fetches each configured environment's homepage once, in
+// parallel, so checks that need rendered HTML (OG/Twitter, favicon
+// detection for CMS-driven sites) share a single request. Staging uses the
+// scan client, which is relaxed for local dev URLs. Production always uses
+// SafeHTTPClient as defense in depth, since a typo or hostile preflight.yml
+// could otherwise point it at an internal IP, unless production itself is
+// a local URL.
+func prefetchHomepages(ctx context.Context, cctx *checks.Context, httpClient *http.Client, spinner *output.Spinner) {
+	cfg := cctx.Config
+	if cfg.URLs.Staging == "" && cfg.URLs.Production == "" {
+		return
 	}
-
-	// Show star message on first scan (only in human format, not JSON)
-	if formatFlag != "json" && isFirstRun("scan_done") {
-		fmt.Println()
-		showStarMessage()
-		markFirstRunComplete("scan_done")
+	spinner.Update("Fetching homepages...")
+	var wg sync.WaitGroup
+	if cfg.URLs.Staging != "" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cctx.PageHTMLStaging, cctx.PageFetchStaging = checks.FetchPage(ctx, httpClient, cfg.URLs.Staging)
+		}()
 	}
-
-	// Determine exit code
-	exitCode := determineExitCode(results)
-	if exitCode != 0 {
-		return &ExitError{Code: exitCode}
+	if cfg.URLs.Production != "" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			prodClient := netutil.SafeHTTPClient(scanHTTPTimeout)
+			if checks.IsLocalURL(cfg.URLs.Production) {
+				prodClient = httpClient
+			}
+			cctx.PageHTMLProduction, cctx.PageFetchProduction = checks.FetchPage(ctx, prodClient, cfg.URLs.Production)
+		}()
 	}
+	wg.Wait()
+	// PageHTML is the first-available rendered HTML, for env-agnostic
+	// checks like favicon detection.
+	if cctx.PageHTMLStaging != "" {
+		cctx.PageHTML = cctx.PageHTMLStaging
+	} else {
+		cctx.PageHTML = cctx.PageHTMLProduction
+	}
+}
 
-	return nil
+// runChecks runs list with up to workers checks in flight and returns the
+// results in list order, so the report reads exactly as it did when checks
+// ran one at a time. progress is called as each check finishes. Checks not
+// yet started when ctx is cancelled are skipped and cancelled reports it;
+// the ones in flight finish on their own (their requests carry ctx).
+func runChecks(ctx context.Context, cctx checks.Context, list []checks.Check, workers int, progress func(done int, title string)) (results []checks.CheckResult, cancelled bool) {
+	results = make([]checks.CheckResult, len(list))
+	if workers < 1 {
+		workers = 1
+	}
+	var (
+		wg   sync.WaitGroup
+		mu   sync.Mutex
+		done int
+		sem  = make(chan struct{}, workers)
+	)
+	for i, check := range list {
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			cancelled = true
+		}
+		if cancelled {
+			break
+		}
+		wg.Add(1)
+		go func(i int, check checks.Check) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			results[i] = runOneCheck(cctx, check)
+			mu.Lock()
+			done++
+			n := done
+			mu.Unlock()
+			progress(n, check.Title())
+		}(i, check)
+	}
+	wg.Wait()
+	return results, cancelled
+}
+
+// runOneCheck converts a check's error, or a panic, into a failed result so
+// one broken check reports itself instead of taking the scan down.
+func runOneCheck(cctx checks.Context, check checks.Check) (result checks.CheckResult) {
+	failed := func(err any) checks.CheckResult {
+		return checks.CheckResult{
+			ID:       check.ID(),
+			Title:    check.Title(),
+			Severity: checks.SeverityError,
+			Passed:   false,
+			Message:  fmt.Sprintf("Check failed: %v", err),
+		}
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			result = failed(fmt.Sprintf("panic: %v", r))
+		}
+	}()
+	result, err := check.Run(cctx)
+	if err != nil {
+		return failed(err)
+	}
+	return result
 }
 
 func buildEnabledChecks(cfg *config.PreflightConfig, rootDir string) []checks.Check {
@@ -409,6 +507,10 @@ func buildEnabledChecks(cfg *config.PreflightConfig, rootDir string) []checks.Ch
 	return enabledChecks
 }
 
+// determineExitCode maps results to the documented exit codes. An unknown
+// severity on a failed check counts as a warning, matching how
+// output.CalculateSummary tallies it, so the summary and the exit code
+// cannot disagree.
 func determineExitCode(results []checks.CheckResult) int {
 	hasError := false
 	hasWarning := false
@@ -418,7 +520,7 @@ func determineExitCode(results []checks.CheckResult) int {
 			switch r.Severity {
 			case checks.SeverityError:
 				hasError = true
-			case checks.SeverityWarn:
+			default:
 				hasWarning = true
 			}
 		}

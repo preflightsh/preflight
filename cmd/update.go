@@ -27,6 +27,10 @@ type githubRelease struct {
 
 // CheckForUpdates checks if a newer version is available and prompts user to upgrade.
 // Only checks once every 24 hours to avoid nagging the user.
+//
+// Everything it prints goes to stderr. It used to write to stdout, where
+// the banner landed in front of `scan --format json` and broke the JSON for
+// anyone piping it without --ci.
 func CheckForUpdates() {
 	// Skip in CI mode or if version is dev
 	if version == "dev" {
@@ -54,26 +58,28 @@ func CheckForUpdates() {
 
 	if isNewerVersion(latest, version) {
 		upgradeCmd := getUpgradeCommand()
-		fmt.Println()
-		fmt.Printf("📦 A new version of Preflight is available: %s → %s\n", version, latest)
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintf(os.Stderr, "📦 A new version of Preflight is available: %s → %s\n", version, latest)
 
 		// For the `curl ... | sh` path we refuse to auto-execute. Piping a
 		// network-fetched script into a shell on the user's machine is too
 		// risky for an auto-prompt, even over HTTPS. Just print the command.
-		if strings.Contains(upgradeCmd, "|") {
-			fmt.Printf("   To upgrade: %s\n", upgradeCmd)
-			fmt.Println()
+		// The same goes when stdin is not a terminal: there is nobody to
+		// answer the prompt, and reading it would swallow piped input.
+		if strings.Contains(upgradeCmd, "|") || !isTerminal(os.Stdin) {
+			fmt.Fprintf(os.Stderr, "   To upgrade: %s\n", upgradeCmd)
+			fmt.Fprintln(os.Stderr)
 			return
 		}
 
 		// Print the command first so the user sees exactly what will run.
-		fmt.Printf("   Will run: %s\n", upgradeCmd)
-		fmt.Print("   Install now? [y/N] ")
+		fmt.Fprintf(os.Stderr, "   Will run: %s\n", upgradeCmd)
+		fmt.Fprint(os.Stderr, "   Install now? [y/N] ")
 
 		reader := bufio.NewReader(os.Stdin)
 		response, err := reader.ReadString('\n')
 		if err != nil {
-			fmt.Printf("   To upgrade later: %s\n", upgradeCmd)
+			fmt.Fprintf(os.Stderr, "   To upgrade later: %s\n", upgradeCmd)
 			return
 		}
 
@@ -87,9 +93,9 @@ func CheckForUpdates() {
 				relaunchAfterUpgrade()
 			}
 		} else {
-			fmt.Printf("   To upgrade later: %s\n", upgradeCmd)
+			fmt.Fprintf(os.Stderr, "   To upgrade later: %s\n", upgradeCmd)
 		}
-		fmt.Println()
+		fmt.Fprintln(os.Stderr)
 	}
 }
 
@@ -135,14 +141,14 @@ func runUpgrade(upgradeCmd string) bool {
 		// Defense in depth: CheckForUpdates is supposed to filter these
 		// out already, but make sure we never pipe untrusted bytes into
 		// a shell from this code path.
-		fmt.Printf("   ✗ Refusing to auto-run piped shell command: %s\n", upgradeCmd)
+		fmt.Fprintf(os.Stderr, "   ✗ Refusing to auto-run piped shell command: %s\n", upgradeCmd)
 		return false
 	}
 
-	fmt.Printf("   Running: %s\n", upgradeCmd)
+	fmt.Fprintf(os.Stderr, "   Running: %s\n", upgradeCmd)
 	parts := strings.Fields(upgradeCmd)
 	if len(parts) == 0 {
-		fmt.Println("   ✗ Could not determine upgrade command")
+		fmt.Fprintln(os.Stderr, "   ✗ Could not determine upgrade command")
 		return false
 	}
 
@@ -150,11 +156,11 @@ func runUpgrade(upgradeCmd string) bool {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		fmt.Printf("   ✗ Upgrade failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "   ✗ Upgrade failed: %v\n", err)
 		return false
 	}
 
-	fmt.Println("   ✓ Upgrade complete!")
+	fmt.Fprintln(os.Stderr, "   ✓ Upgrade complete!")
 	return true
 }
 
@@ -165,10 +171,10 @@ func runUpgrade(upgradeCmd string) bool {
 // in place and never returns; if re-exec is unsupported (Windows) or fails, it
 // prints a re-run hint and exits so we never silently continue on old code.
 func relaunchAfterUpgrade() {
-	fmt.Println("   ↻ Restarting with the new version...")
-	fmt.Println()
+	fmt.Fprintln(os.Stderr, "   ↻ Restarting with the new version...")
+	fmt.Fprintln(os.Stderr)
 	if err := execNewBinary(); err != nil {
-		fmt.Println("   Please re-run your command to use the new version.")
+		fmt.Fprintln(os.Stderr, "   Please re-run your command to use the new version.")
 	}
 	os.Exit(0)
 }
@@ -271,4 +277,14 @@ func getUpgradeCommand() string {
 	}
 
 	return "curl -sSL https://preflight.sh/install.sh | sh"
+}
+
+// isTerminal reports whether f is a character device (an interactive
+// terminal) rather than a pipe or file.
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
 }
