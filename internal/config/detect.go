@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/preflightsh/preflight/internal/catalog"
 	"github.com/preflightsh/preflight/internal/fsutil"
 	"github.com/preflightsh/preflight/internal/netutil"
 )
@@ -231,105 +232,8 @@ func hasMonorepoFramework(rootDir string, files []string) bool {
 	return false
 }
 
-// AllServices returns the list of all supported services
-var AllServices = []string{
-	// Payments
-	"stripe",
-	"paypal",
-	"braintree",
-	"paddle",
-	"lemonsqueezy",
-
-	// Error Tracking & Monitoring
-	"sentry",
-	"bugsnag",
-	"rollbar",
-	"honeybadger",
-	"datadog",
-	"newrelic",
-	"logrocket",
-
-	// Email
-	"postmark",
-	"sendgrid",
-	"mailgun",
-	"aws_ses",
-	"resend",
-	"mailchimp",
-	"convertkit",
-	"beehiiv",
-	"aweber",
-	"activecampaign",
-	"campaignmonitor",
-	"drip",
-	"klaviyo",
-	"buttondown",
-
-	// Analytics
-	"plausible",
-	"fathom",
-	"umami",
-	"fullres",
-	"datafast",
-	"google_analytics",
-	"posthog",
-	"mixpanel",
-	"amplitude",
-	"segment",
-	"hotjar",
-
-	// Auth
-	"auth0",
-	"clerk",
-	"workos",
-	"firebase",
-	"supabase",
-
-	// Communication
-	"twilio",
-	"slack",
-	"discord",
-	"intercom",
-	"crisp",
-
-	// Infrastructure
-	"redis",
-	"sidekiq",
-	"rabbitmq",
-	"elasticsearch",
-	"convex",
-
-	// Storage & CDN
-	"aws_s3",
-	"cloudinary",
-	"cloudflare",
-
-	// Search
-	"algolia",
-
-	// AI
-	"openai",
-	"anthropic",
-	"google_ai",
-	"mistral",
-	"cohere",
-	"replicate",
-	"huggingface",
-	"grok",
-	"perplexity",
-	"together_ai",
-
-	// SEO
-	"indexnow",
-
-	// Cookie Consent
-	"cookieconsent",
-	"cookiebot",
-	"onetrust",
-	"termly",
-	"cookieyes",
-	"iubenda",
-}
+// AllServices lists every supported service ID, in catalog order.
+var AllServices = catalog.ServiceIDs()
 
 // DetectServices scans the project for known service integrations
 func DetectServices(rootDir string) map[string]bool {

@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/preflightsh/preflight/internal/catalog"
 	"github.com/preflightsh/preflight/internal/checks"
 	"github.com/preflightsh/preflight/internal/config"
 	"github.com/preflightsh/preflight/internal/netutil"
@@ -309,99 +310,6 @@ func runScan(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// serviceChecks maps every declared-service check to its service ID, in
-// report order (payments, monitoring, email, marketing, analytics,
-// infrastructure, auth, communication, storage, search, AI, cookie consent).
-// Add new service checks here and in the checks package; nothing else.
-var serviceChecks = []struct {
-	id    string
-	check checks.Check
-}{
-	// Payments
-	{"paypal", checks.PayPalCheck},
-	{"braintree", checks.BraintreeCheck},
-	{"paddle", checks.PaddleCheck},
-	{"lemonsqueezy", checks.LemonSqueezyCheck},
-	// Error tracking & monitoring
-	{"sentry", checks.SentryCheck{}},
-	{"bugsnag", checks.BugsnagCheck},
-	{"rollbar", checks.RollbarCheck},
-	{"honeybadger", checks.HoneybadgerCheck},
-	{"datadog", checks.DatadogCheck},
-	{"newrelic", checks.NewRelicCheck},
-	{"logrocket", checks.LogRocketCheck},
-	// Email services
-	{"postmark", checks.PostmarkCheck{}},
-	{"sendgrid", checks.SendGridCheck{}},
-	{"mailgun", checks.MailgunCheck{}},
-	{"aws_ses", checks.AWSSESCheck{}},
-	{"resend", checks.ResendCheck{}},
-	// Email marketing
-	{"mailchimp", checks.MailchimpCheck},
-	{"convertkit", checks.ConvertKitCheck},
-	{"beehiiv", checks.BeehiivCheck},
-	{"aweber", checks.AWeberCheck},
-	{"activecampaign", checks.ActiveCampaignCheck},
-	{"campaignmonitor", checks.CampaignMonitorCheck},
-	{"drip", checks.DripCheck},
-	{"klaviyo", checks.KlaviyoCheck},
-	{"buttondown", checks.ButtondownCheck},
-	// Analytics
-	{"plausible", checks.PlausibleCheck{}},
-	{"fathom", checks.FathomCheck{}},
-	{"umami", checks.UmamiCheck},
-	{"google_analytics", checks.GoogleAnalyticsCheck{}},
-	{"fullres", checks.FullresCheck},
-	{"datafast", checks.DatafastCheck},
-	{"posthog", checks.PostHogCheck},
-	{"mixpanel", checks.MixpanelCheck},
-	{"amplitude", checks.AmplitudeCheck},
-	{"segment", checks.SegmentCheck},
-	{"hotjar", checks.HotjarCheck},
-	// Infrastructure
-	{"redis", checks.RedisCheck{}},
-	{"sidekiq", checks.SidekiqCheck{}},
-	{"rabbitmq", checks.RabbitMQCheck},
-	{"elasticsearch", checks.ElasticsearchCheck},
-	{"convex", checks.ConvexCheck},
-	// Auth
-	{"auth0", checks.Auth0Check},
-	{"clerk", checks.ClerkCheck},
-	{"workos", checks.WorkOSCheck},
-	{"firebase", checks.FirebaseCheck},
-	{"supabase", checks.SupabaseCheck},
-	// Communication
-	{"twilio", checks.TwilioCheck},
-	{"slack", checks.SlackCheck},
-	{"discord", checks.DiscordCheck},
-	{"intercom", checks.IntercomCheck},
-	{"crisp", checks.CrispCheck},
-	// Storage & CDN
-	{"aws_s3", checks.AWSS3Check},
-	{"cloudinary", checks.CloudinaryCheck},
-	{"cloudflare", checks.CloudflareCheck},
-	// Search
-	{"algolia", checks.AlgoliaCheck},
-	// AI
-	{"openai", checks.OpenAICheck},
-	{"anthropic", checks.AnthropicCheck},
-	{"google_ai", checks.GoogleAICheck},
-	{"mistral", checks.MistralCheck},
-	{"cohere", checks.CohereCheck},
-	{"replicate", checks.ReplicateCheck},
-	{"huggingface", checks.HuggingFaceCheck},
-	{"grok", checks.GrokCheck},
-	{"perplexity", checks.PerplexityCheck},
-	{"together_ai", checks.TogetherAICheck},
-	// Cookie consent
-	{"cookieconsent", checks.CookieConsentJSCheck},
-	{"cookiebot", checks.CookiebotCheck{}},
-	{"onetrust", checks.OneTrustCheck{}},
-	{"termly", checks.TermlyCheck{}},
-	{"cookieyes", checks.CookieYesCheck{}},
-	{"iubenda", checks.IubendaCheck{}},
-}
-
 func buildEnabledChecks(cfg *config.PreflightConfig, rootDir string) []checks.Check {
 	var enabledChecks []checks.Check
 
@@ -464,9 +372,13 @@ func buildEnabledChecks(cfg *config.PreflightConfig, rootDir string) []checks.Ch
 	if cfg.Checks.StripeWebhook != nil && cfg.Checks.StripeWebhook.Enabled && !serviceIgnored("stripe") {
 		enabledChecks = append(enabledChecks, checks.StripeWebhookCheck{})
 	}
-	for _, sc := range serviceChecks {
-		if cfg.Services[sc.id].Declared && !serviceIgnored(sc.id) {
-			enabledChecks = append(enabledChecks, sc.check)
+	for _, svc := range catalog.Services {
+		check, ok := checks.ServiceChecks[svc.ID]
+		if !ok {
+			continue // stripe and indexnow are gated above and below
+		}
+		if cfg.Services[svc.ID].Declared && !serviceIgnored(svc.ID) {
+			enabledChecks = append(enabledChecks, check)
 		}
 	}
 

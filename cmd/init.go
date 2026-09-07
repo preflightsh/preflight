@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/preflightsh/preflight/internal/catalog"
 	"github.com/preflightsh/preflight/internal/config"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -553,108 +554,7 @@ func writeConfig(path string, cfg *config.PreflightConfig) error {
 }
 
 func formatServiceName(svc string) string {
-	names := map[string]string{
-		// Payments
-		"stripe":       "Stripe",
-		"paypal":       "PayPal",
-		"braintree":    "Braintree",
-		"paddle":       "Paddle",
-		"lemonsqueezy": "LemonSqueezy",
-
-		// Error Tracking & Monitoring
-		"sentry":      "Sentry",
-		"bugsnag":     "Bugsnag",
-		"rollbar":     "Rollbar",
-		"honeybadger": "Honeybadger",
-		"datadog":     "Datadog",
-		"newrelic":    "New Relic",
-		"logrocket":   "LogRocket",
-
-		// Email
-		"postmark":        "Postmark",
-		"sendgrid":        "SendGrid",
-		"mailgun":         "Mailgun",
-		"aws_ses":         "AWS SES",
-		"resend":          "Resend",
-		"mailchimp":       "Mailchimp",
-		"convertkit":      "Kit",
-		"beehiiv":         "Beehiiv",
-		"aweber":          "AWeber",
-		"activecampaign":  "ActiveCampaign",
-		"campaignmonitor": "Campaign Monitor",
-		"drip":            "Drip",
-		"klaviyo":         "Klaviyo",
-		"buttondown":      "Buttondown",
-
-		// Analytics
-		"plausible":        "Plausible Analytics",
-		"fathom":           "Fathom Analytics",
-		"umami":            "Umami Analytics",
-		"fullres":          "Fullres Analytics",
-		"datafast":         "Datafa.st Analytics",
-		"google_analytics": "Google Analytics",
-		"posthog":          "PostHog",
-		"mixpanel":         "Mixpanel",
-		"amplitude":        "Amplitude",
-		"segment":          "Segment",
-		"hotjar":           "Hotjar",
-
-		// Auth
-		"auth0":    "Auth0",
-		"clerk":    "Clerk",
-		"workos":   "WorkOS",
-		"firebase": "Firebase",
-		"supabase": "Supabase",
-
-		// Communication
-		"twilio":   "Twilio",
-		"slack":    "Slack",
-		"discord":  "Discord",
-		"intercom": "Intercom",
-		"crisp":    "Crisp",
-
-		// Infrastructure
-		"redis":         "Redis",
-		"sidekiq":       "Sidekiq",
-		"rabbitmq":      "RabbitMQ",
-		"elasticsearch": "Elasticsearch",
-		"convex":        "Convex",
-
-		// Storage & CDN
-		"aws_s3":     "AWS S3",
-		"cloudinary": "Cloudinary",
-		"cloudflare": "Cloudflare",
-
-		// Search
-		"algolia": "Algolia",
-
-		// AI
-		"openai":      "OpenAI",
-		"anthropic":   "Anthropic Claude",
-		"google_ai":   "Google AI (Gemini)",
-		"mistral":     "Mistral AI",
-		"cohere":      "Cohere",
-		"replicate":   "Replicate",
-		"huggingface": "Hugging Face",
-		"grok":        "Grok (X/Twitter)",
-		"perplexity":  "Perplexity",
-		"together_ai": "Together AI",
-
-		// SEO
-		"indexnow": "IndexNow",
-
-		// Cookie Consent
-		"cookieconsent": "CookieConsent",
-		"cookiebot":     "Cookiebot",
-		"onetrust":      "OneTrust",
-		"termly":        "Termly",
-		"cookieyes":     "CookieYes",
-		"iubenda":       "Iubenda",
-	}
-	if name, ok := names[svc]; ok {
-		return name
-	}
-	return svc
+	return catalog.ServiceName(svc)
 }
 
 func formatStackName(stack string) string {
