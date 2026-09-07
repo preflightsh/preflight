@@ -11,7 +11,7 @@ import (
 type EnvParityCheck struct{}
 
 func (c EnvParityCheck) ID() string {
-	return "envParity"
+	return "env_parity"
 }
 
 func (c EnvParityCheck) Title() string {

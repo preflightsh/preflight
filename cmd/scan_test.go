@@ -131,7 +131,7 @@ func TestExecuteScanJSONIsValid(t *testing.T) {
 	dir := scanProject(t, "projectName: demo\nstack: unknown\n")
 	var stdout, stderr bytes.Buffer
 	code, err := executeScan(context.Background(), scanOptions{
-		ProjectDir: dir, Format: "json", Only: []string{"robotsTxt"}, Quiet: true,
+		ProjectDir: dir, Format: "json", Only: []string{"robots_txt"}, Quiet: true,
 	}, &stdout, &stderr)
 	if err != nil {
 		t.Fatal(err)
@@ -146,7 +146,7 @@ func TestExecuteScanJSONIsValid(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
 		t.Fatalf("stdout is not valid JSON: %v\n%s", err, stdout.String())
 	}
-	if doc.Project != "demo" || len(doc.Checks) != 1 || doc.Checks[0].ID != "robotsTxt" || doc.Checks[0].Passed {
+	if doc.Project != "demo" || len(doc.Checks) != 1 || doc.Checks[0].ID != "robots_txt" || doc.Checks[0].Passed {
 		t.Errorf("unexpected document: %+v", doc)
 	}
 	// A missing robots.txt is a warning, and warnings exit 1.
@@ -162,7 +162,7 @@ func TestExecuteScanExitCodes(t *testing.T) {
 			t.Fatal(err)
 		}
 		var out bytes.Buffer
-		code, err := executeScan(context.Background(), scanOptions{ProjectDir: dir, Only: []string{"robotsTxt"}, Quiet: true}, &out, &out)
+		code, err := executeScan(context.Background(), scanOptions{ProjectDir: dir, Only: []string{"robots_txt"}, Quiet: true}, &out, &out)
 		if err != nil || code != ExitOK {
 			t.Errorf("code=%d err=%v, want 0 and nil", code, err)
 		}
@@ -251,5 +251,31 @@ func TestRunChecksHonorsCancellation(t *testing.T) {
 	_, cancelled := runChecks(ctx, checks.Context{}, []checks.Check{fakeCheck{id: "a"}}, 2, func(int, string) {})
 	if !cancelled {
 		t.Error("a cancelled context should stop the scan before it starts")
+	}
+}
+
+// The pre-1.0 camelCase IDs are accepted by --only/--skip and the ignore
+// list, resolve to the same check, and produce a note rather than an error.
+func TestRenamedIDsStillWork(t *testing.T) {
+	if _, err := filterChecksByFlags(nil, []string{"llmsTxt"}, nil); err != nil && !strings.Contains(err.Error(), "no enabled checks match") {
+		t.Errorf("old ID rejected by --only: %v", err)
+	}
+	dir := scanProject(t, "projectName: demo\nstack: unknown\nignore:\n  - robotsTxt\n")
+	var stdout, stderr bytes.Buffer
+	_, err := executeScan(context.Background(), scanOptions{ProjectDir: dir, Format: "json", Only: []string{"robotsTxt", "sitemap"}, Quiet: true}, &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stdout.String(), `"id": "robots_txt"`) {
+		t.Error("robotsTxt in the ignore list should still silence the robots_txt check")
+	}
+	if !strings.Contains(stdout.String(), `"id": "sitemap"`) {
+		t.Error("the --only list should still include sitemap")
+	}
+	if !strings.Contains(stderr.String(), `"robotsTxt" is now "robots_txt"`) {
+		t.Errorf("expected a rename note on stderr, got:\n%s", stderr.String())
+	}
+	if strings.Count(stderr.String(), "robotsTxt") != 1 {
+		t.Errorf("the note should appear once per ID, got:\n%s", stderr.String())
 	}
 }

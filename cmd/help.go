@@ -39,7 +39,7 @@ EXAMPLES:
 
   Silence a specific check:
     $ preflight ignore sitemap
-    $ preflight ignore llmsTxt
+    $ preflight ignore llms_txt
     $ preflight ignore debug_statements
 
   Re-enable a silenced check:
@@ -62,7 +62,7 @@ CONFIGURATION:
   To silence checks via config, add an ignore list:
     ignore:
       - sitemap
-      - llmsTxt
+      - llms_txt
 
 DOCUMENTATION:
   https://github.com/preflightsh/preflight

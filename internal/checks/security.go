@@ -8,7 +8,7 @@ import (
 type SecurityHeadersCheck struct{}
 
 func (c SecurityHeadersCheck) ID() string {
-	return "securityHeaders"
+	return "security_headers"
 }
 
 func (c SecurityHeadersCheck) Title() string {

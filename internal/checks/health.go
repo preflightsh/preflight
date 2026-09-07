@@ -9,7 +9,7 @@ import (
 type HealthCheck struct{}
 
 func (c HealthCheck) ID() string {
-	return "healthEndpoint"
+	return "health_endpoint"
 }
 
 func (c HealthCheck) Title() string {

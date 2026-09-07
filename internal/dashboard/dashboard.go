@@ -199,8 +199,12 @@ func (c *Client) Poll(deviceCode string) (*PollStatus, error) {
 	}
 }
 
-// PublishRequest is the body posted to /api/runs.
+// PublishRequest is the body posted to /api/runs. SchemaVersion and
+// CLIVersion mirror the JSON report (see output.SchemaVersion) so the
+// dashboard can tell which contract a run was published under.
 type PublishRequest struct {
+	SchemaVersion int           `json:"schema_version"`
+	CLIVersion    string        `json:"cli_version"`
 	ProjectKey    string        `json:"project_key"`
 	ProjectName   string        `json:"project_name"`
 	Stack         string        `json:"stack"`

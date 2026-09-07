@@ -64,7 +64,7 @@ preflight scan --ci --format json
 
 # Run only specific checks, or skip some, for fast iteration
 # (one-off; unlike `preflight ignore` it doesn't change preflight.yml)
-preflight scan --only seoMeta,ogTwitter
+preflight scan --only seo_meta,og_twitter
 preflight scan --skip vulnerability,secrets
 
 # Silence a check
@@ -276,7 +276,7 @@ checks:
 # Silence specific checks or services by ID
 ignore:
   - sitemap
-  - llmsTxt
+  - llms_txt
   - google_analytics
 ```
 
@@ -318,13 +318,13 @@ other lines in the same file.
 ### Ignorable Check IDs
 
 **SEO & Social:**
-`seoMeta`, `canonical`, `structured_data`, `indexNow` (opt-in), `ogTwitter`, `viewport`, `lang`
+`seo_meta`, `canonical`, `structured_data`, `index_now` (opt-in), `og_twitter`, `viewport`, `lang`
 
 **Security & Infrastructure:**
-`securityHeaders`, `ssl`, `www_redirect`, `email_auth` (opt-in), `secrets`
+`security_headers`, `ssl`, `www_redirect`, `email_auth` (opt-in), `secrets`
 
 **Environment & Health:**
-`envParity`, `healthEndpoint`
+`env_parity`, `health_endpoint`
 
 **Code Quality & Performance:**
 `vulnerability`, `debug_statements`, `error_pages`, `image_optimization`
@@ -333,7 +333,29 @@ other lines in the same file.
 `legal_pages`
 
 **Web Standard Files:**
-`favicon`, `robotsTxt`, `sitemap`, `llmsTxt`, `adsTxt` (opt-in), `humansTxt` (opt-in), `license` (opt-in)
+`favicon`, `robots_txt`, `sitemap`, `llms_txt`, `ads_txt` (opt-in), `humans_txt` (opt-in), `license` (opt-in)
+
+### Check IDs renamed in 0.22
+
+Every check ID is now snake_case. The old camelCase names keep working
+everywhere an ID is accepted (`ignore:` lists, `--only`, `--skip`,
+`preflight ignore`) through the 1.x line, with a note on stderr, and go
+away in 2.0. `preflight ignore` writes the new name. The keys under
+`checks:` in `preflight.yml` (`healthEndpoint`, `seoMeta`, ...) are a
+separate schema and did not change.
+
+| Old | New |
+|---|---|
+| `seoMeta` | `seo_meta` |
+| `ogTwitter` | `og_twitter` |
+| `securityHeaders` | `security_headers` |
+| `envParity` | `env_parity` |
+| `healthEndpoint` | `health_endpoint` |
+| `robotsTxt` | `robots_txt` |
+| `llmsTxt` | `llms_txt` |
+| `adsTxt` | `ads_txt` |
+| `humansTxt` | `humans_txt` |
+| `indexNow` | `index_now` |
 
 ### A note on scanning code you don't trust
 
@@ -374,7 +396,7 @@ All services have validation checks that verify proper integration (env vars, SD
 
 **AI:** `openai`, `anthropic`, `google_ai`, `mistral`, `cohere`, `replicate`, `huggingface`, `grok`, `perplexity`, `together_ai`
 
-**SEO:** `indexNow`
+**SEO:** `index_now`
 
 **Cookie Consent:** `cookieconsent`, `cookiebot`, `onetrust`, `termly`, `cookieyes`, `iubenda`
 

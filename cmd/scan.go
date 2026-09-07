@@ -89,11 +89,11 @@ func filterChecksByFlags(enabled []checks.Check, only, skip []string) ([]checks.
 
 	onlySet := make(map[string]bool, len(only))
 	for _, id := range only {
-		onlySet[id] = true
+		onlySet[catalog.Canonical(id)] = true
 	}
 	skipSet := make(map[string]bool, len(skip))
 	for _, id := range skip {
-		skipSet[id] = true
+		skipSet[catalog.Canonical(id)] = true
 	}
 
 	var filtered []checks.Check
@@ -242,6 +242,8 @@ func executeScan(ctx context.Context, opts scanOptions, stdout, stderr io.Writer
 		defer spinner.Stop()
 	}
 
+	noteRenamedIDs(stderr, cfg.Ignore, opts.Only, opts.Skip)
+
 	cctx := checks.Context{
 		Ctx:     ctx,
 		RootDir: opts.ProjectDir,
@@ -257,7 +259,7 @@ func executeScan(ctx context.Context, opts scanOptions, stdout, stderr io.Writer
 	if len(cfg.Ignore) > 0 {
 		ignoreMap := make(map[string]bool)
 		for _, id := range cfg.Ignore {
-			ignoreMap[id] = true
+			ignoreMap[catalog.Canonical(id)] = true
 		}
 		var filtered []checks.Check
 		for _, check := range enabledChecks {
@@ -286,7 +288,7 @@ func executeScan(ctx context.Context, opts scanOptions, stdout, stderr io.Writer
 
 	var outputter output.Outputter
 	if opts.Format == "json" {
-		outputter = output.JSONOutputter{}
+		outputter = output.JSONOutputter{CLIVersion: version}
 	} else {
 		outputter = output.HumanOutputter{Verbose: opts.Verbose}
 	}
@@ -299,6 +301,23 @@ func executeScan(ctx context.Context, opts scanOptions, stdout, stderr io.Writer
 	}
 
 	return determineExitCode(results), nil
+}
+
+// noteRenamedIDs tells the user, once per ID, that a pre-1.0 check name in
+// their ignore list or flags has a new name. The old one keeps working
+// through 1.x, so this is a note on stderr rather than an error.
+func noteRenamedIDs(stderr io.Writer, lists ...[]string) {
+	seen := map[string]bool{}
+	for _, list := range lists {
+		for _, id := range list {
+			current, renamed := catalog.Renamed(id)
+			if !renamed || seen[id] {
+				continue
+			}
+			seen[id] = true
+			fmt.Fprintf(stderr, "Note: check ID %q is now %q; the old name keeps working until 2.0.\n", id, current)
+		}
+	}
 }
 
 // prefetchHomepages fetches each configured environment's homepage once, in
@@ -421,7 +440,7 @@ func buildEnabledChecks(cfg *config.PreflightConfig, rootDir string) []checks.Ch
 	// Build ignore map for quick lookup (includes both check IDs and service IDs)
 	ignoreMap := make(map[string]bool)
 	for _, id := range cfg.Ignore {
-		ignoreMap[id] = true
+		ignoreMap[catalog.Canonical(id)] = true
 	}
 
 	// Helper to check if a service should be skipped

@@ -72,7 +72,7 @@ func (h HumanOutputter) Output(w io.Writer, projectName string, results []checks
 			strings.Contains(strings.ToLower(r.Message), "skipped")) {
 			continue
 		}
-		if catalog.IsService(r.ID) {
+		if catalog.IsService(catalog.Canonical(r.ID)) {
 			serviceResults = append(serviceResults, r)
 		} else {
 			coreResults = append(coreResults, r)
@@ -80,7 +80,7 @@ func (h HumanOutputter) Output(w io.Writer, projectName string, results []checks
 	}
 
 	printResult := func(r checks.CheckResult, isLast bool) {
-		category := catalog.Category(r.ID)
+		category := catalog.Category(catalog.Canonical(r.ID))
 		if category == "" {
 			category = strings.ToUpper(r.ID)
 		}

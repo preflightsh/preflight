@@ -21,7 +21,7 @@ import (
 type OGTwitterCheck struct{}
 
 func (c OGTwitterCheck) ID() string {
-	return "ogTwitter"
+	return "og_twitter"
 }
 
 func (c OGTwitterCheck) Title() string {

@@ -254,7 +254,7 @@ func detectIndexNowInSource(ctx Context, key string) (string, bool) {
 type RobotsTxtCheck struct{}
 
 func (c RobotsTxtCheck) ID() string {
-	return "robotsTxt"
+	return "robots_txt"
 }
 
 func (c RobotsTxtCheck) Title() string {
@@ -927,7 +927,7 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 type LLMsTxtCheck struct{}
 
 func (c LLMsTxtCheck) ID() string {
-	return "llmsTxt"
+	return "llms_txt"
 }
 
 func (c LLMsTxtCheck) Title() string {
@@ -1154,7 +1154,7 @@ func (c LLMsTxtCheck) Run(ctx Context) (CheckResult, error) {
 type AdsTxtCheck struct{}
 
 func (c AdsTxtCheck) ID() string {
-	return "adsTxt"
+	return "ads_txt"
 }
 
 func (c AdsTxtCheck) Title() string {
@@ -1227,7 +1227,7 @@ func (c AdsTxtCheck) Run(ctx Context) (CheckResult, error) {
 type IndexNowCheck struct{}
 
 func (c IndexNowCheck) ID() string {
-	return "indexNow"
+	return "index_now"
 }
 
 func (c IndexNowCheck) Title() string {
@@ -1548,7 +1548,7 @@ func (c IndexNowCheck) Run(ctx Context) (CheckResult, error) {
 type HumansTxtCheck struct{}
 
 func (c HumansTxtCheck) ID() string {
-	return "humansTxt"
+	return "humans_txt"
 }
 
 func (c HumansTxtCheck) Title() string {

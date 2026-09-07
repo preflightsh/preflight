@@ -22,7 +22,7 @@ The check will be skipped in future scans.
 
 Example:
   preflight ignore sitemap
-  preflight ignore llmsTxt
+  preflight ignore llms_txt
   preflight ignore debug_statements
 
 To allowlist a single file from the secrets scan (rather than silencing
@@ -39,6 +39,10 @@ func init() {
 
 func runIgnore(cmd *cobra.Command, args []string) error {
 	checkID := args[0]
+	if current, renamed := catalog.Renamed(checkID); renamed {
+		fmt.Fprintf(os.Stderr, "Note: check ID %q is now %q; writing the new name.\n", checkID, current)
+		checkID = current
+	}
 
 	doc, err := loadConfigDocument()
 	if err != nil {
@@ -65,8 +69,8 @@ func runIgnore(cmd *cobra.Command, args []string) error {
 
 	ignoreList := ensureSequence(root, "ignore")
 	for _, item := range ignoreList.Content {
-		if item.Value == checkID {
-			fmt.Printf("'%s' is already in the ignore list\n", checkID)
+		if catalog.Canonical(item.Value) == checkID {
+			fmt.Printf("'%s' is already in the ignore list\n", item.Value)
 			return nil
 		}
 	}
@@ -132,7 +136,7 @@ func init() {
 }
 
 func runUnignore(cmd *cobra.Command, args []string) error {
-	checkID := args[0]
+	checkID := catalog.Canonical(args[0])
 
 	doc, err := loadConfigDocument()
 	if err != nil {
@@ -145,7 +149,9 @@ func runUnignore(cmd *cobra.Command, args []string) error {
 	if ignoreList != nil && ignoreList.Kind == yaml.SequenceNode {
 		kept := ignoreList.Content[:0]
 		for _, item := range ignoreList.Content {
-			if item.Value == checkID {
+			// Match the entry however it was spelled, so `unignore llms_txt`
+			// also removes a pre-1.0 `llmsTxt` line.
+			if catalog.Canonical(item.Value) == checkID {
 				found = true
 				continue
 			}

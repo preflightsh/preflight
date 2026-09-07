@@ -10,7 +10,7 @@ import (
 type SEOMetadataCheck struct{}
 
 func (c SEOMetadataCheck) ID() string {
-	return "seoMeta"
+	return "seo_meta"
 }
 
 func (c SEOMetadataCheck) Title() string {

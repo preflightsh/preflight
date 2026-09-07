@@ -19,7 +19,7 @@ func sampleResults() []checks.CheckResult {
 			Message:  "Canonical URL configured",
 		},
 		{
-			ID:          "ogTwitter",
+			ID:          "og_twitter",
 			Title:       "OG & Twitter cards",
 			Severity:    checks.SeverityWarn,
 			Passed:      false,
@@ -50,7 +50,10 @@ func TestJSONOutputterGolden(t *testing.T) {
 	var buf bytes.Buffer
 	JSONOutputter{}.Output(&buf, "demo", sampleResults())
 
+	// schema_version is part of the contract from 1.0 on; its absence is
+	// how the dashboard recognizes output from a pre-1.0 CLI.
 	const want = `{
+  "schema_version": 1,
   "project": "demo",
   "summary": {
     "ok": 1,
@@ -66,7 +69,7 @@ func TestJSONOutputterGolden(t *testing.T) {
       "message": "Canonical URL configured"
     },
     {
-      "id": "ogTwitter",
+      "id": "og_twitter",
       "title": "OG \u0026 Twitter cards",
       "passed": false,
       "severity": "warn",
@@ -100,7 +103,7 @@ func TestJSONOutputContractKeys(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
 		t.Fatalf("output is not valid JSON: %v", err)
 	}
-	for _, key := range []string{"project", "summary", "checks"} {
+	for _, key := range []string{"schema_version", "project", "summary", "checks"} {
 		if _, ok := decoded[key]; !ok {
 			t.Errorf("top-level key %q missing from JSON contract", key)
 		}
@@ -248,5 +251,13 @@ func TestHumanOutputStripsTerminalControls(t *testing.T) {
 		if !strings.Contains(out, kept) {
 			t.Errorf("expected %q to survive sanitizing", kept)
 		}
+	}
+}
+
+func TestJSONOutputStampsCLIVersion(t *testing.T) {
+	var buf bytes.Buffer
+	JSONOutputter{CLIVersion: "1.2.3"}.Output(&buf, "demo", nil)
+	if !strings.Contains(buf.String(), `"cli_version": "1.2.3"`) {
+		t.Errorf("cli_version missing:\n%s", buf.String())
 	}
 }

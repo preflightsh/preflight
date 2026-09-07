@@ -31,6 +31,8 @@ func publishScanResults(cfg *config.PreflightConfig, projectDir string, results 
 	}
 
 	req := &dashboard.PublishRequest{
+		SchemaVersion: output.SchemaVersion,
+		CLIVersion:    version,
 		ProjectKey:    projectKey(projectDir, cfg.ProjectName),
 		ProjectName:   cfg.ProjectName,
 		Stack:         cfg.Stack,

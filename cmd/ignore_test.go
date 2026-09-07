@@ -80,20 +80,20 @@ func TestIgnorePreservesCommentsAndOrder(t *testing.T) {
 		t.Errorf("config was rewritten beyond the ignore entry.\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 
-	if err := runIgnore(nil, []string{"llmsTxt"}); err != nil {
+	if err := runIgnore(nil, []string{"llms_txt"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := readFile(t, path); !strings.HasSuffix(got, "ignore:\n  - sitemap\n  - llmsTxt\n") {
+	if got := readFile(t, path); !strings.HasSuffix(got, "ignore:\n  - sitemap\n  - llms_txt\n") {
 		t.Errorf("second ignore should append to the list:\n%s", got)
 	}
 
 	if err := runUnignore(nil, []string{"sitemap"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := readFile(t, path); !strings.HasSuffix(got, "ignore:\n  - llmsTxt\n") || !strings.Contains(got, "# we bill through Stripe") {
+	if got := readFile(t, path); !strings.HasSuffix(got, "ignore:\n  - llms_txt\n") || !strings.Contains(got, "# we bill through Stripe") {
 		t.Errorf("unignore should remove one entry and keep comments:\n%s", got)
 	}
-	if err := runUnignore(nil, []string{"llmsTxt"}); err != nil {
+	if err := runUnignore(nil, []string{"llms_txt"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := readFile(t, path); got != normalizedConfig {
@@ -150,5 +150,29 @@ func TestIgnoreKeepsDocumentComment(t *testing.T) {
 	got := readFile(t, path)
 	if !strings.Contains(got, "# nothing configured yet") || !strings.Contains(got, "ignore:\n  - sitemap\n") {
 		t.Errorf("--- got ---\n%s", got)
+	}
+}
+
+// Pre-1.0 IDs keep working: `ignore llmsTxt` writes the current name, and
+// `unignore` removes an entry however it was spelled.
+func TestIgnoreAcceptsRenamedIDs(t *testing.T) {
+	path := inTempProject(t, "projectName: demo\nignore:\n  - seoMeta\n")
+	if err := runIgnore(nil, []string{"llmsTxt"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, path); !strings.HasSuffix(got, "ignore:\n  - seoMeta\n  - llms_txt\n") {
+		t.Errorf("want the current name written, got:\n%s", got)
+	}
+	if err := runIgnore(nil, []string{"seo_meta"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, path); strings.Count(got, "seo") != 1 {
+		t.Errorf("seo_meta is already listed as seoMeta and must not be added twice:\n%s", got)
+	}
+	if err := runUnignore(nil, []string{"seo_meta"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, path); strings.Contains(got, "seoMeta") {
+		t.Errorf("unignore by the new name should remove the old spelling:\n%s", got)
 	}
 }

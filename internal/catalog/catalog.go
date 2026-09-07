@@ -36,22 +36,22 @@ type Service struct {
 
 // Checks lists every core check in the order `preflight checks` shows them.
 var Checks = []Check{
-	{ID: "seoMeta", Category: "SEO", Group: "SEO & Social"},
+	{ID: "seo_meta", Category: "SEO", Group: "SEO & Social"},
 	{ID: "canonical", Category: "SEO", Group: "SEO & Social"},
 	{ID: "structured_data", Category: "SEO", Group: "SEO & Social"},
-	{ID: "indexNow", Category: "INDEXNOW", Group: "SEO & Social", OptIn: true},
-	{ID: "ogTwitter", Category: "SOCIAL", Group: "SEO & Social"},
+	{ID: "index_now", Category: "INDEXNOW", Group: "SEO & Social", OptIn: true},
+	{ID: "og_twitter", Category: "SOCIAL", Group: "SEO & Social"},
 	{ID: "viewport", Category: "MOBILE", Group: "SEO & Social"},
 	{ID: "lang", Category: "LANG", Group: "SEO & Social"},
 
-	{ID: "securityHeaders", Category: "SECURITY", Group: "Security & Infrastructure"},
+	{ID: "security_headers", Category: "SECURITY", Group: "Security & Infrastructure"},
 	{ID: "ssl", Category: "SSL", Group: "Security & Infrastructure"},
 	{ID: "www_redirect", Category: "INFRA", Group: "Security & Infrastructure"},
 	{ID: "email_auth", Category: "EMAIL", Group: "Security & Infrastructure", OptIn: true},
 	{ID: "secrets", Category: "SECRETS", Group: "Security & Infrastructure"},
 
-	{ID: "envParity", Category: "ENV", Group: "Environment & Health"},
-	{ID: "healthEndpoint", Category: "HEALTH", Group: "Environment & Health"},
+	{ID: "env_parity", Category: "ENV", Group: "Environment & Health"},
+	{ID: "health_endpoint", Category: "HEALTH", Group: "Environment & Health"},
 
 	{ID: "vulnerability", Category: "DEPS", Group: "Code Quality & Performance"},
 	{ID: "debug_statements", Category: "DEBUG", Group: "Code Quality & Performance"},
@@ -61,12 +61,47 @@ var Checks = []Check{
 	{ID: "legal_pages", Category: "LEGAL", Group: "Legal & Compliance"},
 
 	{ID: "favicon", Category: "ICONS", Group: "Web Standard Files"},
-	{ID: "robotsTxt", Category: "FILES", Group: "Web Standard Files"},
+	{ID: "robots_txt", Category: "FILES", Group: "Web Standard Files"},
 	{ID: "sitemap", Category: "FILES", Group: "Web Standard Files"},
-	{ID: "llmsTxt", Category: "FILES", Group: "Web Standard Files"},
-	{ID: "adsTxt", Category: "FILES", Group: "Web Standard Files", OptIn: true},
-	{ID: "humansTxt", Category: "FILES", Group: "Web Standard Files", OptIn: true},
+	{ID: "llms_txt", Category: "FILES", Group: "Web Standard Files"},
+	{ID: "ads_txt", Category: "FILES", Group: "Web Standard Files", OptIn: true},
+	{ID: "humans_txt", Category: "FILES", Group: "Web Standard Files", OptIn: true},
 	{ID: "license", Category: "LICENSE", Group: "Web Standard Files", OptIn: true},
+}
+
+// Aliases maps the check IDs Preflight used before 1.0 to their current
+// names. Half the IDs were camelCase and half snake_case, and IDs are the
+// one thing that cannot change after 1.0: they sit in every user's
+// preflight.yml ignore list and CI --only flags. The old names are
+// accepted everywhere an ID is accepted (with a note on stderr) through
+// the 1.x line and go away in 2.0. Config keys (checks.healthEndpoint and
+// friends) are a separate schema and did not change.
+var Aliases = map[string]string{
+	"seoMeta":         "seo_meta",
+	"ogTwitter":       "og_twitter",
+	"securityHeaders": "security_headers",
+	"envParity":       "env_parity",
+	"healthEndpoint":  "health_endpoint",
+	"robotsTxt":       "robots_txt",
+	"llmsTxt":         "llms_txt",
+	"adsTxt":          "ads_txt",
+	"humansTxt":       "humans_txt",
+	"indexNow":        "index_now",
+}
+
+// Canonical returns the current ID for id, following Aliases. IDs the
+// catalog does not know come back unchanged.
+func Canonical(id string) string {
+	if current, ok := Aliases[id]; ok {
+		return current
+	}
+	return id
+}
+
+// Renamed reports whether id is a pre-1.0 name and what it is called now.
+func Renamed(id string) (current string, ok bool) {
+	current, ok = Aliases[id]
+	return current, ok
 }
 
 // Services lists every service in detection and report order. "stripe" is

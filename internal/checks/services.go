@@ -1,5 +1,7 @@
 package checks
 
+import "github.com/preflightsh/preflight/internal/catalog"
+
 // ServiceChecks maps each service ID in catalog.Services to the check that
 // verifies it. Two catalog services deliberately have no entry: "stripe" is
 // verified by StripeWebhookCheck, which is gated on its own config block
@@ -92,9 +94,11 @@ var ServiceChecks = map[string]Check{
 	"iubenda":       IubendaCheck{},
 }
 
-// KnownID reports whether id is the ID of a registered check. It is the
-// validation used by --only, --skip and `preflight ignore`.
+// KnownID reports whether id names a registered check, by its current ID
+// or a pre-1.0 alias. It is the validation used by --only, --skip and
+// `preflight ignore`.
 func KnownID(id string) bool {
+	id = catalog.Canonical(id)
 	for _, c := range Registry {
 		if c.ID() == id {
 			return true
