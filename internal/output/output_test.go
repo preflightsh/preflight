@@ -212,3 +212,41 @@ func TestHumanOutputterVerboseDetails(t *testing.T) {
 		t.Error("verbose output omitted Details")
 	}
 }
+
+// Suggestions are the actionable half of a finding. Until this test they
+// reached only the JSON output, so a terminal user saw "Found 1 debug
+// statement(s)" with no file or line.
+func TestHumanOutputShowsSuggestions(t *testing.T) {
+	var buf bytes.Buffer
+	HumanOutputter{}.Output(&buf, "demo", []checks.CheckResult{{
+		ID: "debug_statements", Title: "Debug statements", Severity: checks.SeverityWarn,
+		Message:     "Found 1 debug statement(s)",
+		Suggestions: []string{"src/app.js:2 - console.log"},
+	}})
+	if !strings.Contains(buf.String(), "src/app.js:2 - console.log") {
+		t.Errorf("suggestion missing from human output:\n%s", buf.String())
+	}
+}
+
+// File names and messages come from the scanned project, so a hostile
+// name must not be able to drive the terminal.
+func TestHumanOutputStripsTerminalControls(t *testing.T) {
+	var buf bytes.Buffer
+	HumanOutputter{Verbose: true}.Output(&buf, "demo", []checks.CheckResult{{
+		ID: "secrets", Title: "Secrets scan", Severity: checks.SeverityError,
+		Message:     "found in \x1b]0;pwned\x07evil\x1b[2J.env",
+		Suggestions: []string{"line\x9bwith C1"},
+		Details:     []string{"tab\tkept, bell\x07dropped"},
+	}})
+	out := buf.String()
+	for _, bad := range []string{"\x1b", "\x07", "\x9b"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("control byte %q reached the terminal output", bad)
+		}
+	}
+	for _, kept := range []string{"pwned", "evil", ".env", "linewith C1", "tab\tkept"} {
+		if !strings.Contains(out, kept) {
+			t.Errorf("expected %q to survive sanitizing", kept)
+		}
+	}
+}

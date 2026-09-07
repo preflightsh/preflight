@@ -5,7 +5,9 @@ import (
 	"io"
 	"os"
 	"strings"
+	"unicode/utf8"
 
+	"github.com/preflightsh/preflight/internal/catalog"
 	"github.com/preflightsh/preflight/internal/checks"
 )
 
@@ -57,163 +59,33 @@ func (h HumanOutputter) Output(w io.Writer, projectName string, results []checks
 	// Header
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "%s%s ✈  Preflight Scan Results%s\n", colorBold, colorCyan, colorReset)
-	fmt.Fprintf(w, "%s   Project: %s%s\n", colorGray, projectName, colorReset)
+	fmt.Fprintf(w, "%s   Project: %s%s\n", colorGray, sanitize(projectName), colorReset)
 	fmt.Fprintln(w)
 
-	// Category icons
-	categoryIcons := map[string]string{
-		"ENV":       "📋",
-		"HEALTH":    "💓",
-		"PAYMENTS":  "💳",
-		"ERRORS":    "🐛",
-		"ANALYTICS": "📊",
-		"INFRA":     "🔧",
-		"JOBS":      "⚡",
-		"SEO":       "🔍",
-		"SECURITY":  "🔒",
-		"SECRETS":   "🔑",
-		"AI":        "🤖",
-		"EMAIL":     "📧",
-		"AUTH":      "🔐",
-		"STORAGE":   "📦",
-		"SEARCH":    "🔎",
-		"CHAT":      "💬",
-		"NOTIFY":    "🔔",
-		"SOCIAL":    "📱",
-		"ICONS":     "🎨",
-		"FILES":     "📄",
-		"SSL":       "🔐",
-		"LICENSE":   "📜",
-		"DEPS":      "📦",
-		"INDEXNOW":  "🔗",
-		"MOBILE":    "📱",
-		"LANG":      "🌐",
-		"PAGES":     "📃",
-		"DEBUG":     "🐞",
-		"PERF":      "⚡",
-		"LEGAL":     "⚖️ ",
-	}
-
-	// Map check IDs to display categories
-	categoryMap := map[string]string{
-		"envParity":          "ENV",
-		"healthEndpoint":     "HEALTH",
-		"seoMeta":            "SEO",
-		"ogTwitter":          "SOCIAL",
-		"securityHeaders":    "SECURITY",
-		"ssl":                "SSL",
-		"secrets":            "SECRETS",
-		"favicon":            "ICONS",
-		"robotsTxt":          "FILES",
-		"sitemap":            "FILES",
-		"llmsTxt":            "FILES",
-		"adsTxt":             "FILES",
-		"humansTxt":          "FILES",
-		"license":            "LICENSE",
-		"vulnerability":      "DEPS",
-		"indexNow":           "INDEXNOW",
-		"canonical":          "SEO",
-		"viewport":           "MOBILE",
-		"lang":               "LANG",
-		"error_pages":        "PAGES",
-		"debug_statements":   "DEBUG",
-		"structured_data":    "SEO",
-		"image_optimization": "PERF",
-		"email_auth":         "EMAIL",
-		"www_redirect":       "INFRA",
-		"legal_pages":        "LEGAL",
-	}
-
-	// Service check IDs - these will be grouped separately
-	serviceCheckIDs := map[string]bool{
-		// Payments
-		"stripe": true, "paypal": true, "braintree": true, "paddle": true, "lemonsqueezy": true,
-		// Error Tracking
-		"sentry": true, "bugsnag": true, "rollbar": true, "honeybadger": true, "datadog": true, "newrelic": true, "logrocket": true,
-		// Email
-		"postmark": true, "sendgrid": true, "mailgun": true, "aws_ses": true, "resend": true,
-		"mailchimp": true, "convertkit": true, "beehiiv": true, "aweber": true, "activecampaign": true,
-		"campaignmonitor": true, "drip": true, "klaviyo": true, "buttondown": true,
-		// Analytics
-		"plausible": true, "fathom": true, "umami": true, "google_analytics": true, "fullres": true, "datafast": true,
-		"posthog": true, "mixpanel": true, "amplitude": true, "segment": true, "hotjar": true,
-		// Auth
-		"auth0": true, "clerk": true, "workos": true, "firebase": true, "supabase": true,
-		// Communication
-		"twilio": true, "slack": true, "discord": true, "intercom": true, "crisp": true,
-		// Infrastructure
-		"redis": true, "sidekiq": true, "rabbitmq": true, "elasticsearch": true, "convex": true,
-		// Storage & CDN
-		"aws_s3": true, "cloudinary": true, "cloudflare": true,
-		// Search
-		"algolia": true,
-		// AI
-		"openai": true, "anthropic": true, "google_ai": true, "mistral": true, "cohere": true,
-		"replicate": true, "huggingface": true, "grok": true, "perplexity": true, "together_ai": true,
-		// Cookie Consent
-		"cookieconsent": true, "cookiebot": true, "onetrust": true, "termly": true, "cookieyes": true, "iubenda": true,
-		// SEO
-		"indexNow": true,
-	}
-
-	// Service category mapping
-	serviceCategoryMap := map[string]string{
-		// Payments
-		"stripe": "PAYMENTS", "paypal": "PAYMENTS", "braintree": "PAYMENTS", "paddle": "PAYMENTS", "lemonsqueezy": "PAYMENTS",
-		// Error Tracking
-		"sentry": "ERRORS", "bugsnag": "ERRORS", "rollbar": "ERRORS", "honeybadger": "ERRORS",
-		"datadog": "ERRORS", "newrelic": "ERRORS", "logrocket": "ERRORS",
-		// Email
-		"postmark": "EMAIL", "sendgrid": "EMAIL", "mailgun": "EMAIL", "aws_ses": "EMAIL", "resend": "EMAIL",
-		"mailchimp": "EMAIL", "convertkit": "EMAIL", "beehiiv": "EMAIL", "aweber": "EMAIL",
-		"activecampaign": "EMAIL", "campaignmonitor": "EMAIL", "drip": "EMAIL", "klaviyo": "EMAIL", "buttondown": "EMAIL",
-		// Analytics
-		"plausible": "ANALYTICS", "fathom": "ANALYTICS", "umami": "ANALYTICS", "google_analytics": "ANALYTICS", "fullres": "ANALYTICS", "datafast": "ANALYTICS",
-		"posthog": "ANALYTICS", "mixpanel": "ANALYTICS", "amplitude": "ANALYTICS", "segment": "ANALYTICS", "hotjar": "ANALYTICS",
-		// Auth
-		"auth0": "AUTH", "clerk": "AUTH", "workos": "AUTH", "firebase": "AUTH", "supabase": "AUTH",
-		// Communication
-		"twilio": "NOTIFY", "slack": "NOTIFY", "discord": "NOTIFY", "intercom": "CHAT", "crisp": "CHAT",
-		// Infrastructure
-		"redis": "INFRA", "sidekiq": "JOBS", "rabbitmq": "JOBS", "elasticsearch": "SEARCH", "convex": "INFRA",
-		// Storage & CDN
-		"aws_s3": "STORAGE", "cloudinary": "STORAGE", "cloudflare": "INFRA",
-		// Search
-		"algolia": "SEARCH",
-		// AI
-		"openai": "AI", "anthropic": "AI", "google_ai": "AI", "mistral": "AI", "cohere": "AI",
-		"replicate": "AI", "huggingface": "AI", "grok": "AI", "perplexity": "AI", "together_ai": "AI",
-		// Cookie Consent
-		"cookieconsent": "LEGAL", "cookiebot": "LEGAL", "onetrust": "LEGAL", "termly": "LEGAL", "cookieyes": "LEGAL", "iubenda": "LEGAL",
-		// SEO
-		"indexNow": "INDEXNOW",
-	}
-
-	// Separate results into non-service checks and service checks
-	// Also filter out skipped checks entirely
+	// Separate results into core checks and service checks, and drop
+	// checks that only report they were skipped so they don't clutter
+	// the output.
 	var coreResults []checks.CheckResult
 	var serviceResults []checks.CheckResult
 	for _, r := range results {
-		// Skip checks that are just "skipping" or "skipped" - don't clutter output
 		if r.Passed && (strings.Contains(strings.ToLower(r.Message), "skipping") ||
 			strings.Contains(strings.ToLower(r.Message), "skipped")) {
 			continue
 		}
-		if serviceCheckIDs[r.ID] {
+		if catalog.IsService(r.ID) {
 			serviceResults = append(serviceResults, r)
 		} else {
 			coreResults = append(coreResults, r)
 		}
 	}
 
-	// Helper function to print a check result
-	printResult := func(r checks.CheckResult, isLast bool, catMap map[string]string) {
-		category := catMap[r.ID]
+	printResult := func(r checks.CheckResult, isLast bool) {
+		category := catalog.Category(r.ID)
 		if category == "" {
 			category = strings.ToUpper(r.ID)
 		}
 
-		icon := categoryIcons[category]
+		icon := catalog.CategoryIcons[category]
 		if icon == "" {
 			icon = "•"
 		}
@@ -221,21 +93,29 @@ func (h HumanOutputter) Output(w io.Writer, projectName string, results []checks
 		status := formatStatus(r)
 		categoryLabel := fmt.Sprintf("%s  %-10s", icon, category)
 
-		fmt.Fprintf(w, "  %s %s%-45s%s %s\n", categoryLabel, colorReset, r.Title, colorReset, status)
+		fmt.Fprintf(w, "  %s %s%-45s%s %s\n", categoryLabel, colorReset, sanitize(r.Title), colorReset, status)
 
 		// Show message for failed checks, or for passed checks with useful info
 		if r.Message != "" {
-			if !r.Passed {
-				fmt.Fprintf(w, "  %s                  └─ %s%s\n", colorGray, r.Message, colorReset)
-			} else if hasUsefulPassedMessage(r.Message) {
-				fmt.Fprintf(w, "  %s                  └─ %s%s\n", colorGray, r.Message, colorReset)
+			if !r.Passed || hasUsefulPassedMessage(r.Message) {
+				fmt.Fprintf(w, "  %s                  └─ %s%s\n", colorGray, sanitize(r.Message), colorReset)
+			}
+		}
+
+		// Suggestions are the actionable half of a finding (the file and
+		// line of a debug statement, the header to add, the image to
+		// shrink). They used to reach only the JSON output, which left
+		// terminal users with "Found 1 debug statement(s)" and no path.
+		if !r.Passed {
+			for _, s := range r.Suggestions {
+				fmt.Fprintf(w, "  %s                     • %s%s\n", colorGray, sanitize(s), colorReset)
 			}
 		}
 
 		// Show verbose details if enabled
 		if h.Verbose && len(r.Details) > 0 {
 			for _, detail := range r.Details {
-				fmt.Fprintf(w, "  %s                  │  %s%s\n", colorGray, detail, colorReset)
+				fmt.Fprintf(w, "  %s                  │  %s%s\n", colorGray, sanitize(detail), colorReset)
 			}
 		}
 
@@ -248,7 +128,7 @@ func (h HumanOutputter) Output(w io.Writer, projectName string, results []checks
 	// Print core check results
 	for i, r := range coreResults {
 		isLast := i == len(coreResults)-1 && len(serviceResults) == 0
-		printResult(r, isLast, categoryMap)
+		printResult(r, isLast)
 	}
 
 	// Print service check results under a heading
@@ -263,7 +143,7 @@ func (h HumanOutputter) Output(w io.Writer, projectName string, results []checks
 
 		for i, r := range serviceResults {
 			isLast := i == len(serviceResults)-1
-			printResult(r, isLast, serviceCategoryMap)
+			printResult(r, isLast)
 		}
 	}
 
@@ -293,6 +173,47 @@ func (h HumanOutputter) Output(w io.Writer, projectName string, results []checks
 		fmt.Fprintf(w, "  %s%s✓ Ready for launch!%s\n", colorBold, colorGreen, colorReset)
 	}
 	fmt.Fprintln(w)
+}
+
+// sanitize strips the control characters a terminal would interpret. Titles
+// are ours, but messages and suggestions carry file names and content
+// harvested from the scanned project, and a file named with an escape
+// sequence would otherwise reach the terminal verbatim (the JSON output is
+// safe because encoding/json escapes them). Tabs are kept; C0 controls,
+// DEL and the C1 range (U+0080 to U+009F, which some terminals treat as
+// 8-bit escape introducers) are dropped.
+func sanitize(s string) string {
+	clean := true
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if isTerminalControl(r) || (r == utf8.RuneError && size == 1) {
+			clean = false
+			break
+		}
+		i += size
+	}
+	if clean {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		// A lone invalid byte is dropped too: 0x9b on its own is not valid
+		// UTF-8, but a terminal in 8-bit mode still reads it as CSI.
+		if !isTerminalControl(r) && !(r == utf8.RuneError && size == 1) {
+			b.WriteString(s[i : i+size])
+		}
+		i += size
+	}
+	return b.String()
+}
+
+func isTerminalControl(r rune) bool {
+	if r == '\t' {
+		return false
+	}
+	return r < 0x20 || (r >= 0x7f && r <= 0x9f)
 }
 
 // hasUsefulPassedMessage returns true if the message contains info worth showing
