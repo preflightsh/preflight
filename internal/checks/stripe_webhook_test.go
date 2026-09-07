@@ -1,6 +1,8 @@
 package checks
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -124,4 +126,44 @@ func TestStripeDependencyFileDetection(t *testing.T) {
 
 func containsIssue(message, want string) bool {
 	return strings.Contains(message, want)
+}
+
+// stripeWebhook.url is documented in the README and redacted on publish,
+// but was never read. A GET to a Stripe endpoint legitimately answers 405
+// (POST only); that is the route saying it exists.
+func TestStripeWebhookURLProbe(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		want   webhookProbe
+	}{
+		{"method not allowed means the route exists", http.StatusMethodNotAllowed, webhookReachable},
+		{"bad request means the route exists", http.StatusBadRequest, webhookReachable},
+		{"ok", http.StatusOK, webhookReachable},
+		{"404 means no route", http.StatusNotFound, webhookMissing},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					t.Errorf("probe used %s, want GET (never POST to a webhook)", r.Method)
+				}
+				w.WriteHeader(tc.status)
+			}))
+			defer srv.Close()
+			ctx := Context{Client: srv.Client(), Config: &config.PreflightConfig{}}
+			if got := probeWebhookEndpoint(ctx, srv.URL+"/webhooks/stripe"); got != tc.want {
+				t.Errorf("probe = %d, want %d", got, tc.want)
+			}
+		})
+	}
+	t.Run("connection failure is unreachable", func(t *testing.T) {
+		srv := httptest.NewServer(http.NotFoundHandler())
+		url := srv.URL
+		srv.Close()
+		ctx := Context{Client: http.DefaultClient, Config: &config.PreflightConfig{}}
+		if got := probeWebhookEndpoint(ctx, url+"/webhooks/stripe"); got != webhookUnreachable {
+			t.Errorf("probe = %d, want unreachable", got)
+		}
+	})
 }

@@ -245,6 +245,30 @@ func IsLocalURL(rawURL string) bool {
 	return false
 }
 
+// HostUnreachable reports whether the scan's homepage prefetch for rawURL
+// was attempted and got no response at all. Checks that would otherwise
+// probe a series of paths on that host (legal pages, health endpoints,
+// well-known files) use it to skip straight to their "unreachable" result
+// instead of waiting out the timeout once per path.
+func (c Context) HostUnreachable(rawURL string) bool {
+	if rawURL == "" {
+		return false
+	}
+	base := strings.TrimSuffix(rawURL, "/")
+	for _, env := range []struct {
+		url   string
+		fetch PageFetch
+	}{
+		{c.Config.URLs.Staging, c.PageFetchStaging},
+		{c.Config.URLs.Production, c.PageFetchProduction},
+	} {
+		if strings.TrimSuffix(env.url, "/") == base {
+			return env.fetch.Attempted() && env.fetch.Status == 0
+		}
+	}
+	return false
+}
+
 // blockedStatus reports whether a status means the host refused to serve
 // the scanner rather than the site being down. Bot protection (Cloudflare
 // answers 403 with a cf-mitigated challenge page), auth walls and rate

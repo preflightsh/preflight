@@ -2,6 +2,7 @@ package checks
 
 import (
 	"bufio"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -141,6 +142,22 @@ func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {
 		suggestions = append(suggestions, "Ensure Stripe is initialized in your application")
 	}
 
+	// Webhook endpoint reachability. README documents stripeWebhook.url
+	// and publish redacts it, but until now nothing read it.
+	webhookNote := ""
+	if cfg := ctx.Config.Checks.StripeWebhook; cfg != nil && cfg.URL != "" {
+		switch probeWebhookEndpoint(ctx, cfg.URL) {
+		case webhookReachable:
+			webhookNote = ", webhook endpoint reachable"
+		case webhookMissing:
+			issues = append(issues, "webhook URL returns 404")
+			suggestions = append(suggestions, "Check the route for "+cfg.URL+" is deployed")
+		case webhookUnreachable:
+			issues = append(issues, "webhook URL unreachable")
+			suggestions = append(suggestions, "Check that "+cfg.URL+" resolves and accepts connections")
+		}
+	}
+
 	// Build result
 	if len(issues) == 0 {
 		message := "Stripe keys configured"
@@ -149,6 +166,7 @@ func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {
 		} else {
 			message += " (webhook secret not found - needed for webhooks)"
 		}
+		message += webhookNote
 		return CheckResult{
 			ID:       c.ID(),
 			Title:    c.Title(),
@@ -190,4 +208,34 @@ func scanEnvFile(path string, keys []string, foundKeys map[string]bool) {
 		}
 	}
 	_ = scanner.Err()
+}
+
+type webhookProbe int
+
+const (
+	webhookSkipped webhookProbe = iota
+	webhookReachable
+	webhookMissing
+	webhookUnreachable
+)
+
+// probeWebhookEndpoint asks whether a route exists at the configured Stripe
+// webhook URL. Nothing is posted: Stripe endpoints only accept signed POST
+// bodies, so a GET answering 405, 400, 401 or 403 is the route saying "I am
+// here, that is not a webhook", which is the answer wanted. Only a 404 (no
+// route) or no response at all (host down, DNS, SSRF refusal) count against
+// the check; a 5xx is reported as reachable since the route clearly ran.
+func probeWebhookEndpoint(ctx Context, rawURL string) webhookProbe {
+	if ctx.Client == nil {
+		return webhookSkipped
+	}
+	resp, err := doGet(ctx.reqContext(), ctx.Client, rawURL)
+	if err != nil {
+		return webhookUnreachable
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return webhookMissing
+	}
+	return webhookReachable
 }
