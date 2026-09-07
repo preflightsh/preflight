@@ -77,22 +77,11 @@ jobs:
         env:
           WEBHOOK_SECRET: ${{ secrets.AUTOCHANGELOG_WEBHOOK_SECRET }}
         run: |
-          # Match the bump to the tag: v0.21.0 after v0.20.1 is a minor
-          # bump, and the patch this used to hard-code would have left the
-          # changelog's version disagreeing with the release's.
-          NEW=${GITHUB_REF_NAME#v}
-          PREV=$(git tag --sort=-v:refname | grep -vx "$GITHUB_REF_NAME" | head -1)
-          PREV=${PREV#v}
-          BUMP=patch
-          if [ -n "$PREV" ]; then
-            if [ "$(echo "$NEW" | cut -d. -f1)" != "$(echo "$PREV" | cut -d. -f1)" ]; then
-              BUMP=major
-            elif [ "$(echo "$NEW" | cut -d. -f2)" != "$(echo "$PREV" | cut -d. -f2)" ]; then
-              BUMP=minor
-            fi
-          fi
-          echo "AutoChangelog bump: $BUMP ($PREV -> $NEW)"
-          BODY="{\"bump\": \"$BUMP\"}"
+          # Send the tag as the version. AutoChangelog keeps its own counter
+          # when only a bump type is given, and it had drifted to v0.13.0
+          # while the CLI was at v0.21.0; naming the version pins the two.
+          BODY="{\"version\": \"$GITHUB_REF_NAME\", \"title\": \"Release $GITHUB_REF_NAME\"}"
+          echo "AutoChangelog: $BODY"
           SIGNATURE=$(printf '%s' "$BODY" | python3 -c "import hmac, hashlib, os, sys; print(hmac.new(os.environ['WEBHOOK_SECRET'].encode(), sys.stdin.buffer.read(), hashlib.sha256).hexdigest())")
           curl -fsSL -X POST https://autochangelog.com/api/v1/hooks/045aaccf-bd97-4227-bf8f-bec556e4331b \
             -H "Content-Type: application/json" \
