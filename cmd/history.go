@@ -39,7 +39,7 @@ func init() {
 
 func runHistory(cmd *cobra.Command, args []string) error {
 	if historyFormat != "human" && historyFormat != "json" {
-		return &ExitError{Code: 2, Err: fmt.Errorf("invalid --format %q (want human or json)", historyFormat)}
+		return &ExitError{Code: ExitUsage, Err: fmt.Errorf("invalid --format %q (want human or json)", historyFormat)}
 	}
 
 	creds, err := dashboard.LoadCredentials()
@@ -49,7 +49,10 @@ func runHistory(cmd *cobra.Command, args []string) error {
 	if creds == nil || creds.Token == "" {
 		return &ExitError{Code: 1, Err: fmt.Errorf("not logged in; run 'preflight auth login' to view your dashboard history")}
 	}
-	client := dashboard.NewClient()
+	client, warning := dashboard.ClientForCredentials(creds)
+	if warning != "" {
+		fmt.Fprintln(os.Stderr, warning)
+	}
 
 	if len(args) == 1 {
 		return showRun(client, creds.Token, args[0])
@@ -63,7 +66,7 @@ func listHistory(client *dashboard.Client, token string) error {
 	if historyHere {
 		projectKey = currentProjectKey()
 		if projectKey == "" {
-			return &ExitError{Code: 2, Err: fmt.Errorf("could not determine the current project; run from a project directory or omit --here")}
+			return &ExitError{Code: ExitUsage, Err: fmt.Errorf("could not determine the current project; run from a project directory or omit --here")}
 		}
 	}
 
@@ -107,7 +110,8 @@ func showRun(client *dashboard.Client, token, runID string) error {
 		mark := "✓"
 		if !c.Passed {
 			mark = "✗"
-			if c.Severity == "warning" {
+			// The wire value is "warn" (checks.SeverityWarn), not "warning".
+			if c.Severity == "warn" {
 				mark = "!"
 			}
 		}
@@ -140,9 +144,12 @@ func relTime(unix int64) string {
 	return time.Unix(unix, 0).Format("Jan 2 3:04 PM")
 }
 
+// truncate shortens s to n runes. Project names are user text, so count
+// runes rather than bytes to avoid slicing a multi-byte character.
 func truncate(s string, n int) string {
-	if len(s) <= n {
+	r := []rune(s)
+	if len(r) <= n {
 		return s
 	}
-	return s[:n-1] + "…"
+	return string(r[:n-1]) + "…"
 }

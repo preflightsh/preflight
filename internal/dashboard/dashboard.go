@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -106,9 +107,37 @@ type Client struct {
 	HTTP    *http.Client
 }
 
-// NewClient returns a Client pointed at APIURL().
+// NewClient returns a Client pointed at APIURL(). Use it for flows that
+// have no token yet (login). Anything holding a token goes through
+// ClientForCredentials instead.
 func NewClient() *Client {
-	return &Client{BaseURL: APIURL(), HTTP: &http.Client{Timeout: 30 * time.Second}}
+	return NewClientFor(APIURL())
+}
+
+// NewClientFor returns a Client for an explicit base URL.
+func NewClientFor(baseURL string) *Client {
+	return &Client{BaseURL: strings.TrimSuffix(baseURL, "/"), HTTP: &http.Client{Timeout: 30 * time.Second}}
+}
+
+// ClientForCredentials returns the client to use with a stored token: one
+// pointed at the origin that issued it. The environment is deliberately
+// not consulted here. PREFLIGHT_API_URL exists so the login flow can be
+// exercised against a local server, but a stale value left in a shell or
+// CI runner must not redirect a production bearer token to another host.
+//
+// When the environment names a different origin, the returned warning
+// says so, so a local-testing setup that forgot to log in again fails
+// loudly instead of quietly publishing to production. Credentials saved
+// by versions that did not record an origin fall back to APIURL().
+func ClientForCredentials(creds *Credentials) (client *Client, warning string) {
+	base := strings.TrimSuffix(creds.APIURL, "/")
+	if base == "" {
+		return NewClient(), ""
+	}
+	if env := strings.TrimSuffix(os.Getenv("PREFLIGHT_API_URL"), "/"); env != "" && env != base {
+		warning = fmt.Sprintf("PREFLIGHT_API_URL is %s but you are logged in to %s; using %s. Run 'preflight auth login' to switch.", env, base, base)
+	}
+	return NewClientFor(base), warning
 }
 
 // StartResponse is returned by StartAuth.

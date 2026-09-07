@@ -41,7 +41,10 @@ func publishScanResults(cfg *config.PreflightConfig, projectDir string, results 
 		},
 	}
 
-	client := dashboard.NewClient()
+	client, warning := dashboard.ClientForCredentials(creds)
+	if warning != "" {
+		fmt.Fprintln(os.Stderr, "\n"+warning)
+	}
 	resp, err := client.PublishRun(creds.Token, req)
 	if err != nil {
 		if errors.Is(err, dashboard.ErrQuotaExceeded) {
@@ -128,18 +131,27 @@ func projectKey(dir, projectName string) string {
 }
 
 // normalizeRemote canonicalizes a git remote URL so the same repository hashes
-// identically whether cloned via SSH or HTTPS.
+// identically however it was cloned: scp-style git@host:owner/repo, ssh://,
+// https://, with or without userinfo, with or without .git.
 func normalizeRemote(url string) string {
 	url = strings.ToLower(strings.TrimSpace(url))
 	url = strings.TrimSuffix(url, ".git")
 	url = strings.TrimSuffix(url, "/")
-	// git@github.com:owner/repo -> github.com/owner/repo
-	if strings.HasPrefix(url, "git@") {
-		url = strings.TrimPrefix(url, "git@")
-		url = strings.Replace(url, ":", "/", 1)
+
+	if i := strings.Index(url, "://"); i >= 0 {
+		// ssh://git@github.com/owner/repo, https://github.com/owner/repo
+		url = url[i+3:]
+	} else if c := strings.Index(url, ":"); c >= 0 && !strings.Contains(url[:c], "/") {
+		// scp-style git@github.com:owner/repo -> git@github.com/owner/repo
+		url = url[:c] + "/" + url[c+1:]
 	}
-	url = strings.TrimPrefix(url, "https://")
-	url = strings.TrimPrefix(url, "http://")
-	url = strings.TrimPrefix(url, "ssh://")
+
+	// Drop userinfo (git@, user:token@) from the authority so a clone with
+	// embedded credentials lands on the same project as one without.
+	if slash := strings.Index(url, "/"); slash > 0 {
+		if at := strings.LastIndex(url[:slash], "@"); at >= 0 {
+			url = url[at+1:]
+		}
+	}
 	return url
 }
