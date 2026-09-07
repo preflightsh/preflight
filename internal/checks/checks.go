@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/preflightsh/preflight/internal/config"
 	"github.com/preflightsh/preflight/internal/netutil"
@@ -344,7 +345,10 @@ func RunPerEnv(ctx Context, scanRenderedHTML func(html string) []string) (summar
 			lines = append(lines, fmt.Sprintf("%s missing: %s", e.name, strings.Join(missing, ", ")))
 		}
 	}
-	return strings.Join(lines, "\n                    └─ "), authoritativePassed
+	// One line: Message is part of the JSON contract and both the terminal
+	// and the dashboard render it on a single line, so the per-env parts
+	// are joined rather than stacked with terminal box-drawing.
+	return strings.Join(lines, "; "), authoritativePassed
 }
 
 // PageFetch describes how a homepage request went, apart from the body.
@@ -381,6 +385,16 @@ func FetchPage(ctx context.Context, client *http.Client, rawURL string) (html st
 	}
 	baseURL := strings.TrimSuffix(rawURL, "/")
 	resp, requested, err := tryURL(ctx, client, baseURL+"/")
+	if err != nil && ctx.Err() == nil {
+		// One retry. This is the first request a host sees from the scan,
+		// and on platforms that scale to zero it is the request that
+		// wakes the host; the second attempt is what finds it up.
+		select {
+		case <-time.After(fetchRetryDelay):
+			resp, requested, err = tryURL(ctx, client, baseURL+"/")
+		case <-ctx.Done():
+		}
+	}
 	fetch = PageFetch{URL: requested}
 	if err != nil {
 		return "", fetch
@@ -397,6 +411,9 @@ func FetchPage(ctx context.Context, client *http.Client, rawURL string) (html st
 	}
 	return string(body), fetch
 }
+
+// fetchRetryDelay is the pause before FetchPage's single retry.
+const fetchRetryDelay = 500 * time.Millisecond
 
 // FetchPageHTML is FetchPage for callers that only need the body.
 func FetchPageHTML(ctx context.Context, client *http.Client, rawURL string) string {

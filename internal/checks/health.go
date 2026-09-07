@@ -37,6 +37,13 @@ func (c HealthCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
+	// The scan already tried this host once. If nothing answered, report
+	// that now rather than waiting out the timeout on each health path
+	// and then the root.
+	if ctx.HostUnreachable(baseURL) {
+		return c.unreachable(baseURL), nil
+	}
+
 	baseURLs := []string{baseURL}
 
 	// Determine which health paths to probe. If the user explicitly enabled
@@ -74,6 +81,10 @@ func (c HealthCheck) Run(ctx Context) (CheckResult, error) {
 	}
 
 	// Site itself isn't reachable.
+	return c.unreachable(baseURL), nil
+}
+
+func (c HealthCheck) unreachable(baseURL string) CheckResult {
 	return CheckResult{
 		ID:       c.ID(),
 		Title:    c.Title(),
@@ -83,7 +94,7 @@ func (c HealthCheck) Run(ctx Context) (CheckResult, error) {
 		Suggestions: []string{
 			"Ensure your site is accessible",
 		},
-	}, nil
+	}
 }
 
 // probePath tries a path and returns (result, true) on a 200 response.

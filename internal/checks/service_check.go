@@ -111,7 +111,7 @@ func checkLiveSiteForPatterns(ctx Context, patterns []*regexp.Regexp) (bool, str
 	if url == "" {
 		url = ctx.Config.URLs.Staging
 	}
-	if url == "" || ctx.Client == nil {
+	if url == "" || ctx.Client == nil || ctx.HostUnreachable(url) {
 		return false, ""
 	}
 

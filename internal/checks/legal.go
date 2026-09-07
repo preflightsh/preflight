@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // getWithContext is a context-aware GET that, unlike doGet, does not set
@@ -51,7 +52,10 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 	// page existing.
 	baseURL = strings.TrimSuffix(baseURL, "/")
 
-	if baseURL != "" {
+	// Skip the HTTP probing entirely when the homepage prefetch already
+	// found nothing listening: 25 candidate paths on a dead host is 25
+	// timeouts, and the filesystem checks below still run.
+	if baseURL != "" && !ctx.HostUnreachable(baseURL) {
 		// Reuse ctx.Client (which already handles the local-vs-safe choice
 		// based on the configured URLs) but override CheckRedirect so 3xx
 		// is treated as "page exists" rather than followed. Copy the
@@ -62,6 +66,22 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 		}
 		client := &clientCopy
 
+		// A redirect counts as "found" only if it stays on the same
+		// domain, isn't a login/auth bounce, and actually lands on a
+		// matching URL (not a path-clean or homepage bounce).
+		accepting := func(keywords ...string) func(*http.Response) bool {
+			return func(resp *http.Response) bool {
+				if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+					return true
+				}
+				if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+					loc := resp.Header.Get("Location")
+					return isSameDomainRedirect(baseURL, loc) && !isAuthRedirect(loc) && redirectMentions(loc, keywords...)
+				}
+				return false
+			}
+		}
+
 		privacyURLs := []string{
 			"/privacy", "/privacy-policy", "/privacypolicy",
 			"/legal/privacy", "/legal/privacy-policy",
@@ -69,27 +89,9 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 			"/privacy-notice", "/privacy-statement",
 			"/info/privacy", "/about/privacy",
 		}
-		for _, path := range privacyURLs {
-			if hasPrivacy {
-				break
-			}
-			resp, err := getWithContext(ctx.reqContext(), client, baseURL+path)
-			if err == nil {
-				resp.Body.Close()
-				if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-					hasPrivacy = true
-					privacyPath = path + " (via HTTP)"
-				} else if resp.StatusCode >= 300 && resp.StatusCode < 400 {
-					// Count a redirect as "found" only if it stays on the same
-					// domain, isn't a login/auth bounce, and actually lands on a
-					// privacy-looking URL (not a path-clean or homepage bounce).
-					loc := resp.Header.Get("Location")
-					if isSameDomainRedirect(baseURL, loc) && !isAuthRedirect(loc) && redirectMentions(loc, "privacy") {
-						hasPrivacy = true
-						privacyPath = path + " (via HTTP)"
-					}
-				}
-			}
+		if path, ok := probeFirstHit(ctx, client, baseURL, privacyURLs, accepting("privacy")); ok {
+			hasPrivacy = true
+			privacyPath = path + " (via HTTP)"
 		}
 
 		termsURLs := []string{
@@ -99,24 +101,9 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 			"/terms-and-conditions", "/terms-conditions",
 			"/info/terms", "/about/terms", "/eula",
 		}
-		for _, path := range termsURLs {
-			if hasTerms {
-				break
-			}
-			resp, err := getWithContext(ctx.reqContext(), client, baseURL+path)
-			if err == nil {
-				resp.Body.Close()
-				if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-					hasTerms = true
-					termsPath = path + " (via HTTP)"
-				} else if resp.StatusCode >= 300 && resp.StatusCode < 400 {
-					loc := resp.Header.Get("Location")
-					if isSameDomainRedirect(baseURL, loc) && !isAuthRedirect(loc) && redirectMentions(loc, "terms", "tos", "eula") {
-						hasTerms = true
-						termsPath = path + " (via HTTP)"
-					}
-				}
-			}
+		if path, ok := probeFirstHit(ctx, client, baseURL, termsURLs, accepting("terms", "tos", "eula")); ok {
+			hasTerms = true
+			termsPath = path + " (via HTTP)"
 		}
 
 		// If we found both via HTTP, return early
@@ -589,4 +576,43 @@ func redirectMentions(location string, keywords ...string) bool {
 		}
 	}
 	return false
+}
+
+// legalProbeBatch is how many candidate paths probeFirstHit requests at once.
+const legalProbeBatch = 5
+
+// probeFirstHit requests candidate paths in batches, concurrently within a
+// batch, and returns the first path in list order whose response accept
+// approves. Batching keeps the common case (an early candidate exists) to
+// one round of requests, while a miss no longer costs one timeout per
+// candidate in series: on a slow host, 14 sequential probes at the scan
+// timeout was over two minutes for one check.
+func probeFirstHit(ctx Context, client *http.Client, baseURL string, paths []string, accept func(*http.Response) bool) (string, bool) {
+	for start := 0; start < len(paths); start += legalProbeBatch {
+		end := min(start+legalProbeBatch, len(paths))
+		hits := make([]bool, end-start)
+		var wg sync.WaitGroup
+		for i, path := range paths[start:end] {
+			wg.Add(1)
+			go func(i int, path string) {
+				defer wg.Done()
+				resp, err := getWithContext(ctx.reqContext(), client, baseURL+path)
+				if err != nil {
+					return
+				}
+				resp.Body.Close()
+				hits[i] = accept(resp)
+			}(i, path)
+		}
+		wg.Wait()
+		for i, hit := range hits {
+			if hit {
+				return paths[start+i], true
+			}
+		}
+		if ctx.reqContext().Err() != nil {
+			return "", false
+		}
+	}
+	return "", false
 }

@@ -74,8 +74,8 @@ func TestSecrets_FingerprintMismatchStillAlerts(t *testing.T) {
 	if res.Passed {
 		t.Fatalf("expected alert (fingerprint mismatch should not suppress), got pass: %s", res.Message)
 	}
-	if !strings.Contains(res.Message, "web/js/golden-hour.js") {
-		t.Fatalf("expected finding to reference the file, got: %s", res.Message)
+	if !strings.Contains(strings.Join(res.Suggestions, "\n"), "web/js/golden-hour.js") {
+		t.Fatalf("expected a suggestion to reference the file, got: %v", res.Suggestions)
 	}
 }
 
@@ -116,11 +116,12 @@ func TestSecrets_UnrelatedSecretInAllowlistedFileStillAlerts(t *testing.T) {
 		t.Fatalf("expected alert for the un-allowlisted secret, got pass: %s", res.Message)
 	}
 	// The remaining finding should be line 2 (the B secret).
-	if !strings.Contains(res.Message, "mixed.js:2") {
-		t.Fatalf("expected line 2 finding to remain, got: %s", res.Message)
+	findings := strings.Join(res.Suggestions, "\n")
+	if !strings.Contains(findings, "mixed.js:2") {
+		t.Fatalf("expected line 2 finding to remain, got: %s", findings)
 	}
-	if strings.Contains(res.Message, "mixed.js:1") {
-		t.Fatalf("line 1 should have been suppressed, got: %s", res.Message)
+	if strings.Contains(findings, "mixed.js:1") {
+		t.Fatalf("line 1 should have been suppressed, got: %s", findings)
 	}
 }
 
@@ -240,8 +241,8 @@ func TestSecrets_TrackedButGitignoredStillAlerts(t *testing.T) {
 	if res.Passed {
 		t.Fatalf("expected alert: tracked file is committed regardless of .gitignore, got pass: %s", res.Message)
 	}
-	if !strings.Contains(res.Message, "[tracked by git]") {
-		t.Fatalf("expected [tracked by git] tag, got: %s", res.Message)
+	if !strings.Contains(strings.Join(res.Suggestions, "\n"), "[tracked by git]") {
+		t.Fatalf("expected [tracked by git] tag, got: %v", res.Suggestions)
 	}
 }
 
@@ -272,8 +273,8 @@ func TestSecrets_UntrackedNotIgnoredAlerts(t *testing.T) {
 	if res.Passed {
 		t.Fatalf("expected alert: untracked + not ignored is committable, got pass: %s", res.Message)
 	}
-	if !strings.Contains(res.Message, "[not gitignored]") {
-		t.Fatalf("expected [not gitignored] tag, got: %s", res.Message)
+	if !strings.Contains(strings.Join(res.Suggestions, "\n"), "[not gitignored]") {
+		t.Fatalf("expected [not gitignored] tag, got: %v", res.Suggestions)
 	}
 }
 

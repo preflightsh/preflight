@@ -135,7 +135,7 @@ func parentBaseURLs(rawURL string) []string {
 // non-empty, non-HTML content (robots.txt is plain text, sitemap.xml is XML —
 // an HTML body means we got a page, e.g. a login/SPA shell, not the file).
 func probeFileAtBase(ctx Context, baseURL, path string) (string, bool) {
-	if ctx.Client == nil || baseURL == "" {
+	if ctx.Client == nil || baseURL == "" || ctx.HostUnreachable(baseURL) {
 		return "", false
 	}
 	baseURL = strings.TrimSuffix(baseURL, "/")
@@ -191,7 +191,7 @@ func probeIndexNowKeyOverHTTP(ctx Context, key string) (string, bool) {
 	seen := make(map[string]bool)
 	for _, base := range bases {
 		base = strings.TrimSuffix(base, "/")
-		if base == "" || seen[base] {
+		if base == "" || seen[base] || ctx.HostUnreachable(base) {
 			continue
 		}
 		seen[base] = true

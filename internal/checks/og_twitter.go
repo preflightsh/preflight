@@ -321,7 +321,7 @@ func (c OGTwitterCheck) Run(ctx Context) (CheckResult, error) {
 	// Check OG image dimensions
 	if ogImageURL != "" && ctx.Client != nil {
 		fullURL := resolveImageURL(ogImageURL, baseURL)
-		if fullURL != "" {
+		if fullURL != "" && imageFetchable(ctx, fullURL, baseURL) {
 			width, height, err := fetchImageDimensions(ctx, fullURL)
 			if err == nil {
 				details = append(details, fmt.Sprintf("og:image dimensions: %dx%d", width, height))
@@ -353,7 +353,7 @@ func (c OGTwitterCheck) Run(ctx Context) (CheckResult, error) {
 	// Check Twitter image dimensions
 	if twitterImageURL != "" && ctx.Client != nil {
 		fullURL := resolveImageURL(twitterImageURL, baseURL)
-		if fullURL != "" {
+		if fullURL != "" && imageFetchable(ctx, fullURL, baseURL) {
 			width, height, err := fetchImageDimensions(ctx, fullURL)
 			if err == nil {
 				details = append(details, fmt.Sprintf("twitter:image dimensions: %dx%d", width, height))
@@ -599,6 +599,15 @@ func resolveImageURL(imageURL, baseURL string) string {
 
 	// Handle relative path
 	return baseURL + "/" + imageURL
+}
+
+// imageFetchable reports whether an image URL is worth requesting: an image
+// on a base the homepage prefetch already found unreachable is skipped so
+// the check doesn't wait out another timeout. CDN-hosted images on other
+// hosts are always tried.
+func imageFetchable(ctx Context, imageURL, baseURL string) bool {
+	base := strings.TrimSuffix(baseURL, "/")
+	return base == "" || !strings.HasPrefix(imageURL, base) || !ctx.HostUnreachable(baseURL)
 }
 
 // fetchImageDimensions fetches an image from a URL and returns its dimensions

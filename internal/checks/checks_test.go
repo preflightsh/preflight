@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/preflightsh/preflight/internal/config"
@@ -377,4 +378,58 @@ func TestRunPerEnv(t *testing.T) {
 			t.Errorf("RunPerEnv staging-only authoritativePassed = false, want true")
 		}
 	})
+}
+
+// The first request is often what wakes a host that scaled to zero; a
+// single retry turns "unreachable" into the page.
+func TestFetchPageRetriesOnce(t *testing.T) {
+	var mu sync.Mutex
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		first := calls == 1
+		mu.Unlock()
+		if first {
+			// Drop the connection without a response.
+			hj, ok := w.(http.Hijacker)
+			if !ok {
+				t.Fatal("server does not support hijacking")
+			}
+			conn, _, err := hj.Hijack()
+			if err != nil {
+				t.Fatal(err)
+			}
+			conn.Close()
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<html><head><title>up</title></head></html>"))
+	}))
+	defer srv.Close()
+
+	html, fetch := FetchPage(context.Background(), srv.Client(), srv.URL)
+	if fetch.Status != 200 || !strings.Contains(html, "<title>up</title>") {
+		t.Fatalf("status=%d html=%q, want the retried response", fetch.Status, html)
+	}
+}
+
+func TestHostUnreachable(t *testing.T) {
+	ctx := Context{
+		Config:              &config.PreflightConfig{URLs: config.URLConfig{Production: "https://example.com/", Staging: "https://staging.example.com"}},
+		PageFetchProduction: PageFetch{URL: "https://example.com/", Status: 0},
+		PageFetchStaging:    PageFetch{URL: "https://staging.example.com/", Status: 200},
+	}
+	if !ctx.HostUnreachable("https://example.com") {
+		t.Error("production was attempted and got nothing; want unreachable")
+	}
+	if ctx.HostUnreachable("https://staging.example.com") {
+		t.Error("staging answered; want reachable")
+	}
+	if ctx.HostUnreachable("https://elsewhere.example") {
+		t.Error("a host the scan never tried must not be assumed down")
+	}
+	if (Context{Config: &config.PreflightConfig{URLs: config.URLConfig{Production: "https://example.com"}}}).HostUnreachable("https://example.com") {
+		t.Error("no prefetch attempted (tests, init) must not read as unreachable")
+	}
 }

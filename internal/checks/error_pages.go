@@ -166,7 +166,7 @@ func probeCustom404OverHTTP(ctx Context) bool {
 	} else if ctx.Config.URLs.Production != "" {
 		baseURL = ctx.Config.URLs.Production
 	}
-	if baseURL == "" {
+	if baseURL == "" || ctx.HostUnreachable(baseURL) {
 		return false
 	}
 	baseURL = strings.TrimSuffix(baseURL, "/")

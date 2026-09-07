@@ -298,9 +298,15 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 		suffix = fmt.Sprintf(" (and %d more)", len(findings)-5)
 	}
 
-	message := "Potential secrets found:\n  " + strings.Join(displayMessages, "\n  ") + suffix
+	// Message is one line (it is rendered on one line everywhere and
+	// redacted before publishing); the per-finding locations go in
+	// Suggestions, which the terminal prints and the dashboard never sees.
+	message := fmt.Sprintf("Potential secrets found in %d place(s)", len(findings))
 	if filesErrored > 0 {
-		message += fmt.Sprintf("\n  Note: %s", scanSummary)
+		message += " (" + scanSummary + ")"
+	}
+	if suffix != "" {
+		displayMessages[len(displayMessages)-1] += suffix
 	}
 
 	return CheckResult{
@@ -309,12 +315,12 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 		Severity: SeverityError,
 		Passed:   false,
 		Message:  message,
-		Suggestions: []string{
+		Suggestions: append(displayMessages,
 			"Remove secrets from source code",
 			"Use environment variables instead",
 			"Add sensitive files to .gitignore",
 			"Consider using git-crypt or similar for encrypted secrets",
-		},
+		),
 	}, nil
 }
 

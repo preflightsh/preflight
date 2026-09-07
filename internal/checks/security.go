@@ -80,9 +80,9 @@ func (c SecurityHeadersCheck) Run(ctx Context) (CheckResult, error) {
 			Title:    c.Title(),
 			Severity: SeverityInfo,
 			Passed:   true,
-			// Stack per-env results one per line, matching how every other
-			// per-env check (SEO, OG, viewport, lang) renders its breakdown.
-			Message: strings.Join(results, "\n                    └─ "),
+			// One line, like every other per-env check: Message is rendered
+			// on a single line by the terminal and the dashboard.
+			Message: strings.Join(results, "; "),
 		}, nil
 	}
 
@@ -111,7 +111,7 @@ func (c SecurityHeadersCheck) Run(ctx Context) (CheckResult, error) {
 		Title:       c.Title(),
 		Severity:    SeverityWarn,
 		Passed:      false,
-		Message:     strings.Join(results, "\n                    └─ "),
+		Message:     strings.Join(results, "; "),
 		Suggestions: suggestions,
 	}, nil
 }

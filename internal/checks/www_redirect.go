@@ -175,7 +175,7 @@ func getFinalURL(ctx context.Context, urlStr string) (string, error) {
 	// This call starts with a user-configured URL and follows redirects;
 	// SafeHTTPClient guards both the initial dial AND each redirect hop
 	// against private / loopback / link-local addresses.
-	client := netutil.SafeHTTPClient(5 * time.Second)
+	client := netutil.SafeHTTPClient(10 * time.Second)
 
 	req, err := http.NewRequestWithContext(ctx, "HEAD", urlStr, nil)
 	if err != nil {
