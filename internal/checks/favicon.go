@@ -7,6 +7,13 @@ import (
 	"strings"
 )
 
+// Compiled once; both used to be rebuilt inside per-file loops.
+var (
+	appleTouchIconRe = regexp.MustCompile(`(?i)apple-touch-icon`)
+	// Next.js metadata icons API with an apple entry.
+	nextAppleIconRe = regexp.MustCompile(`(?i)icons\s*[:=]\s*\{[^}]*apple\s*:`)
+)
+
 type FaviconCheck struct{}
 
 func (c FaviconCheck) ID() string {
@@ -173,7 +180,7 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 		if cfg != nil && cfg.MainLayout != "" {
 			layoutPath := filepath.Join(ctx.RootDir, cfg.MainLayout)
 			if content, err := os.ReadFile(layoutPath); err == nil {
-				if regexp.MustCompile(`(?i)apple-touch-icon`).Match(content) {
+				if appleTouchIconRe.Match(content) {
 					hasAppleIcon = true
 					found = append(found, "apple-touch-icon (in HTML)")
 				}
@@ -198,7 +205,7 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 			for _, tplPath := range templatePaths {
 				fullPath := filepath.Join(ctx.RootDir, tplPath)
 				if content, err := os.ReadFile(fullPath); err == nil {
-					if regexp.MustCompile(`(?i)apple-touch-icon`).Match(content) {
+					if appleTouchIconRe.Match(content) {
 						hasAppleIcon = true
 						found = append(found, "apple-touch-icon (in HTML)")
 						break
@@ -229,7 +236,7 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 				fullPath := filepath.Join(ctx.RootDir, layoutPath)
 				if content, err := os.ReadFile(fullPath); err == nil {
 					// Check for Next.js metadata icons with apple property
-					if regexp.MustCompile(`(?i)icons\s*[:=]\s*\{[^}]*apple\s*:`).Match(content) {
+					if nextAppleIconRe.Match(content) {
 						hasAppleIcon = true
 						found = append(found, "apple-touch-icon (in Next.js metadata)")
 						break

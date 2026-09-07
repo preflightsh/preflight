@@ -981,7 +981,7 @@ func detectAnalyticsScripts(rootDir string, services map[string]bool) {
 		return nil
 	})
 	if walkErr != nil {
-		fmt.Printf("⚠️  Could not fully scan project directory: %v\n", walkErr)
+		fmt.Fprintf(os.Stderr, "⚠️  Could not fully scan project directory: %v\n", walkErr)
 	}
 
 	// Fetch and check external scripts (limit to avoid slowdown)
@@ -1020,23 +1020,23 @@ func detectServicesFromExternalScripts(urls []string, services map[string]bool, 
 	// Overall timeout for all external script checking
 	overallDeadline := time.Now().Add(15 * time.Second)
 
-	fmt.Print("Checking external scripts")
+	fmt.Fprint(os.Stderr, "Checking external scripts")
 
 	for _, url := range urls {
 		// Check if we've exceeded overall timeout
 		if time.Now().After(overallDeadline) {
-			fmt.Println(" (timeout)")
+			fmt.Fprintln(os.Stderr, " (timeout)")
 			return
 		}
 
-		fmt.Print(".")
+		fmt.Fprint(os.Stderr, ".")
 
 		resp, err := client.Get(url)
 		if err != nil {
 			var netErr net.Error
 			if errors.As(err, &netErr) && netErr.Timeout() {
 				domain := hostFromURL(url)
-				fmt.Printf("\n  ⚠️  %s timed out", domain)
+				fmt.Fprintf(os.Stderr, "\n  ⚠️  %s timed out", domain)
 			}
 			if resp != nil {
 				resp.Body.Close()
@@ -1067,7 +1067,7 @@ func detectServicesFromExternalScripts(urls []string, services map[string]bool, 
 		}
 	}
 
-	fmt.Println(" done")
+	fmt.Fprintln(os.Stderr, " done")
 }
 
 // hostFromURL extracts just the host portion of a URL-like string via

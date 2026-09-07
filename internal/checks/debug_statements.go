@@ -536,6 +536,10 @@ func isDevGuarded(lines []string, lineNum int) bool {
 	return false
 }
 
+// heredocStart matches Ruby heredocs: <<~WORD, <<-WORD, <<WORD. Package
+// level because isInCodeExample runs once per debug-statement match.
+var heredocStart = regexp.MustCompile(`<<[~-]?([A-Z_]+)`)
+
 // isInCodeExample checks if a line is inside a documentation code block or example
 func isInCodeExample(lines []string, lineNum int) bool {
 	// Look for code block markers in surrounding lines
@@ -549,9 +553,6 @@ func isInCodeExample(lines []string, lineNum int) bool {
 	heredocMarker := ""
 	inMarkdownCode := false
 	inHTMLCode := false
-
-	// Regex to match Ruby heredocs: <<~WORD, <<-WORD, <<WORD
-	heredocStart := regexp.MustCompile(`<<[~-]?([A-Z_]+)`)
 
 	for i := start; i <= lineNum; i++ {
 		line := lines[i]

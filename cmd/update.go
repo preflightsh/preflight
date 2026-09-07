@@ -251,7 +251,8 @@ func getUpgradeCommand() string {
 	if err != nil {
 		resolved = executable
 	}
-	path := strings.ToLower(resolved)
+	// Compare with forward slashes so C:\Users\x\go\bin matches /go/bin.
+	path := strings.ToLower(filepath.ToSlash(resolved))
 
 	if strings.Contains(path, "homebrew") || strings.Contains(path, "cellar") || strings.Contains(path, "/opt/homebrew") {
 		return "brew upgrade preflightsh/preflight/preflight"
