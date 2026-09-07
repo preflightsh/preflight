@@ -38,10 +38,22 @@ func IsPrivateIP(ip net.IP) bool {
 		ip.IsMulticast() || ip.IsUnspecified() || ip.IsPrivate() {
 		return true
 	}
-	// 169.254.0.0/16 is covered by IsLinkLocalUnicast, but the metadata
-	// endpoint 169.254.169.254 is worth calling out defensively.
-	if ip4 := ip.To4(); ip4 != nil && ip4[0] == 169 && ip4[1] == 254 {
-		return true
+	if ip4 := ip.To4(); ip4 != nil {
+		// 169.254.0.0/16 is covered by IsLinkLocalUnicast, but the metadata
+		// endpoint 169.254.169.254 is worth calling out defensively.
+		if ip4[0] == 169 && ip4[1] == 254 {
+			return true
+		}
+		// 0.0.0.0/8: IsUnspecified only catches 0.0.0.0 itself, and Linux
+		// routes the rest of the block to loopback.
+		if ip4[0] == 0 {
+			return true
+		}
+		// 100.64.0.0/10 (RFC 6598 shared address space): carrier-grade NAT,
+		// Tailscale and cloud-provider internal ranges. Not in IsPrivate.
+		if ip4[0] == 100 && ip4[1]&0xc0 == 64 {
+			return true
+		}
 	}
 	return false
 }
@@ -227,13 +239,15 @@ func (e exemptAddrs) checkRedirect(req *http.Request, via []*http.Request) error
 		}
 		return nil
 	}
-	ips, err := net.LookupIP(host)
+	// req carries the client's context, so a slow resolver on a redirect
+	// hop is bounded by the same timeout as the request itself.
+	ips, err := net.DefaultResolver.LookupIPAddr(req.Context(), host)
 	if err != nil {
 		return err
 	}
 	for _, ip := range ips {
-		if IsPrivateIP(ip) {
-			return fmt.Errorf("%w: %s resolves to %s", ErrPrivateAddress, host, ip)
+		if IsPrivateIP(ip.IP) {
+			return fmt.Errorf("%w: %s resolves to %s", ErrPrivateAddress, host, ip.IP)
 		}
 	}
 	return nil

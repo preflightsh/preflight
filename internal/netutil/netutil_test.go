@@ -219,3 +219,21 @@ func mustURL(t *testing.T, s string) *url.URL {
 	}
 	return u
 }
+
+// Ranges net.IP's own predicates leave out but that still reach a host's
+// own network: 0.0.0.0/8 (Linux routes it to loopback) and the RFC 6598
+// shared block used by carrier NAT, Tailscale and cloud-internal services.
+func TestIsPrivateIPExtraRanges(t *testing.T) {
+	private := []string{"0.0.0.1", "0.255.255.255", "100.64.0.1", "100.127.255.254"}
+	for _, s := range private {
+		if !IsPrivateIP(net.ParseIP(s)) {
+			t.Errorf("IsPrivateIP(%s) = false, want true", s)
+		}
+	}
+	public := []string{"100.63.255.255", "100.128.0.0", "1.1.1.1", "8.8.8.8"}
+	for _, s := range public {
+		if IsPrivateIP(net.ParseIP(s)) {
+			t.Errorf("IsPrivateIP(%s) = true, want false", s)
+		}
+	}
+}

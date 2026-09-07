@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"net/url"
 	"os/exec"
 	"runtime"
 	"time"
@@ -135,7 +136,16 @@ func runAuthStatus(cmd *cobra.Command, args []string) error {
 
 // openBrowser best-effort opens a URL in the user's default browser. Failure is
 // non-fatal: the URL is always printed so the user can open it manually.
-func openBrowser(url string) {
+//
+// The URL comes from the dashboard's auth response. Only web URLs are handed
+// to the OS opener: `open` and `xdg-open` will happily launch file:// paths
+// or other registered schemes, which a misconfigured PREFLIGHT_API_URL
+// should not be able to trigger.
+func openBrowser(rawURL string) {
+	u, err := url.Parse(rawURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return
+	}
 	var cmd string
 	var args []string
 	switch runtime.GOOS {
@@ -147,6 +157,6 @@ func openBrowser(url string) {
 	default:
 		cmd = "xdg-open"
 	}
-	args = append(args, url)
+	args = append(args, rawURL)
 	_ = exec.Command(cmd, args...).Start()
 }
