@@ -811,89 +811,77 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 	}
 
 	// Jekyll: Check for jekyll-sitemap in _config.yml or Gemfile
-	{
-		if configMentions(ctx.RootDir, "_config.yml", "jekyll-sitemap") {
-			return CheckResult{
-				ID:       c.ID(),
-				Title:    c.Title(),
-				Severity: SeverityInfo,
-				Passed:   true,
-				Message:  "sitemap.xml generated via jekyll-sitemap plugin",
-			}, nil
-		}
+	if configMentions(ctx.RootDir, "_config.yml", "jekyll-sitemap") {
+		return CheckResult{
+			ID:       c.ID(),
+			Title:    c.Title(),
+			Severity: SeverityInfo,
+			Passed:   true,
+			Message:  "sitemap.xml generated via jekyll-sitemap plugin",
+		}, nil
 	}
 
 	// Gatsby: Check for gatsby-plugin-sitemap
-	{
-		if configMentions(ctx.RootDir, "gatsby-config.js", "gatsby-plugin-sitemap") {
-			return CheckResult{
-				ID:       c.ID(),
-				Title:    c.Title(),
-				Severity: SeverityInfo,
-				Passed:   true,
-				Message:  "sitemap.xml generated via gatsby-plugin-sitemap",
-			}, nil
-		}
+	if configMentions(ctx.RootDir, "gatsby-config.js", "gatsby-plugin-sitemap") {
+		return CheckResult{
+			ID:       c.ID(),
+			Title:    c.Title(),
+			Severity: SeverityInfo,
+			Passed:   true,
+			Message:  "sitemap.xml generated via gatsby-plugin-sitemap",
+		}, nil
 	}
 
 	// Astro: Check for @astrojs/sitemap
 	astroConfigs := []string{"astro.config.mjs", "astro.config.ts", "astro.config.js"}
 	for _, cfg := range astroConfigs {
-		{
-			if configMentions(ctx.RootDir, cfg, "sitemap") {
-				return CheckResult{
-					ID:       c.ID(),
-					Title:    c.Title(),
-					Severity: SeverityInfo,
-					Passed:   true,
-					Message:  "sitemap.xml generated via Astro sitemap integration",
-				}, nil
-			}
+		if configMentions(ctx.RootDir, cfg, "sitemap") {
+			return CheckResult{
+				ID:       c.ID(),
+				Title:    c.Title(),
+				Severity: SeverityInfo,
+				Passed:   true,
+				Message:  "sitemap.xml generated via Astro sitemap integration",
+			}, nil
 		}
 	}
 
 	// Nuxt: Check for @nuxtjs/sitemap module
 	nuxtConfigs := []string{"nuxt.config.ts", "nuxt.config.js"}
 	for _, cfg := range nuxtConfigs {
-		{
-			if configMentions(ctx.RootDir, cfg, "sitemap") {
-				return CheckResult{
-					ID:       c.ID(),
-					Title:    c.Title(),
-					Severity: SeverityInfo,
-					Passed:   true,
-					Message:  "sitemap.xml generated via Nuxt sitemap module",
-				}, nil
-			}
-		}
-	}
-
-	// SvelteKit: Check for sitemap in svelte.config.js
-	{
-		if configMentions(ctx.RootDir, "svelte.config.js", "sitemap") {
+		if configMentions(ctx.RootDir, cfg, "sitemap") {
 			return CheckResult{
 				ID:       c.ID(),
 				Title:    c.Title(),
 				Severity: SeverityInfo,
 				Passed:   true,
-				Message:  "sitemap.xml configured via SvelteKit",
+				Message:  "sitemap.xml generated via Nuxt sitemap module",
 			}, nil
 		}
+	}
+
+	// SvelteKit: Check for sitemap in svelte.config.js
+	if configMentions(ctx.RootDir, "svelte.config.js", "sitemap") {
+		return CheckResult{
+			ID:       c.ID(),
+			Title:    c.Title(),
+			Severity: SeverityInfo,
+			Passed:   true,
+			Message:  "sitemap.xml configured via SvelteKit",
+		}, nil
 	}
 
 	// Eleventy: Check for sitemap in .eleventy.js or eleventy.config.js
 	eleventyConfigs := []string{".eleventy.js", "eleventy.config.js", "eleventy.config.cjs", "eleventy.config.mjs"}
 	for _, cfg := range eleventyConfigs {
-		{
-			if configMentions(ctx.RootDir, cfg, "sitemap") {
-				return CheckResult{
-					ID:       c.ID(),
-					Title:    c.Title(),
-					Severity: SeverityInfo,
-					Passed:   true,
-					Message:  "sitemap.xml configured via Eleventy",
-				}, nil
-			}
+		if configMentions(ctx.RootDir, cfg, "sitemap") {
+			return CheckResult{
+				ID:       c.ID(),
+				Title:    c.Title(),
+				Severity: SeverityInfo,
+				Passed:   true,
+				Message:  "sitemap.xml configured via Eleventy",
+			}, nil
 		}
 	}
 

@@ -258,8 +258,9 @@ func ServiceName(id string) string {
 	return id
 }
 
-// Category returns the terminal category for a check or service ID. Unknown
-// IDs get their uppercased ID so a new check still renders something.
+// Category returns the terminal category for a check or service ID, or ""
+// for an ID the catalog does not know (the renderer falls back to the
+// uppercased ID so a check missing from the catalog still shows something).
 func Category(id string) string {
 	if c, ok := checkByID[id]; ok {
 		return c.Category

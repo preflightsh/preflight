@@ -18,11 +18,11 @@ import (
 	"github.com/preflightsh/preflight/internal/config"
 )
 
-// serveTLS starts a TLS listener on a public-looking address is impossible
-// in a unit test (SafeTLSDial refuses loopback), so these tests exercise
-// the classification of a leaf certificate directly and the result
-// grading, which is where the bugs lived: the expiry branch was
-// unreachable and the hostname branch used the wrong errors.As target.
+// A unit test cannot stand up a TLS listener SafeTLSDial will talk to (it
+// refuses loopback), so these tests exercise the leaf-certificate grading
+// and the error classification directly. That is where the bugs lived: the
+// expiry branch was unreachable and the hostname branch used the wrong
+// errors.As target.
 func selfSignedCert(t *testing.T, notBefore, notAfter time.Time, dnsName string) *x509.Certificate {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -75,7 +75,7 @@ func TestSSLVerificationFailureIsAnError(t *testing.T) {
 	err := &tls.CertificateVerificationError{Err: x509.UnknownAuthorityError{}}
 	// peekLeafCertificate can't reach a fake host, so this exercises the
 	// path where classification has only the handshake error to go on.
-	res := SSLCheck{}.classifyDialError(Context{Config: &config.PreflightConfig{}}, "invalid.invalid:443", err)
+	res := SSLCheck{}.classifyDialError("invalid.invalid:443", err)
 	if res.Passed || res.Severity != SeverityError {
 		t.Errorf("verification failure graded %s passed=%v, want error", res.Severity, res.Passed)
 	}
@@ -87,7 +87,7 @@ func TestSSLVerificationFailureIsAnError(t *testing.T) {
 // Connection-level failures (DNS, refused, timeout) stay warnings: they say
 // the host is unreachable from here, not that the certificate is bad.
 func TestSSLConnectFailureIsAWarning(t *testing.T) {
-	res := SSLCheck{}.classifyDialError(Context{Config: &config.PreflightConfig{}}, "invalid.invalid:443", &net.OpError{Op: "dial", Err: errRefused})
+	res := SSLCheck{}.classifyDialError("invalid.invalid:443", &net.OpError{Op: "dial", Err: errRefused})
 	if res.Severity != SeverityWarn {
 		t.Errorf("connect failure graded %s, want warn", res.Severity)
 	}

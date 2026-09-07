@@ -67,7 +67,7 @@ func (c SSLCheck) Run(ctx Context) (CheckResult, error) {
 		MinVersion: tls.VersionTLS12,
 	}, 10*time.Second)
 	if err != nil {
-		return c.classifyDialError(ctx, host, err), nil
+		return c.classifyDialError(host, err), nil
 	}
 	defer func() { _ = conn.Close() }()
 
@@ -136,7 +136,7 @@ func (c SSLCheck) expiryResult(cert *x509.Certificate) CheckResult {
 // verification disabled. That dial still goes through SafeTLSDial (so it
 // can't be pointed at a private address) and nothing is sent over it; the
 // leaf is read and the connection closed.
-func (c SSLCheck) classifyDialError(ctx Context, host string, err error) CheckResult {
+func (c SSLCheck) classifyDialError(host string, err error) CheckResult {
 	if errors.Is(err, netutil.ErrPrivateAddress) {
 		return CheckResult{
 			ID:       c.ID(),

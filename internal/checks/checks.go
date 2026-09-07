@@ -252,7 +252,7 @@ func IsLocalURL(rawURL string) bool {
 // well-known files) use it to skip straight to their "unreachable" result
 // instead of waiting out the timeout once per path.
 func (c Context) HostUnreachable(rawURL string) bool {
-	if rawURL == "" {
+	if rawURL == "" || c.Config == nil {
 		return false
 	}
 	base := strings.TrimSuffix(rawURL, "/")
