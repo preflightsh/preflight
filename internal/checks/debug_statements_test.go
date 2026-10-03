@@ -3,6 +3,7 @@ package checks
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 )
 
@@ -72,5 +73,62 @@ func TestScanForDebugStatements(t *testing.T) {
 				t.Errorf("scanForDebugStatements found %v, want any=%v", got, tc.wantAny)
 			}
 		})
+	}
+}
+
+// Toolchain output and Claude Code worktrees are not the project's source.
+// On a polyglot monorepo with agent worktrees, walking them took minutes and
+// reported each finding once per worktree.
+func TestScanForDebugStatementsSkipsToolchainAndWorktreeDirs(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "deps") // a root named like a skipped dir is still scanned
+	files := map[string]string{
+		"app.js":                              "console.log('real')\n",
+		"target/debug/build/gen.rs":           "dbg!(x);\n",
+		".venv/lib/site.py":                   "breakpoint()\n",
+		"_build/dev/lib/app.ex":               "IO.inspect(x)\n",
+		".claude/worktrees/agent-a1/app.js":   "console.log('copy')\n",
+		"packages/rust/target/release/gen.rs": "dbg!(y);\n",
+	}
+	for name, body := range files {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got := scanForDebugStatements(root, nil)
+	if len(got) != 1 || got[0] != "app.js:1 - console.log" {
+		t.Errorf("scanForDebugStatements = %v, want only app.js:1", got)
+	}
+}
+
+func TestSearchForPatternsSkipsWorktreesButNotRoot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "build")
+	pattern := []*regexp.Regexp{regexp.MustCompile(`application/ld\+json`)}
+
+	writeTree := func(name string) {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(`<script type="application/ld+json">{}</script>`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	writeTree(".claude/worktrees/agent-a1/src/layout.astro")
+	if m := searchForPatternsWithDetails(root, "", pattern); m != nil {
+		t.Errorf("matched %s inside .claude/worktrees", m.FilePath)
+	}
+
+	writeTree("src/layout.astro")
+	if m := searchForPatternsWithDetails(root, "", pattern); m == nil || m.FilePath != "src/layout.astro" {
+		t.Errorf("searchForPatternsWithDetails = %+v, want src/layout.astro", m)
+	}
+	if !searchForPatterns(root, "", pattern) {
+		t.Error("searchForPatterns missed src/layout.astro under a root named build")
 	}
 }

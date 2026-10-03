@@ -246,6 +246,19 @@ func scanForDebugStatements(rootDir string, ignore []string) []string {
 		"_site":        true,
 		"out":          true,
 		"assets":       true,
+		// Agent tooling: vendored skills, and full repo checkouts under
+		// .claude/worktrees.
+		".claude": true,
+		".agents": true,
+	}
+
+	// Every pattern is scoped to extensions, so a file whose extension no
+	// pattern covers is never read.
+	scannedExts := map[string]bool{}
+	for _, p := range patterns {
+		for _, e := range p.extensions {
+			scannedExts[e] = true
+		}
 	}
 
 	skipFiles := []string{
@@ -303,7 +316,7 @@ func scanForDebugStatements(rootDir string, ignore []string) []string {
 
 		// Skip directories
 		if d.IsDir() {
-			if skipDirs[d.Name()] {
+			if path != rootDir && (skipDirs[d.Name()] || toolchainDirs[d.Name()]) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -342,6 +355,9 @@ func scanForDebugStatements(rootDir string, ignore []string) []string {
 		// Handle .blade.php
 		if strings.HasSuffix(path, ".blade.php") {
 			ext = ".blade.php"
+		}
+		if !scannedExts[ext] {
+			return nil
 		}
 
 		// Skip files larger than 500KB

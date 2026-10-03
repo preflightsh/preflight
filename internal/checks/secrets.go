@@ -156,7 +156,7 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 
 		// Skip directories
 		if info.IsDir() {
-			if skipDirs[info.Name()] {
+			if path != ctx.RootDir && (skipDirs[info.Name()] || toolchainDirs[info.Name()] || isAgentWorktreesDir(path)) {
 				return filepath.SkipDir
 			}
 			return nil

@@ -512,6 +512,28 @@ func tryURL(ctx context.Context, client *http.Client, url string) (*http.Respons
 	return resp, url, err
 }
 
+// toolchainDirs are build outputs and dependency trees outside the JS
+// world (Rust/Maven target, Python virtualenvs, Elixir _build and deps,
+// Gradle caches). A source walker that skips only node_modules and dist
+// spends minutes in these on a polyglot monorepo.
+var toolchainDirs = map[string]bool{
+	"target":        true,
+	".venv":         true,
+	"venv":          true,
+	".pytest_cache": true,
+	"_build":        true,
+	"deps":          true,
+	".gradle":       true,
+	".svelte-kit":   true,
+}
+
+// isAgentWorktreesDir reports whether path is .claude/worktrees, where
+// Claude Code keeps full checkouts of the repo. Walking it multiplies the
+// scan (and its findings) by the number of worktrees.
+func isAgentWorktreesDir(path string) bool {
+	return filepath.Base(path) == "worktrees" && filepath.Base(filepath.Dir(path)) == ".claude"
+}
+
 // Comment-stripping regexes, compiled once at package init.
 var (
 	reSingleLineComment = regexp.MustCompile(`//[^\n]*`)

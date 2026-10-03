@@ -310,114 +310,14 @@ func searchForPatterns(rootDir, stack string, patterns []*regexp.Regexp) bool {
 		}
 	}
 
-	// Search in common directories across all stacks
-	searchDirs := []string{
-		".", // root directory
-		// Frontend
-		"src", "app", "components", "pages", "lib",
-		// Monorepo patterns
-		"apps", "packages",
-		// PHP
-		"includes", "partials", "inc",
-		// Templates
-		"templates", "views", "layouts", "_layouts", "_includes",
-		// Public/Static
-		"public", "web", "static", "dist", "www", "_site", "out",
-		// Rails
-		"app/views", "app/views/layouts",
-		// Laravel
-		"resources/views", "resources/views/layouts",
-		// WordPress
-		"wp-content/themes",
-		// Craft CMS
-		"templates/_partials",
-		// Hugo
-		"layouts/_default", "layouts/partials",
-		// SvelteKit
-		"src/routes",
-		// Gatsby
-		"gatsby-browser.js",
-	}
-	extensions := []string{
-		// JavaScript/TypeScript
-		".tsx", ".jsx", ".js", ".ts", ".mjs", ".cjs",
-		// PHP
-		".php",
-		// Template engines
-		".twig", ".blade.php", ".erb", ".haml", ".slim",
-		".ejs", ".pug", ".hbs", ".handlebars", ".mustache",
-		".njk", ".liquid",
-		// HTML
-		".html", ".htm",
-		// Frontend frameworks
-		".vue", ".svelte", ".astro",
-		// Python
-		".py",
-		// Ruby
-		".rb",
-		// Go
-		".go", ".tmpl", ".gohtml",
-	}
-
-	for _, dir := range searchDirs {
-		dirPath := filepath.Join(rootDir, dir)
-		if _, err := os.Stat(dirPath); os.IsNotExist(err) {
-			continue
+	return walkSourceFiles(rootDir, func(_ string, content []byte) bool {
+		for _, pattern := range patterns {
+			if pattern.Match(content) {
+				return true
+			}
 		}
-
-		found := false
-		_ = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
-			if err != nil || found {
-				return nil
-			}
-
-			// Skip common build/dependency directories
-			baseName := filepath.Base(path)
-			if info.IsDir() {
-				if baseName == "node_modules" || baseName == "vendor" ||
-					baseName == ".git" || baseName == "dist" ||
-					baseName == "build" || baseName == "cache" ||
-					baseName == ".next" || baseName == ".turbo" ||
-					baseName == "coverage" || baseName == "__pycache__" ||
-					baseName == "_generated" || baseName == ".convex" {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-
-			ext := filepath.Ext(path)
-			validExt := false
-			for _, e := range extensions {
-				if ext == e {
-					validExt = true
-					break
-				}
-			}
-			if !validExt {
-				return nil
-			}
-
-			content, err := os.ReadFile(path)
-			if err != nil {
-				return nil
-			}
-
-			for _, pattern := range patterns {
-				if pattern.Match(content) {
-					found = true
-					return filepath.SkipAll
-				}
-			}
-
-			return nil
-		})
-
-		if found {
-			return true
-		}
-	}
-
-	return false
+		return false
+	})
 }
 
 // SearchMatch contains details about a pattern match
@@ -457,121 +357,96 @@ func searchForPatternsWithDetails(rootDir, stack string, patterns []*regexp.Rege
 		}
 	}
 
-	// Search in common directories across all stacks
-	searchDirs := []string{
-		".", // root directory
-		// Frontend
-		"src", "app", "components", "pages", "lib",
-		// Monorepo patterns
-		"apps", "packages",
-		// PHP
-		"includes", "partials", "inc",
-		// Templates
-		"templates", "views", "layouts", "_layouts", "_includes",
-		// Public/Static
-		"public", "web", "static", "dist", "www", "_site", "out",
-		// Rails
-		"app/views", "app/views/layouts",
-		// Laravel
-		"resources/views", "resources/views/layouts",
-		// WordPress
-		"wp-content/themes",
-		// Craft CMS
-		"templates/_partials",
-		// Hugo
-		"layouts/_default", "layouts/partials",
-		// SvelteKit
-		"src/routes",
-		// Gatsby
-		"gatsby-browser.js",
-	}
-	extensions := []string{
-		// JavaScript/TypeScript
-		".tsx", ".jsx", ".js", ".ts", ".mjs", ".cjs",
-		// PHP
-		".php",
-		// Template engines
-		".twig", ".blade.php", ".erb", ".haml", ".slim",
-		".ejs", ".pug", ".hbs", ".handlebars", ".mustache",
-		".njk", ".liquid",
-		// HTML
-		".html", ".htm",
-		// Frontend frameworks
-		".vue", ".svelte", ".astro",
-		// Python
-		".py",
-		// Ruby
-		".rb",
-		// Go
-		".go", ".tmpl", ".gohtml",
-	}
-
 	var result *SearchMatch
-	for _, dir := range searchDirs {
-		dirPath := filepath.Join(rootDir, dir)
-		if _, err := os.Stat(dirPath); os.IsNotExist(err) {
-			continue
+	walkSourceFiles(rootDir, func(path string, content []byte) bool {
+		// Strip comments to avoid false positives on commented-out code
+		contentStr := stripComments(string(content))
+
+		for _, pattern := range patterns {
+			if pattern.MatchString(contentStr) {
+				result = &SearchMatch{
+					FilePath: relPath(rootDir, path),
+					Pattern:  pattern.String(),
+				}
+				return true
+			}
+		}
+		return false
+	})
+	return result
+}
+
+// sourceExtensions are the file types searchForPatterns and
+// searchForPatternsWithDetails look inside when walking the project.
+var sourceExtensions = map[string]bool{
+	// JavaScript/TypeScript
+	".tsx": true, ".jsx": true, ".js": true, ".ts": true, ".mjs": true, ".cjs": true,
+	// PHP
+	".php": true,
+	// Template engines
+	".twig": true, ".erb": true, ".haml": true, ".slim": true,
+	".ejs": true, ".pug": true, ".hbs": true, ".handlebars": true, ".mustache": true,
+	".njk": true, ".liquid": true,
+	// HTML
+	".html": true, ".htm": true,
+	// Frontend frameworks
+	".vue": true, ".svelte": true, ".astro": true,
+	// Python
+	".py": true,
+	// Ruby
+	".rb": true,
+	// Go
+	".go": true, ".tmpl": true, ".gohtml": true,
+}
+
+// walkSourceFiles calls visit with the content of every source file in the
+// project, skipping dependency trees and build output, until visit returns
+// true. It reports whether visit did.
+//
+// This replaces a walk of "." followed by walks of src, app, packages and
+// other common subdirectories: "." already covered them, so on a miss
+// every one of them was walked a second time.
+func walkSourceFiles(rootDir string, visit func(path string, content []byte) bool) bool {
+	found := false
+	_ = filepath.WalkDir(rootDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
 		}
 
-		_ = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
-			if err != nil || result != nil {
+		// Skip common build/dependency directories, but never the root
+		// itself (a project can live in a directory named build or deps).
+		if d.IsDir() {
+			if path == rootDir {
 				return nil
 			}
-
-			// Skip common build/dependency directories
-			baseName := filepath.Base(path)
-			if info.IsDir() {
-				if baseName == "node_modules" || baseName == "vendor" ||
-					baseName == ".git" || baseName == "dist" ||
-					baseName == "build" || baseName == "cache" ||
-					baseName == ".next" || baseName == ".turbo" ||
-					baseName == "coverage" || baseName == "__pycache__" ||
-					baseName == "_generated" || baseName == ".convex" {
+			switch name := d.Name(); name {
+			case "node_modules", "vendor", ".git", "dist", "build", "cache",
+				".next", ".turbo", "coverage", "__pycache__", "_generated",
+				".convex", ".claude", ".agents":
+				return filepath.SkipDir
+			default:
+				if toolchainDirs[name] {
 					return filepath.SkipDir
 				}
-				return nil
 			}
-
-			ext := filepath.Ext(path)
-			validExt := false
-			for _, e := range extensions {
-				if ext == e {
-					validExt = true
-					break
-				}
-			}
-			if !validExt {
-				return nil
-			}
-
-			content, err := os.ReadFile(path)
-			if err != nil {
-				return nil
-			}
-
-			// Strip comments to avoid false positives on commented-out code
-			contentStr := stripComments(string(content))
-
-			for _, pattern := range patterns {
-				if pattern.MatchString(contentStr) {
-					relPath := relPath(rootDir, path)
-					result = &SearchMatch{
-						FilePath: relPath,
-						Pattern:  pattern.String(),
-					}
-					return filepath.SkipAll
-				}
-			}
-
 			return nil
-		})
-
-		if result != nil {
-			return result
 		}
-	}
 
-	return nil
+		if !sourceExtensions[filepath.Ext(path)] {
+			return nil
+		}
+
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		if visit(path, content) {
+			found = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return found
 }
 
 func getLayoutFilesForStack(stack string) []string {
