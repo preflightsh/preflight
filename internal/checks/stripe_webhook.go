@@ -82,12 +82,19 @@ func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {
 		}
 
 		_ = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
-			if err != nil || info.IsDir() || initFound {
+			if err != nil || initFound {
 				return nil
 			}
-
-			if strings.Contains(path, "node_modules") || strings.Contains(path, "vendor") {
-				return filepath.SkipDir
+			// Match dependency trees by directory name and prune them
+			// before descending. A substring test on file paths walked
+			// every file inside them, and a file such as vendor_helpers.js
+			// returned SkipDir and dropped the rest of its own directory.
+			if info.IsDir() {
+				name := info.Name()
+				if name == "node_modules" || name == "vendor" || toolchainDirs[name] {
+					return filepath.SkipDir
+				}
+				return nil
 			}
 
 			ext := filepath.Ext(path)
@@ -202,14 +209,30 @@ func scanEnvFile(path string, keys []string, foundKeys map[string]bool) {
 	// (best-effort skip, same as the os.Open path above).
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
-		line := strings.ToUpper(scanner.Text())
+		name := envVarName(scanner.Text())
 		for _, key := range keys {
-			if strings.HasPrefix(line, key) {
+			if name == key {
 				foundKeys[key] = true
 			}
 		}
 	}
 	_ = scanner.Err()
+}
+
+// envVarName returns the upper-cased variable name assigned on a .env line,
+// or "" for comments and lines without an assignment. The whole name is
+// compared so STRIPE_SECRET_KEY_OLD does not satisfy STRIPE_SECRET_KEY, and
+// a leading `export` is allowed.
+func envVarName(line string) string {
+	line = strings.TrimSpace(line)
+	if strings.HasPrefix(line, "export ") {
+		line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+	}
+	name, _, ok := strings.Cut(line, "=")
+	if !ok {
+		return ""
+	}
+	return strings.ToUpper(strings.TrimSpace(name))
 }
 
 type webhookProbe int
