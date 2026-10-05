@@ -87,13 +87,13 @@ func TestSSLVerificationFailureIsAnError(t *testing.T) {
 // Connection-level failures (DNS, refused, timeout) stay warnings: they say
 // the host is unreachable from here, not that the certificate is bad.
 func TestSSLConnectFailureIsAWarning(t *testing.T) {
-	res := SSLCheck{}.classifyDialError("invalid.invalid:443", &net.OpError{Op: "dial", Err: errRefused})
+	res := SSLCheck{}.classifyDialError("invalid.invalid:443", &net.OpError{Op: "dial", Err: errNoSuchHost})
 	if res.Severity != SeverityWarn {
 		t.Errorf("connect failure graded %s, want warn", res.Severity)
 	}
 }
 
-var errRefused = &net.DNSError{Err: "no such host", Name: "invalid.invalid", IsNotFound: true}
+var errNoSuchHost = &net.DNSError{Err: "no such host", Name: "invalid.invalid", IsNotFound: true}
 
 // Keep the http import used: a plain-HTTP production URL is graded before
 // any dial happens.

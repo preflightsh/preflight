@@ -40,10 +40,12 @@ func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {
 	requiredKeys := []string{"STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY"}
 	webhookKey := "STRIPE_WEBHOOK_SECRET"
 
+	keysToScan := append(append([]string{}, requiredKeys...), webhookKey)
+
 	foundKeys := make(map[string]bool)
 	for _, envFile := range envFiles {
 		path := filepath.Join(ctx.RootDir, envFile)
-		scanEnvFile(path, append(requiredKeys, webhookKey), foundKeys)
+		scanEnvFile(path, keysToScan, foundKeys)
 	}
 
 	// Check required keys
