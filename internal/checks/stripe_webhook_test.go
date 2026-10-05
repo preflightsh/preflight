@@ -15,6 +15,22 @@ import (
 // the result turns purely on whether initialization is detected in code.
 func runStripeCheck(t *testing.T, srcFile, srcBody string, depFiles map[string]string) CheckResult {
 	t.Helper()
+	res, err := StripeWebhookCheck{}.Run(Context{
+		RootDir: stripeProject(t, srcFile, srcBody, depFiles),
+		Config: &config.PreflightConfig{
+			Stack:    "go",
+			Services: map[string]config.ServiceConfig{"stripe": {Declared: true}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	return res
+}
+
+// stripeProject writes the project runStripeCheck scans and returns its root.
+func stripeProject(t *testing.T, srcFile, srcBody string, depFiles map[string]string) string {
+	t.Helper()
 	dir := t.TempDir()
 
 	if srcFile != "" {
@@ -37,18 +53,7 @@ func runStripeCheck(t *testing.T, srcFile, srcBody string, depFiles map[string]s
 			t.Fatal(err)
 		}
 	}
-
-	res, err := StripeWebhookCheck{}.Run(Context{
-		RootDir: dir,
-		Config: &config.PreflightConfig{
-			Stack:    "go",
-			Services: map[string]config.ServiceConfig{"stripe": {Declared: true}},
-		},
-	})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	return res
+	return dir
 }
 
 // initPatterns are broad by design (a bare `Stripe(` counts), so matching
@@ -247,4 +252,62 @@ func TestScanEnvFileMatchesWholeNames(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The probe tests above call probeWebhookEndpoint directly. This drives it
+// through Run, so a check that stops reading stripeWebhook.url, or maps a
+// probe result to the wrong verdict, fails here.
+func TestStripeWebhookURLThroughRun(t *testing.T) {
+	dir := stripeProject(t, "payments.go", "package payments\n\nfunc init() { stripe.Key = k }\n", nil)
+	run := func(t *testing.T, url string) CheckResult {
+		t.Helper()
+		res, err := StripeWebhookCheck{}.Run(Context{
+			RootDir: dir,
+			Client:  http.DefaultClient,
+			Config: &config.PreflightConfig{
+				Stack:    "go",
+				Services: map[string]config.ServiceConfig{"stripe": {Declared: true}},
+				Checks:   config.ChecksConfig{StripeWebhook: &config.StripeWebhookConfig{URL: url}},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		return res
+	}
+
+	t.Run("reachable route passes and says so", func(t *testing.T) {
+		var hits int
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits++
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}))
+		defer srv.Close()
+		res := run(t, srv.URL+"/webhooks/stripe")
+		if hits != 1 {
+			t.Errorf("Run probed the webhook URL %d time(s), want 1", hits)
+		}
+		if !res.Passed || !strings.Contains(res.Message, "webhook endpoint reachable") {
+			t.Errorf("passed=%v message=%q, want a pass noting the reachable endpoint", res.Passed, res.Message)
+		}
+	})
+
+	t.Run("404 fails", func(t *testing.T) {
+		srv := httptest.NewServer(http.NotFoundHandler())
+		defer srv.Close()
+		res := run(t, srv.URL+"/webhooks/stripe")
+		if res.Passed || !containsIssue(res.Message, "webhook URL returns 404") {
+			t.Errorf("passed=%v message=%q, want a 404 failure", res.Passed, res.Message)
+		}
+	})
+
+	t.Run("connection failure fails as unreachable", func(t *testing.T) {
+		srv := httptest.NewServer(http.NotFoundHandler())
+		url := srv.URL
+		srv.Close()
+		res := run(t, url+"/webhooks/stripe")
+		if res.Passed || !containsIssue(res.Message, "webhook URL unreachable") {
+			t.Errorf("passed=%v message=%q, want an unreachable failure", res.Passed, res.Message)
+		}
+	})
 }
