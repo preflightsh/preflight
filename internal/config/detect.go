@@ -943,15 +943,10 @@ func detectAnalyticsScripts(rootDir string, services map[string]bool) {
 			return nil
 		}
 
-		// Skip files larger than 1MB to avoid slowdown
-		info, err := d.Info()
-		if err != nil || info.Size() > 1024*1024 {
-			return nil
-		}
-
-		// Read file content
-		content, err := os.ReadFile(path)
-		if err != nil {
+		// Regular files up to 1MB only: a symlink to /dev/zero or a FIFO
+		// planted in a cloned repo would otherwise hang or exhaust memory.
+		content, ok := fsutil.ReadRegularFile(path, 1024*1024)
+		if !ok {
 			return nil
 		}
 
@@ -1399,14 +1394,18 @@ func extractIndexNowKey(content string) string {
 	if m := indexNowKeyAssignRe.FindStringSubmatch(content); m != nil {
 		return strings.ToLower(m[1])
 	}
-	if m := indexNowKeyNamedRe.FindStringSubmatch(content); m != nil {
-		return strings.ToLower(m[1])
+	if m := indexNowKeyNamedRe.FindStringSubmatchIndex(content); m != nil && standaloneToken(content, m[3]) {
+		return strings.ToLower(content[m[2]:m[3]])
 	}
 	// Last resort: one unambiguous hex token in an IndexNow file is the key.
 	// More than one (e.g. an asset hash is also present) is too risky to guess.
 	seen := map[string]bool{}
 	var uniq []string
-	for _, m := range hex32Re.FindAllString(lower, -1) {
+	for _, loc := range hex32Re.FindAllStringIndex(lower, -1) {
+		m := lower[loc[0]:loc[1]]
+		if !standaloneToken(lower, loc[1]) || (loc[0] > 0 && lower[loc[0]-1] == '-') {
+			continue
+		}
 		if !seen[m] {
 			seen[m] = true
 			uniq = append(uniq, m)
@@ -1416,6 +1415,19 @@ func extractIndexNowKey(content string) string {
 		return uniq[0]
 	}
 	return ""
+}
+
+// standaloneToken reports whether the token ending at end really ends there.
+// A Mailchimp API key is 32 hex characters followed by "-us6"; without this
+// a generic "key = ..." assignment in a file that mentions IndexNow was
+// harvested as the IndexNow key, printed, and written to preflight.yml.
+func standaloneToken(s string, end int) bool {
+	if end >= len(s) {
+		return true
+	}
+	c := s[end]
+	isWordChar := c == '-' || c == '_' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+	return !isWordChar
 }
 
 // maxIndexNowScanBytes caps the size of a file read during dynamic IndexNow
@@ -1449,11 +1461,11 @@ func detectIndexNowDynamic(rootDir string) (bool, string) {
 			}
 			return nil
 		}
-		if !isIndexNowScannable(fi.Name()) || fi.Size() > maxIndexNowScanBytes {
+		if !isIndexNowScannable(fi.Name()) || isPreflightConfig(fi.Name()) {
 			return nil
 		}
-		content, err := os.ReadFile(path)
-		if err != nil {
+		content, ok := fsutil.ReadRegularFile(path, maxIndexNowScanBytes)
+		if !ok {
 			return nil
 		}
 		lower := strings.ToLower(string(content))
@@ -1472,6 +1484,13 @@ func detectIndexNowDynamic(rootDir string) (bool, string) {
 		return nil
 	})
 	return found, key
+}
+
+// isPreflightConfig reports whether name is Preflight's own config file. It
+// always contains the indexNow key that init writes, so reading it made every
+// re-run of init "detect" IndexNow and offer to generate a key.
+func isPreflightConfig(name string) bool {
+	return name == "preflight.yml" || name == "preflight.yaml"
 }
 
 // isIndexNowScannable reports whether a filename is worth reading when looking

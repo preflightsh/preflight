@@ -788,8 +788,8 @@ func detectIndexNowKey(cwd string) string {
 				// Found a key file, extract the key from filename
 				key := strings.TrimSuffix(entry.Name(), ".txt")
 				// Verify file content matches the key
-				content, err := os.ReadFile(filepath.Join(dir, entry.Name()))
-				if err == nil && strings.TrimSpace(string(content)) == key {
+				content, ok := fsutil.ReadRegularFile(filepath.Join(dir, entry.Name()), 1024)
+				if ok && strings.TrimSpace(string(content)) == key {
 					return key
 				}
 			}

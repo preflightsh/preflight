@@ -145,3 +145,30 @@ func TestDetectIndexNowStaticKeyFile(t *testing.T) {
 		t.Fatal("expected static IndexNow key file to be detected")
 	}
 }
+
+// preflight.yml always carries the indexNow key that init writes, so a second
+// init used to "detect" IndexNow from it and offer to generate a key file.
+func TestDetectIndexNowIgnoresPreflightConfig(t *testing.T) {
+	root := writeProject(t, map[string]string{
+		"preflight.yml": "projectName: p\nchecks:\n  indexNow:\n    enabled: false\n",
+		"src/app.js":    "console.log('hello')\n",
+	})
+	if found, _ := detectIndexNowDynamic(root); found {
+		t.Error("preflight.yml alone should not count as an IndexNow integration")
+	}
+}
+
+// A 32-hex prefix of a longer secret (a Mailchimp key is 32 hex plus "-us6")
+// must not be harvested as the IndexNow key.
+func TestExtractIndexNowKeySkipsLongerTokens(t *testing.T) {
+	cases := map[string]string{
+		"// indexnow\nconst apiKey = \"" + testKey + "-us6\"\n": "",
+		"// indexnow ping\nmailchimp: " + testKey + "-us21\n":   "",
+		"// indexnow\nconst key = \"" + testKey + "\"\n":        testKey,
+	}
+	for content, want := range cases {
+		if got := extractIndexNowKey(content); got != want {
+			t.Errorf("extractIndexNowKey(%q) = %q, want %q", content, got, want)
+		}
+	}
+}
