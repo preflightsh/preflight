@@ -48,6 +48,7 @@ Download the latest release from [GitHub Releases](https://github.com/preflights
 # Initialize in your project directory
 cd your-project
 preflight init
+# (asks before replacing an existing preflight.yml; --force skips the question)
 
 # Run all checks
 preflight scan
