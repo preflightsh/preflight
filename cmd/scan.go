@@ -223,13 +223,14 @@ func executeScan(ctx context.Context, opts scanOptions, stdout, stderr io.Writer
 		return ExitUsage, &ExitError{Code: ExitUsage, Err: fmt.Errorf("%s", msg)}
 	}
 
-	// SafeHTTPClient refuses to dial private/loopback/metadata IPs so a
-	// hostile preflight.yml cannot coerce checks into probing internal
-	// services.
+	// SafeHTTPClient refuses to dial private/loopback/metadata IPs for
+	// any URL the config did not name.
 	//
-	// Configuring a local dev URL (localhost, *.local, *.test,
+	// Configuring a local dev URL (localhost, *.localhost, *.test,
 	// *.ddev.site etc.) is a trusted-config workflow, so we exempt those
-	// targets, but only those exact host:port pairs. The scan reaches
+	// targets, but only those exact host:port pairs. That means a hostile
+	// preflight.yml can still point a scan at a loopback port; only scan
+	// configs you trust. The scan reaches
 	// plenty of URLs the config never vouched for (og:image and
 	// twitter:image are taken verbatim from page content), so exempting
 	// per-target rather than swapping in a wide-open client keeps a
