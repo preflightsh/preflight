@@ -46,7 +46,9 @@ func DetectStack(rootDir string) string {
 	}
 
 	// Check for Craft CMS
-	if fileExists(rootDir, "craft") || fileContains(rootDir, "composer.json", "craftcms/cms") {
+	// Craft ships a "craft" PHP console script at the root. A directory or
+	// unrelated file of that name is not Craft.
+	if fileContains(rootDir, "craft", "Craft") || fileContains(rootDir, "composer.json", "craftcms/cms") {
 		return "craft"
 	}
 
@@ -104,12 +106,15 @@ func DetectStack(rootDir string) string {
 
 	// Check for Sanity
 	if fileExists(rootDir, "sanity.json") || fileExists(rootDir, "sanity.config.ts") || fileExists(rootDir, "sanity.config.js") ||
-		fileContains(rootDir, "package.json", "sanity") {
+		(!hasFrontendFramework(rootDir) && (fileContains(rootDir, "package.json", `"sanity":`) || fileContains(rootDir, "package.json", `"@sanity/`))) {
 		return "sanity"
 	}
 
 	// Check for Contentful (usually detected via env vars, but check for config)
-	if fileContains(rootDir, "package.json", "contentful") {
+	// Match the dependency key, not the bare word: a React app that merely
+	// uses the Contentful SDK is still a React app, and a "sanity-check"
+	// script is not Sanity.
+	if fileContains(rootDir, "package.json", `"contentful":`) && !hasFrontendFramework(rootDir) {
 		return "contentful"
 	}
 
@@ -235,6 +240,19 @@ func hasMonorepoFramework(rootDir string, files []string) bool {
 // AllServices lists every supported service ID, in catalog order.
 var AllServices = catalog.ServiceIDs()
 
+// hasFrontendFramework reports whether package.json depends on a frontend
+// framework. A headless CMS SDK inside such an app (a Next site reading from
+// Sanity or Contentful) does not make the project a CMS project; the
+// framework's layout and SEO checks are the ones that apply.
+func hasFrontendFramework(rootDir string) bool {
+	for _, dep := range []string{`"react":`, `"next":`, `"vue":`, `"nuxt":`, `"svelte":`, `"@sveltejs/kit":`, `"astro":`, `"vite":`} {
+		if fileContains(rootDir, "package.json", dep) {
+			return true
+		}
+	}
+	return false
+}
+
 // DetectServices scans the project for known service integrations
 func DetectServices(rootDir string) map[string]bool {
 	services := make(map[string]bool)
@@ -315,15 +333,19 @@ func detectServicesFromContent(content string, services map[string]bool, lang st
 		services["paypal"] = true
 	}
 	// Braintree Payments SDK patterns (not braintree.com AI company)
+	// content is lowercased by every caller, so the patterns must be too.
 	if strings.Contains(content, "braintree/braintree") || // composer package
-		strings.Contains(content, "Braintree\\Gateway") || // PHP namespace
-		strings.Contains(content, "Braintree::") || // Ruby module
-		strings.Contains(content, "braintree.BraintreeGateway") || // Node SDK
-		strings.Contains(content, "braintree.Environment") || // Python/Node SDK
+		strings.Contains(content, `"braintree":`) || // npm dependency
+		strings.Contains(content, "gem 'braintree'") || strings.Contains(content, `gem "braintree"`) ||
+		strings.Contains(content, "    braintree (") || // Gemfile.lock
+		strings.Contains(content, "braintree\\gateway") || // PHP namespace
+		strings.Contains(content, "braintree::") || // Ruby module
+		strings.Contains(content, "braintree.braintreegateway") || // Node SDK
+		strings.Contains(content, "braintree.environment") || // Python/Node SDK
 		strings.Contains(content, "braintreepayments") || // domain
-		strings.Contains(content, "BRAINTREE_MERCHANT_ID") ||
-		strings.Contains(content, "BRAINTREE_PUBLIC_KEY") ||
-		strings.Contains(content, "BRAINTREE_PRIVATE_KEY") {
+		strings.Contains(content, "braintree_merchant_id") ||
+		strings.Contains(content, "braintree_public_key") ||
+		strings.Contains(content, "braintree_private_key") {
 		services["braintree"] = true
 	}
 	// Paddle - be specific to avoid matching sports/game paddle
@@ -504,7 +526,10 @@ func detectServicesFromContent(content string, services map[string]bool, lang st
 	if strings.Contains(content, "sidekiq") {
 		services["sidekiq"] = true
 	}
-	if strings.Contains(content, "amqplib") || strings.Contains(content, "bunny") || strings.Contains(content, "rabbitmq") {
+	// "bunny" is the Ruby AMQP gem; a bare substring also matched BunnyCDN
+	// packages, so require the gem forms (Gemfile and Gemfile.lock).
+	if strings.Contains(content, "amqplib") || strings.Contains(content, "gem 'bunny'") || strings.Contains(content, `gem "bunny"`) ||
+		strings.Contains(content, "    bunny (") || strings.Contains(content, "rabbitmq") {
 		services["rabbitmq"] = true
 	}
 	// Elasticsearch - be specific with @elastic to avoid false positives
