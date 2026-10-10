@@ -76,54 +76,12 @@ func (c OGTwitterCheck) Run(ctx Context) (CheckResult, error) {
 	// Strip comments to avoid false positives on commented-out code
 	contentStr := stripComments(string(content))
 
-	// For Next.js, check if metadata/generateMetadata exists anywhere in app
+	// For the Next.js App Router, the root page and top-level route group
+	// layouts can carry the Metadata API export instead of the root layout;
+	// a nested page's export only covers that page (see nextRootRouteSources).
+	var nextSources []string
 	if strings.Contains(layoutFile, "app/") {
-		hasMetadataInApp := false
-		appDir := filepath.Dir(filepath.Join(ctx.RootDir, layoutFile))
-		generateMetadataPattern := regexp.MustCompile(`(?s)export\s+(async\s+)?function\s+generateMetadata`)
-		metadataExportPattern := regexp.MustCompile(`(?s)export\s+(const|let|var)\s+metadata\s*[=:]`)
-
-		_ = filepath.Walk(appDir, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				if info != nil && info.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if hasMetadataInApp {
-				return nil
-			}
-			if info.IsDir() {
-				name := info.Name()
-				if name == "node_modules" || name == ".git" {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			nameLower := strings.ToLower(info.Name())
-			if !strings.HasSuffix(nameLower, ".tsx") && !strings.HasSuffix(nameLower, ".ts") &&
-				!strings.HasSuffix(nameLower, ".jsx") && !strings.HasSuffix(nameLower, ".js") {
-				return nil
-			}
-			fileContent, err := readSourceFile(path)
-			if err != nil {
-				return nil
-			}
-			if generateMetadataPattern.Match(fileContent) || metadataExportPattern.Match(fileContent) {
-				hasMetadataInApp = true
-			}
-			return nil
-		})
-
-		if hasMetadataInApp {
-			return CheckResult{
-				ID:       c.ID(),
-				Title:    c.Title(),
-				Severity: SeverityInfo,
-				Passed:   true,
-				Message:  "OG and Twitter metadata configured via Next.js Metadata API",
-			}, nil
-		}
+		nextSources = nextRootRouteSources(filepath.Dir(layoutPath))
 	}
 
 	// OG and Twitter card elements
@@ -179,7 +137,7 @@ func (c OGTwitterCheck) Run(ctx Context) (CheckResult, error) {
 
 		// Try Next.js Metadata API patterns (multi-line aware)
 		if !matched {
-			matched = hasNextJSOGTwitterMeta(contentStr, name)
+			matched = hasNextJSOGTwitterMeta(contentStr, name) || anyNextSource(nextSources, name, hasNextJSOGTwitterMeta)
 		}
 
 		if matched {
@@ -466,7 +424,7 @@ func hasNextJSOGTwitterMeta(content, name string) bool {
 		if ogBlock != "" {
 			// Check for images array or image property
 			imagesPattern := regexp.MustCompile(`(?m)images\s*:\s*\[`)
-			imagePattern := regexp.MustCompile(`(?m)image\s*:\s*["'\x60]`)
+			imagePattern := regexp.MustCompile(`(?m)image\s*:\s*[^\s,}]`)
 			return imagesPattern.MatchString(ogBlock) || imagePattern.MatchString(ogBlock)
 		}
 		return false
@@ -478,7 +436,7 @@ func hasNextJSOGTwitterMeta(content, name string) bool {
 		}
 		ogBlock := extractNestedBlockOG(metadataContent, "openGraph")
 		if ogBlock != "" {
-			urlPattern := regexp.MustCompile(`(?m)url\s*:\s*["'\x60]`)
+			urlPattern := regexp.MustCompile(`(?m)url\s*:\s*[^\s,}]`)
 			return urlPattern.MatchString(ogBlock)
 		}
 		return false
@@ -486,7 +444,7 @@ func hasNextJSOGTwitterMeta(content, name string) bool {
 	case "og:type":
 		ogBlock := extractNestedBlockOG(metadataContent, "openGraph")
 		if ogBlock != "" {
-			typePattern := regexp.MustCompile(`(?m)type\s*:\s*["'\x60]`)
+			typePattern := regexp.MustCompile(`(?m)type\s*:\s*[^\s,}]`)
 			return typePattern.MatchString(ogBlock)
 		}
 		return false
@@ -494,7 +452,7 @@ func hasNextJSOGTwitterMeta(content, name string) bool {
 	case "twitter:card":
 		twitterBlock := extractNestedBlockOG(metadataContent, "twitter")
 		if twitterBlock != "" {
-			cardPattern := regexp.MustCompile(`(?m)card\s*:\s*["'\x60]`)
+			cardPattern := regexp.MustCompile(`(?m)card\s*:\s*[^\s,}]`)
 			return cardPattern.MatchString(twitterBlock)
 		}
 		return false
@@ -503,7 +461,7 @@ func hasNextJSOGTwitterMeta(content, name string) bool {
 		twitterBlock := extractNestedBlockOG(metadataContent, "twitter")
 		if twitterBlock != "" {
 			imagesPattern := regexp.MustCompile(`(?m)images\s*:\s*\[`)
-			imagePattern := regexp.MustCompile(`(?m)image\s*:\s*["'\x60]`)
+			imagePattern := regexp.MustCompile(`(?m)image\s*:\s*[^\s,}]`)
 			return imagesPattern.MatchString(twitterBlock) || imagePattern.MatchString(twitterBlock)
 		}
 		return false

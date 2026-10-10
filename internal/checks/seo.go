@@ -55,57 +55,13 @@ func (c SEOMetadataCheck) Run(ctx Context) (CheckResult, error) {
 	// Strip comments to avoid false positives on commented-out code
 	contentStr := stripComments(string(content))
 
-	// For Next.js, also check page files for metadata/generateMetadata
+	// For the Next.js App Router, the root route's page and any top-level
+	// route group layout can carry the Metadata API export instead of the
+	// root layout. A metadata export on some nested page says nothing about
+	// the rest of the site, so only those root-route files count.
+	var nextSources []string
 	if strings.Contains(layoutFile, "app/") {
-		hasMetadataInApp := false
-		appDir := filepath.Dir(filepath.Join(ctx.RootDir, layoutFile))
-		// Check if layout has generateMetadata or metadata export
-		generateMetadataPattern := regexp.MustCompile(`(?s)export\s+(async\s+)?function\s+generateMetadata`)
-		metadataExportPattern := regexp.MustCompile(`(?s)export\s+(const|let|var)\s+metadata\s*[=:]`)
-
-		_ = filepath.Walk(appDir, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				if info != nil && info.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if hasMetadataInApp {
-				return nil
-			}
-			if info.IsDir() {
-				name := info.Name()
-				if name == "node_modules" || name == ".git" {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			// Only check tsx/ts/jsx/js files
-			nameLower := strings.ToLower(info.Name())
-			if !strings.HasSuffix(nameLower, ".tsx") && !strings.HasSuffix(nameLower, ".ts") &&
-				!strings.HasSuffix(nameLower, ".jsx") && !strings.HasSuffix(nameLower, ".js") {
-				return nil
-			}
-			fileContent, err := readSourceFile(path)
-			if err != nil {
-				return nil
-			}
-			if generateMetadataPattern.Match(fileContent) || metadataExportPattern.Match(fileContent) {
-				hasMetadataInApp = true
-			}
-			return nil
-		})
-
-		if hasMetadataInApp {
-			// Metadata is handled somewhere in the app, pass all checks
-			return CheckResult{
-				ID:       c.ID(),
-				Title:    c.Title(),
-				Severity: SeverityInfo,
-				Passed:   true,
-				Message:  "SEO metadata configured via Next.js Metadata API",
-			}, nil
-		}
+		nextSources = nextRootRouteSources(filepath.Dir(layoutPath))
 	}
 
 	// Required SEO elements
@@ -120,7 +76,7 @@ func (c SEOMetadataCheck) Run(ctx Context) (CheckResult, error) {
 	for name, pattern := range checks {
 		if !pattern.MatchString(contentStr) {
 			// Check for alternate patterns (some frameworks use different formats)
-			if !checkAlternatePatterns(contentStr, name) {
+			if !checkAlternatePatterns(contentStr, name) && !anyNextSource(nextSources, name, hasNextJSMetadata) {
 				missing = append(missing, name)
 			}
 		}
@@ -310,8 +266,12 @@ func getLayoutFile(rootDir string, stack string, configuredLayout string) string
 func checkAlternatePatterns(content, name string) bool {
 	alternates := map[string][]*regexp.Regexp{
 		"title": {
-			regexp.MustCompile(`\btitle\s*[:=]`), // JSX/React
-			regexp.MustCompile(`<Title>`),        // Next.js Head
+			// A title prop on a component (<Seo title="...">, <Head title=...>)
+			// or a title key in a JS object. A bare title= attribute on an
+			// HTML element (<a title="Home">) is a tooltip, not the page title.
+			regexp.MustCompile(`<[A-Z][\w.]*\b[^>]*\btitle\s*=`),
+			regexp.MustCompile(`\btitle\s*:`),
+			regexp.MustCompile(`<Title>`), // Next.js Head
 		},
 		"description": {
 			regexp.MustCompile(`name:\s*["']description["']`),
@@ -371,20 +331,20 @@ func hasNextJSMetadata(content, name string) bool {
 
 	switch name {
 	case "title":
-		// title: "..." or title: '...' or title: `...`
-		titlePattern := regexp.MustCompile(`(?m)^\s*title\s*:\s*["'\x60]`)
+		// title: "...", title: siteConfig.name or title: { default, template }
+		titlePattern := regexp.MustCompile(`(?m)^\s*title\s*:\s*[^\s,}]`)
 		return titlePattern.MatchString(metadataContent)
 
 	case "description":
-		// description: "..." at the top level of metadata
-		descPattern := regexp.MustCompile(`(?m)^\s*description\s*:\s*["'\x60]`)
+		// description at the top level of metadata, as a literal or an identifier
+		descPattern := regexp.MustCompile(`(?m)^\s*description\s*:\s*[^\s,}]`)
 		return descPattern.MatchString(metadataContent)
 
 	case "og:title":
 		// openGraph: { ... title: ... }
 		ogBlock := extractNestedBlockSEO(metadataContent, "openGraph")
 		if ogBlock != "" {
-			titleInOG := regexp.MustCompile(`(?m)title\s*:\s*["'\x60]`)
+			titleInOG := regexp.MustCompile(`(?m)title\s*:\s*[^\s,}]`)
 			return titleInOG.MatchString(ogBlock)
 		}
 		return false
@@ -393,7 +353,7 @@ func hasNextJSMetadata(content, name string) bool {
 		// openGraph: { ... description: ... }
 		ogBlock := extractNestedBlockSEO(metadataContent, "openGraph")
 		if ogBlock != "" {
-			descInOG := regexp.MustCompile(`(?m)description\s*:\s*["'\x60]`)
+			descInOG := regexp.MustCompile(`(?m)description\s*:\s*[^\s,}]`)
 			return descInOG.MatchString(ogBlock)
 		}
 		return false
