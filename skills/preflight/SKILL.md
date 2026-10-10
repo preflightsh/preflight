@@ -38,7 +38,7 @@ Use Preflight to scan a project for launch readiness issues before deploy. Treat
      preflight scan --ci --format human --verbose
      ```
 
-   - Interpret exit codes directly: `0` means all checks passed, `1` means warnings only, and `2` means errors or command/config failure.
+   - Interpret exit codes directly: `0` means all checks passed, `1` means warnings only, `2` means checks found errors, `64` means Preflight could not run (bad path, unreadable or invalid preflight.yml, unknown check ID, bad flag), and `130` means the scan was cancelled.
 
 5. Triage findings into fixes.
    - Address errors before warnings.

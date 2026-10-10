@@ -1,8 +1,11 @@
 .PHONY: build test clean release install lint fmt tidy run run-init run-scan test-coverage release-snapshot
 
 # Build binary
+# The || binds to sed (always 0), so fall back to "dev" on an empty result.
+VERSION := $(or $(shell git describe --tags 2>/dev/null | sed 's/^v//'),dev)
+
 build:
-	go build -ldflags "-X github.com/preflightsh/preflight/cmd.version=$(shell git describe --tags 2>/dev/null | sed 's/^v//' || echo dev)" -o bin/preflight main.go
+	go build -ldflags "-X github.com/preflightsh/preflight/cmd.version=$(VERSION)" -o bin/preflight main.go
 
 # Run tests
 test:
