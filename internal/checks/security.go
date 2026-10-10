@@ -34,6 +34,10 @@ func (c SecurityHeadersCheck) Run(ctx Context) (CheckResult, error) {
 	var allMissing []string
 	var suggestions []string
 	hasFailure := false
+	// Production is authoritative once it answered, the same rule RunPerEnv
+	// applies: a staging host that is down (a local dev server not running
+	// during the scan) is noted in the message but is not a header failure.
+	prodAnswered := false
 
 	// Check production if configured
 	if prodURL != "" {
@@ -54,6 +58,7 @@ func (c SecurityHeadersCheck) Run(ctx Context) (CheckResult, error) {
 		} else {
 			results = append(results, "prod: ✓")
 		}
+		prodAnswered = err == nil && !blockedStatus(status)
 	}
 
 	// Check staging if configured
@@ -61,10 +66,10 @@ func (c SecurityHeadersCheck) Run(ctx Context) (CheckResult, error) {
 		missing, status, err := c.checkURL(ctx, stagingURL, ctx.PageFetchStaging)
 		if err != nil {
 			results = append(results, "staging: unreachable")
-			hasFailure = true
+			hasFailure = hasFailure || !prodAnswered
 		} else if blockedStatus(status) {
 			results = append(results, fmt.Sprintf("staging: %s", fetchFailure(status)))
-			hasFailure = true
+			hasFailure = hasFailure || !prodAnswered
 		} else if len(missing) > 0 {
 			results = append(results, fmt.Sprintf("staging missing: %s", strings.Join(missing, ", ")))
 			allMissing = append(allMissing, missing...)
