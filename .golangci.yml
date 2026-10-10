@@ -51,6 +51,11 @@ linters:
         - G304
         # G306: file permissions. We use 0644/0755 intentionally.
         - G306
+        # G122: symlink TOCTOU in Walk callbacks. The walkers scan a repo
+        # the user chose to scan and read only regular files after an
+        # Lstat; an attacker able to race a symlink swap already controls
+        # the files being read.
+        - G122
 
     staticcheck:
       # QF rules are quickfix-style style suggestions. Useful in editors,

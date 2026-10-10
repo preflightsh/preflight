@@ -22,6 +22,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          # GoReleaser authenticates with its own tokens; don't leave the
+          # job token in .git/config for every later step to read.
+          persist-credentials: false
 
       - name: Set up Go
         # setup-go v6+ exports GOTOOLCHAIN=local, so the version resolved
@@ -31,8 +34,8 @@ jobs:
         # every go command fails instead of downloading a toolchain.
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.25'
-          # Without this, setup-go takes any cached 1.25.x the runner
+          go-version: '1.26'
+          # Without this, setup-go takes any cached 1.26.x the runner
           # image happens to ship and never looks for a newer patch, so
           # the toolchain that builds a release is whatever the runner
           # was baked with. That silently decides whether standard

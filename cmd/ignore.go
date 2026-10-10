@@ -57,7 +57,7 @@ func runIgnore(cmd *cobra.Command, args []string) error {
 		if checkID != "secrets" {
 			return &ExitError{Code: ExitUsage, Err: fmt.Errorf("per-path ignore is only supported for 'secrets' (got %q)", checkID)}
 		}
-		return addSecretsAllowlistEntry(doc, args[1])
+		return addSecretsAllowlistEntry(doc, args[1]) //nolint:gosec // G602: guarded by len(args) == 2 above
 	}
 
 	// A typo used to be accepted and written to the file, so `preflight

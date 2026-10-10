@@ -17,5 +17,7 @@ func execNewBinary() error {
 		return err
 	}
 	env := append(os.Environ(), noUpdateCheckEnv+"=1")
-	return syscall.Exec(bin, os.Args, env)
+	// G702: bin is this program's own freshly installed binary, re-run with
+	// the user's original arguments; nothing here comes from outside.
+	return syscall.Exec(bin, os.Args, env) //nolint:gosec
 }
