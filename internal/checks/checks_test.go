@@ -26,7 +26,6 @@ func TestIsLocalURL(t *testing.T) {
 		{"http://127.0.0.5:8080", true, "loopback IPv4 (not .1)"},
 		{"http://0.0.0.0", true, "unspecified IPv4"},
 		{"http://[::1]", true, "loopback IPv6"},
-		{"https://myapp.local", true, "mDNS suffix"},
 		{"https://x.y.test", true, ".test suffix"},
 		{"https://example.ddev.site", true, "ddev"},
 		{"https://yow.lndo.site", true, "lando"},
@@ -43,6 +42,11 @@ func TestIsLocalURL(t *testing.T) {
 		{"https://attacker-127.0.0.1.example.com/", false, "substring in hostname"},
 		{"https://localproject.com", false, "starts with 'local' but not local"},
 		{"https://my.local.com", false, "'.local' is not the suffix"},
+		// .local is mDNS on a LAN and a corporate AD suffix: exempting it
+		// from the private-address guard let a hostile preflight.yml
+		// reach internal hosts.
+		{"https://myapp.local", false, "mDNS / AD suffix is not the scanning machine"},
+		{"https://intranet.corp.local", false, "corporate AD suffix"},
 		{"https://example.test.evil.com", false, "'.test' is not the suffix"},
 
 		// Non-local public.

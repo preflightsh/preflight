@@ -211,13 +211,18 @@ var Registry = []Check{
 	LogRocketCheck,
 }
 
-// IsLocalURL reports whether rawURL points at a developer's own machine
-// or a local-only TLD that conventionally maps to it (mDNS, ddev, etc.).
-// Uses strict hostname parsing rather than substring search on the whole
-// URL, so it cannot be tricked by patterns like
-// "https://localhost.attacker.com/" or "https://attacker.com/?h=127.0.0.1"
-// — this matters when callers use IsLocalURL as a security gate (see
-// cmd/scan.go's choice of HTTP client).
+// IsLocalURL reports whether rawURL points at a developer's own machine:
+// loopback, or a reserved or dev-tool name that resolves to it (.localhost,
+// .test, ddev, Lando). Uses strict hostname parsing rather than substring
+// search on the whole URL, so it cannot be tricked by patterns like
+// "https://localhost.attacker.com/" or "https://attacker.com/?h=127.0.0.1".
+//
+// This is a trust boundary, not just a label: cmd/scan.go dials these hosts
+// without the private-address guard, so a preflight.yml naming one can make
+// the scan send requests to any port on the scanning machine. That is the
+// accepted cost of scanning a local dev server. ".local" is deliberately not
+// here: it is mDNS on a LAN and a common corporate Active Directory suffix,
+// so treating it as local would let a hostile config reach internal hosts.
 func IsLocalURL(rawURL string) bool {
 	candidate := rawURL
 	if !strings.HasPrefix(candidate, "http://") && !strings.HasPrefix(candidate, "https://") {
@@ -238,7 +243,7 @@ func IsLocalURL(rawURL string) bool {
 	if ip := net.ParseIP(host); ip != nil {
 		return ip.IsLoopback()
 	}
-	for _, tld := range []string{".local", ".test", ".localhost", ".ddev.site", ".lndo.site"} {
+	for _, tld := range []string{".test", ".localhost", ".ddev.site", ".lndo.site"} {
 		if strings.HasSuffix(host, tld) {
 			return true
 		}
