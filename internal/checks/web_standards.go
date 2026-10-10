@@ -204,6 +204,9 @@ func probeIndexNowKeyOverHTTP(ctx Context, key string) (string, bool) {
 // file layout (e.g. a Go net/http ServeMux registering "GET /{key}.txt") where
 // the key never exists as a file on disk. Returns the matching relative path.
 func detectIndexNowInSource(ctx Context, key string) (string, bool) {
+	if key == "" {
+		return "", false
+	}
 	srcRoots := []string{
 		"internal", "handlers", "web", "server", "routes",
 		"cmd", "pkg", "src", "app", "lib",
@@ -240,8 +243,14 @@ func detectIndexNowInSource(ctx Context, key string) (string, bool) {
 			if err != nil {
 				return nil
 			}
-			if strings.Contains(strings.ToLower(string(content)), "indexnow") ||
-				(key != "" && strings.Contains(string(content), key+".txt")) {
+			// The configured key in live code is the signal. The bare word
+			// "indexnow" is not: a check catalog, a docs string or a TODO
+			// mentions it without serving anything.
+			code := stripCodeComments(string(content))
+			if ext := strings.ToLower(filepath.Ext(path)); ext == ".rb" || ext == ".py" || ext == ".ex" {
+				code = stripComments(code)
+			}
+			if strings.Contains(code, key) {
 				found = relPath(ctx.RootDir, path)
 			}
 			return nil
