@@ -29,18 +29,6 @@ func (c SentryCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	// Patterns to search for Sentry initialization
-	patterns := []*regexp.Regexp{
-		regexp.MustCompile(`Sentry\.init`),
-		regexp.MustCompile(`sentry\.init`),
-		regexp.MustCompile(`@sentry/`),
-		regexp.MustCompile(`require\s*\(\s*['"]@sentry`),
-		regexp.MustCompile(`import.*from\s+['"]@sentry`),
-		regexp.MustCompile(`Sentry::init`),       // Ruby
-		regexp.MustCompile(`sentry_sdk\.init`),   // Python
-		regexp.MustCompile(`\bsentry-laravel\b`), // Laravel
-	}
-
 	// Check for Next.js Sentry config files at root first
 	nextjsSentryFiles := []string{
 		"sentry.client.config.ts",
@@ -51,25 +39,17 @@ func (c SentryCheck) Run(ctx Context) (CheckResult, error) {
 		"sentry.edge.config.js",
 	}
 
+	found := false
 	for _, file := range nextjsSentryFiles {
-		path := filepath.Join(ctx.RootDir, file)
-		if _, err := os.Stat(path); err == nil {
-			return CheckResult{
-				ID:       c.ID(),
-				Title:    c.Title(),
-				Severity: SeverityInfo,
-				Passed:   true,
-				Message:  "Sentry initialization found",
-			}, nil
+		if _, err := os.Stat(filepath.Join(ctx.RootDir, file)); err == nil {
+			found = true
 		}
 	}
 
 	// Check monorepo structures for Sentry config
-	monorepoRoots := []string{"apps", "packages", "services"}
-	for _, monoRoot := range monorepoRoots {
-		monoDir := filepath.Join(ctx.RootDir, monoRoot)
-		entries, err := os.ReadDir(monoDir)
-		if err != nil {
+	for _, monoRoot := range []string{"apps", "packages", "services"} {
+		entries, err := os.ReadDir(filepath.Join(ctx.RootDir, monoRoot))
+		if err != nil || found {
 			continue
 		}
 		for _, entry := range entries {
@@ -77,108 +57,14 @@ func (c SentryCheck) Run(ctx Context) (CheckResult, error) {
 				continue
 			}
 			for _, file := range nextjsSentryFiles {
-				path := filepath.Join(monoDir, entry.Name(), file)
-				if _, err := os.Stat(path); err == nil {
-					return CheckResult{
-						ID:       c.ID(),
-						Title:    c.Title(),
-						Severity: SeverityInfo,
-						Passed:   true,
-						Message:  "Sentry initialization found",
-					}, nil
-				}
-			}
-		}
-	}
-
-	// Directories to search
-	searchDirs := []string{
-		"src",
-		"app",
-		"lib",
-		"config",
-		"config/initializers",
-	}
-
-	// Also add monorepo src directories
-	for _, monoRoot := range monorepoRoots {
-		monoDir := filepath.Join(ctx.RootDir, monoRoot)
-		entries, err := os.ReadDir(monoDir)
-		if err != nil {
-			continue
-		}
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
-			}
-			searchDirs = append(searchDirs,
-				filepath.Join(monoRoot, entry.Name(), "src"),
-				filepath.Join(monoRoot, entry.Name(), "app"),
-				filepath.Join(monoRoot, entry.Name(), "lib"),
-			)
-		}
-	}
-
-	// File extensions to check
-	extensions := []string{".js", ".ts", ".tsx", ".jsx", ".rb", ".py", ".php"}
-
-	found := false
-
-	for _, dir := range searchDirs {
-		dirPath := filepath.Join(ctx.RootDir, dir)
-		if _, err := os.Stat(dirPath); os.IsNotExist(err) {
-			continue
-		}
-
-		err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return nil
-			}
-
-			if info.IsDir() {
-				name := info.Name()
-				if name == "node_modules" || name == "vendor" || name == ".git" {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-
-			// Check extension
-			ext := filepath.Ext(path)
-			validExt := false
-			for _, e := range extensions {
-				if ext == e {
-					validExt = true
-					break
-				}
-			}
-			if !validExt {
-				return nil
-			}
-
-			content, err := readSourceFile(path)
-			if err != nil {
-				return nil
-			}
-
-			for _, pattern := range patterns {
-				if pattern.Match(content) {
+				if _, err := os.Stat(filepath.Join(ctx.RootDir, monoRoot, entry.Name(), file)); err == nil {
 					found = true
-					return filepath.SkipAll
 				}
 			}
-
-			return nil
-		})
-
-		if err != nil {
-			continue
-		}
-
-		if found {
-			break
 		}
 	}
+
+	found = found || sentrySDKFound(ctx.RootDir)
 
 	if found {
 		return CheckResult{
@@ -201,4 +87,51 @@ func (c SentryCheck) Run(ctx Context) (CheckResult, error) {
 			"Check Sentry documentation for your framework",
 		},
 	}, nil
+}
+
+// sentryDependencyPatterns match a Sentry SDK declared in a package manifest.
+var sentryDependencyPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`"@sentry/[\w-]+"\s*:`),                 // package.json
+	regexp.MustCompile(`github\.com/getsentry/sentry-go`),      // go.mod
+	regexp.MustCompile(`sentry/sentry(?:-laravel|-symfony)?"`), // composer.json
+	regexp.MustCompile(`gem ['"]sentry-(?:ruby|rails)['"]`),    // Gemfile
+	regexp.MustCompile(`(?i)\bsentry-sdk\b`),                   // requirements.txt, pyproject, Pipfile
+}
+
+// sentryCodePatterns match Sentry being initialized in source. Case is
+// ignored so Go's sentry.Init and Python's sentry_sdk.init both count.
+var sentryCodePatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\bsentry(?:_sdk)?(?:\.|::)init\b`),
+	regexp.MustCompile(`require\s*\(\s*['"]@sentry`),
+	regexp.MustCompile(`import.*from\s+['"]@sentry`),
+	regexp.MustCompile(`\bsentry-laravel\b`),
+}
+
+// sentrySDKFound reports whether a Sentry SDK is a declared dependency or is
+// initialized anywhere in the project's source, comments excluded.
+func sentrySDKFound(rootDir string) bool {
+	for _, name := range dependencyManifests {
+		content, err := readSourceFile(filepath.Join(rootDir, name))
+		if err != nil {
+			continue
+		}
+		deps := stripComments(string(content))
+		for _, p := range sentryDependencyPatterns {
+			if p.MatchString(deps) {
+				return true
+			}
+		}
+	}
+	return walkSourceFiles(rootDir, func(path string, content []byte) bool {
+		code := stripCodeComments(string(content))
+		if ext := filepath.Ext(path); ext == ".rb" || ext == ".py" {
+			code = stripComments(code)
+		}
+		for _, p := range sentryCodePatterns {
+			if p.MatchString(code) {
+				return true
+			}
+		}
+		return false
+	})
 }
