@@ -53,3 +53,20 @@ func TestLoadEmptyFile(t *testing.T) {
 		t.Errorf("Stack = %q, want unknown", cfg.Stack)
 	}
 }
+
+// A hand-edited URL without a scheme used to reach every check as-is, so SSL
+// reported "does not use HTTPS" and every page probe failed.
+func TestLoadNormalizesSchemelessURLs(t *testing.T) {
+	dir := t.TempDir()
+	yml := "projectName: p\nurls:\n  staging: localhost:3000\n  production: example.com\n"
+	if err := os.WriteFile(filepath.Join(dir, "preflight.yml"), []byte(yml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.URLs.Production != "https://example.com" || cfg.URLs.Staging != "http://localhost:3000" {
+		t.Errorf("urls = %+v", cfg.URLs)
+	}
+}

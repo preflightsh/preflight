@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -130,6 +131,12 @@ func Load(rootDir string) (*PreflightConfig, error) {
 }
 
 func applyDefaults(cfg *PreflightConfig) {
+	// init writes URLs with a scheme, but a hand-edited "production:
+	// example.com" used to cascade into a dozen false errors (SSL "does not
+	// use HTTPS", every page "missing").
+	cfg.URLs.Staging = NormalizeURL(cfg.URLs.Staging)
+	cfg.URLs.Production = NormalizeURL(cfg.URLs.Production)
+
 	if cfg.Stack == "" {
 		cfg.Stack = "unknown"
 	}
@@ -148,4 +155,21 @@ func applyDefaults(cfg *PreflightConfig) {
 			cfg.Checks.HealthEndpoint.Path = "/health"
 		}
 	}
+}
+
+// NormalizeURL adds a scheme to a URL written without one: http:// for
+// localhost and 127.0.0.1, https:// for everything else. A URL that already
+// has a scheme is returned unchanged.
+func NormalizeURL(url string) string {
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return ""
+	}
+	if strings.Contains(url, "://") {
+		return url
+	}
+	if strings.HasPrefix(url, "localhost") || strings.HasPrefix(url, "127.0.0.1") {
+		return "http://" + url
+	}
+	return "https://" + url
 }

@@ -92,8 +92,8 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	// Get URLs
 	fmt.Println()
-	stagingURL := normalizeURL(promptOptional(reader, "Staging URL (optional)"))
-	productionURL := normalizeURL(promptOptional(reader, "Production URL (optional)"))
+	stagingURL := config.NormalizeURL(promptOptional(reader, "Staging URL (optional)"))
+	productionURL := config.NormalizeURL(promptOptional(reader, "Production URL (optional)"))
 
 	// Confirm services
 	fmt.Println()
@@ -320,25 +320,6 @@ func promptOptional(reader *bufio.Reader, prompt string) string {
 		return ""
 	}
 	return strings.TrimSpace(input)
-}
-
-func normalizeURL(url string) string {
-	if url == "" {
-		return ""
-	}
-
-	// Already has a protocol
-	if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
-		return url
-	}
-
-	// Localhost gets http://
-	if strings.HasPrefix(url, "localhost") || strings.HasPrefix(url, "127.0.0.1") {
-		return "http://" + url
-	}
-
-	// Everything else gets https://
-	return "https://" + url
 }
 
 func promptYesNo(reader *bufio.Reader, prompt string, defaultYes bool) bool {
