@@ -170,13 +170,15 @@ func runUpgrade(upgradeCmd string) bool {
 // stale logic (e.g. service detection from before a fix). On Unix this re-execs
 // in place and never returns; if re-exec is unsupported (Windows) or fails, it
 // prints a re-run hint and exits so we never silently continue on old code.
+// That exit is ExitUsage, never 0: the user's command did not run, and a
+// zero would let `preflight scan && deploy` deploy without a scan.
 func relaunchAfterUpgrade() {
 	fmt.Fprintln(os.Stderr, "   ↻ Restarting with the new version...")
 	fmt.Fprintln(os.Stderr)
 	if err := execNewBinary(); err != nil {
 		fmt.Fprintln(os.Stderr, "   Please re-run your command to use the new version.")
 	}
-	os.Exit(0)
+	os.Exit(ExitUsage)
 }
 
 // resolveNewBinary returns an absolute path to the preflight binary to re-exec

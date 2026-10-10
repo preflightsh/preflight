@@ -47,7 +47,9 @@ var scanCmd = &cobra.Command{
 	Long: `Run all enabled checks against your project and report results.
 If path is provided, scans that directory. Otherwise scans current directory.
 Exits 0 on success, 1 for warnings only, 2 when checks find errors,
-and 64 when preflight could not run (bad path or unreadable config).`,
+64 when preflight could not run (bad path, unreadable config, unknown
+check ID, or a bad flag), and 130 when the scan is cancelled (Ctrl-C).`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runScan,
 }
 
@@ -128,6 +130,12 @@ type scanOptions struct {
 }
 
 func runScan(cmd *cobra.Command, args []string) error {
+	// A typo such as --format JSON used to fall through to the human
+	// report, which a CI step parsing JSON then choked on.
+	if formatFlag != "human" && formatFlag != "json" {
+		return &ExitError{Code: ExitUsage, Err: fmt.Errorf("invalid --format %q (want human or json)", formatFlag)}
+	}
+
 	// The update notice is interactive output. It is skipped for JSON so
 	// nothing can land in front of the document, and for CI, which has
 	// nobody to prompt.

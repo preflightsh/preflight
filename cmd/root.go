@@ -1,11 +1,16 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
+	"strings"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/mod/semver"
 )
 
 var (
@@ -25,7 +30,62 @@ func Execute() error {
 	return rootCmd.Execute()
 }
 
+// ExitCode turns the error from Execute into the process exit code, printing
+// the message to stderr. An *ExitError carries its own code. Any other error
+// comes from cobra (unknown command or flag, wrong argument count, bad flag
+// value) or from a command that could not do its job, so it is a usage error:
+// exiting 1 would tell CI "warnings only" for a scan that never ran.
+func ExitCode(err error, stderr io.Writer) int {
+	if err == nil {
+		return ExitOK
+	}
+	var exitErr *ExitError
+	if errors.As(err, &exitErr) {
+		if exitErr.Err != nil {
+			fmt.Fprintln(stderr, exitErr.Err)
+		}
+		return exitErr.Code
+	}
+	fmt.Fprintf(stderr, "Error: %v\nRun 'preflight --help' for usage.\n", err)
+	return ExitUsage
+}
+
+// resolveVersion falls back to the module version stamped by
+// `go install ...@vX.Y.Z` when the binary was not built with -ldflags
+// (GoReleaser sets it there). Local builds get a VCS pseudo-version such as
+// v0.22.2-0.2026...-abc+dirty; those stay "dev" so the update check keeps
+// skipping them.
+func resolveVersion(v string) string {
+	if v != "dev" {
+		return v
+	}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if releaseVersion(info.Main.Version) {
+			return strings.TrimPrefix(info.Main.Version, "v")
+		}
+	}
+	return v
+}
+
+// releaseVersion reports whether v is a plain tagged release (vX.Y.Z), not a
+// pseudo-version, pre-release, or dirty build.
+func releaseVersion(v string) bool {
+	return semver.IsValid(v) && semver.Prerelease(v) == "" && semver.Build(v) == ""
+}
+
+var versionCmd = &cobra.Command{
+	Use:   "version",
+	Short: "Show version information",
+	Args:  cobra.NoArgs,
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Fprintf(cmd.OutOrStdout(), "preflight version %s\n", rootCmd.Version)
+	},
+}
+
 func init() {
+	version = resolveVersion(version)
+	rootCmd.Version = version
+	rootCmd.AddCommand(versionCmd)
 	rootCmd.SetVersionTemplate("preflight version {{.Version}}\n")
 	rootCmd.SilenceUsage = true
 	rootCmd.SilenceErrors = true
