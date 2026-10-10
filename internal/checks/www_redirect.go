@@ -2,13 +2,18 @@ package checks
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/preflightsh/preflight/internal/netutil"
+	"golang.org/x/net/publicsuffix"
 )
 
 type WWWRedirectCheck struct{}
@@ -58,6 +63,19 @@ func (c WWWRedirectCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
+	// A www counterpart only exists for the registrable domain. For a
+	// subdomain production URL (app.example.com) there is no www question:
+	// www.app.example.com is not a name anyone types or expects to work.
+	if apex, err := publicsuffix.EffectiveTLDPlusOne(host); err == nil && host != apex && host != "www."+apex {
+		return CheckResult{
+			ID:       c.ID(),
+			Title:    c.Title(),
+			Severity: SeverityInfo,
+			Passed:   true,
+			Message:  "Skipped for subdomain " + host,
+		}, nil
+	}
+
 	// Determine www and non-www versions
 	var wwwHost, nonWwwHost string
 	if strings.HasPrefix(host, "www.") {
@@ -87,7 +105,7 @@ func (c WWWRedirectCheck) Run(ctx Context) (CheckResult, error) {
 			Title:    c.Title(),
 			Severity: SeverityWarn,
 			Passed:   false,
-			Message:  "Neither www nor non-www resolves",
+			Message:  fmt.Sprintf("Neither www nor non-www is reachable (www %s, non-www %s)", describeFetchError(wwwErr), describeFetchError(nonWwwErr)),
 			Suggestions: []string{
 				"Check your DNS configuration",
 				"Ensure both www and non-www have DNS records",
@@ -102,7 +120,7 @@ func (c WWWRedirectCheck) Run(ctx Context) (CheckResult, error) {
 			Title:    c.Title(),
 			Severity: SeverityWarn,
 			Passed:   false,
-			Message:  fmt.Sprintf("www.%s does not resolve", nonWwwHost),
+			Message:  fmt.Sprintf("www.%s %s", nonWwwHost, describeFetchError(wwwErr)),
 			Suggestions: []string{
 				"Add a CNAME or A record for www subdomain",
 				"Or redirect www to non-www in your DNS/CDN",
@@ -116,7 +134,7 @@ func (c WWWRedirectCheck) Run(ctx Context) (CheckResult, error) {
 			Title:    c.Title(),
 			Severity: SeverityWarn,
 			Passed:   false,
-			Message:  fmt.Sprintf("%s (non-www) does not resolve", nonWwwHost),
+			Message:  fmt.Sprintf("%s (non-www) %s", nonWwwHost, describeFetchError(nonWwwErr)),
 			Suggestions: []string{
 				"Add an A record for the apex domain",
 				"Or redirect non-www to www in your DNS/CDN",
@@ -190,6 +208,31 @@ func getFinalURL(ctx context.Context, urlStr string) (string, error) {
 	defer resp.Body.Close()
 
 	return resp.Request.URL.String(), nil
+}
+
+// describeFetchError names the class of a failed request, so a certificate
+// problem or a refused connection isn't reported as missing DNS.
+func describeFetchError(err error) string {
+	var dnsErr *net.DNSError
+	var certErr *tls.CertificateVerificationError
+	var hostErr x509.HostnameError
+	var authErr x509.UnknownAuthorityError
+	var invalidErr x509.CertificateInvalidError
+	switch {
+	case errors.As(err, &dnsErr):
+		return "does not resolve"
+	case errors.As(err, &certErr), errors.As(err, &hostErr), errors.As(err, &authErr), errors.As(err, &invalidErr):
+		return "has a TLS certificate error"
+	case errors.Is(err, context.DeadlineExceeded) || isTimeout(err):
+		return "timed out"
+	default:
+		return "is unreachable"
+	}
+}
+
+func isTimeout(err error) bool {
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
 }
 
 func extractHost(urlStr string) string {
