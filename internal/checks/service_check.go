@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"io"
 	"regexp"
 	"strings"
 )
@@ -106,27 +105,33 @@ func (c ServiceCheck) Run(ctx Context) (CheckResult, error) {
 // a DNS name that doesn't resolve yet, or a CI runner with no egress is not
 // evidence about the page's contents, and pre-launch projects (the ones this
 // tool is for) hit all three.
+//
+// Only a 2xx/3xx page counts as the live page. A Cloudflare challenge (403),
+// an auth wall or a 5xx error page is the edge's markup, not the site's, and
+// reading it would claim an integration is missing from a page we never saw.
 func checkLiveSiteForPatterns(ctx Context, patterns []*regexp.Regexp) (bool, string) {
-	url := ctx.Config.URLs.Production
+	url, html, prefetch := ctx.Config.URLs.Production, ctx.PageHTMLProduction, ctx.PageFetchProduction
 	if url == "" {
-		url = ctx.Config.URLs.Staging
+		url, html, prefetch = ctx.Config.URLs.Staging, ctx.PageHTMLStaging, ctx.PageFetchStaging
 	}
-	if url == "" || ctx.Client == nil || ctx.HostUnreachable(url) {
+	if url == "" || ctx.HostUnreachable(url) {
 		return false, ""
 	}
 
-	resp, _, err := tryURL(ctx.reqContext(), ctx.Client, url)
-	if err != nil {
+	// The scan already fetched this homepage; reuse it so this check can't
+	// disagree with the others about what the page holds. FetchPage leaves
+	// html empty for any response that wasn't a usable page.
+	if !prefetch.Attempted() {
+		if ctx.Client == nil {
+			return false, ""
+		}
+		html, _ = FetchPage(ctx.reqContext(), ctx.Client, url)
+	}
+	if html == "" {
 		return false, ""
 	}
-	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
-	if err != nil {
-		return false, ""
-	}
-
-	content := strings.ToLower(string(body))
+	content := strings.ToLower(html)
 	for _, pattern := range patterns {
 		if pattern.MatchString(content) {
 			return true, url
