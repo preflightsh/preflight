@@ -44,10 +44,10 @@ func runHistory(cmd *cobra.Command, args []string) error {
 
 	creds, err := dashboard.LoadCredentials()
 	if err != nil {
-		return &ExitError{Code: 1, Err: err}
+		return &ExitError{Code: ExitFail, Err: err}
 	}
 	if creds == nil || creds.Token == "" {
-		return &ExitError{Code: 1, Err: fmt.Errorf("not logged in; run 'preflight auth login' to view your dashboard history")}
+		return &ExitError{Code: ExitFail, Err: fmt.Errorf("not logged in; run 'preflight auth login' to view your dashboard history")}
 	}
 	client, warning := dashboard.ClientForCredentials(creds)
 	if warning != "" {
@@ -72,7 +72,7 @@ func listHistory(client *dashboard.Client, token string) error {
 
 	runs, err := client.ListRuns(token, projectKey, historyLimit)
 	if err != nil {
-		return &ExitError{Code: 1, Err: err}
+		return &ExitError{Code: ExitFail, Err: err}
 	}
 
 	if historyFormat == "json" {
@@ -98,7 +98,7 @@ func listHistory(client *dashboard.Client, token string) error {
 func showRun(client *dashboard.Client, token, runID string) error {
 	run, err := client.GetRun(token, runID)
 	if err != nil {
-		return &ExitError{Code: 1, Err: err}
+		return &ExitError{Code: ExitFail, Err: err}
 	}
 	if historyFormat == "json" {
 		return printJSON(run)

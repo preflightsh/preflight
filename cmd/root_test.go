@@ -75,3 +75,18 @@ func TestResolveLoginToken(t *testing.T) {
 		}
 	}
 }
+
+// TestHistoryNotLoggedInFails: a runtime failure such as a missing login exits
+// 2, not 1, which CI reads as "warnings only".
+func TestHistoryNotLoggedInFails(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PREFLIGHT_TOKEN", "")
+	historyFormat = "human"
+	var stderr bytes.Buffer
+	if got := ExitCode(runHistory(historyCmd, nil), &stderr); got != ExitFail {
+		t.Errorf("code = %d, want %d", got, ExitFail)
+	}
+	if !strings.Contains(stderr.String(), "not logged in") {
+		t.Errorf("stderr = %q, want the not-logged-in message", stderr.String())
+	}
+}

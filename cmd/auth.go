@@ -62,14 +62,14 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 	if loginToken != "" {
 		email, err := client.Whoami(loginToken)
 		if err != nil {
-			return &ExitError{Code: 1, Err: fmt.Errorf("token rejected: %w", err)}
+			return &ExitError{Code: ExitFail, Err: fmt.Errorf("token rejected: %w", err)}
 		}
 		return saveLogin(client.BaseURL, loginToken, email)
 	}
 
 	start, err := client.StartAuth()
 	if err != nil {
-		return &ExitError{Code: 1, Err: fmt.Errorf("could not start login: %w", err)}
+		return &ExitError{Code: ExitFail, Err: fmt.Errorf("could not start login: %w", err)}
 	}
 
 	fmt.Println()
@@ -93,7 +93,7 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 			var permanent *dashboard.PermanentError
 			if errors.As(err, &permanent) {
 				fmt.Println()
-				return &ExitError{Code: 1, Err: fmt.Errorf("login failed: %w", err)}
+				return &ExitError{Code: ExitFail, Err: fmt.Errorf("login failed: %w", err)}
 			}
 			continue // transient; keep polling
 		}
@@ -101,7 +101,7 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 		case "approved":
 			if status.Token == "" {
 				fmt.Println()
-				return &ExitError{Code: 1, Err: fmt.Errorf("the dashboard approved the login but sent no token; run 'preflight auth login' again")}
+				return &ExitError{Code: ExitFail, Err: fmt.Errorf("the dashboard approved the login but sent no token; run 'preflight auth login' again")}
 			}
 			fmt.Println(" done.")
 			email, err := client.Whoami(status.Token)
@@ -111,13 +111,13 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 			return saveLogin(client.BaseURL, status.Token, email)
 		case "expired":
 			fmt.Println()
-			return &ExitError{Code: 1, Err: fmt.Errorf("the authorization code expired; run 'preflight auth login' again")}
+			return &ExitError{Code: ExitFail, Err: fmt.Errorf("the authorization code expired; run 'preflight auth login' again")}
 		default:
 			fmt.Print(".")
 		}
 	}
 	fmt.Println()
-	return &ExitError{Code: 1, Err: fmt.Errorf("timed out waiting for authorization")}
+	return &ExitError{Code: ExitFail, Err: fmt.Errorf("timed out waiting for authorization")}
 }
 
 // resolveLoginToken picks the token from --token ("-" means stdin) or, when
@@ -144,7 +144,7 @@ func resolveLoginToken(flag, env string, stdin io.Reader) (string, error) {
 func saveLogin(apiURL, token, email string) error {
 	creds := &dashboard.Credentials{Token: token, Email: email, APIURL: apiURL}
 	if err := creds.Save(); err != nil {
-		return &ExitError{Code: 1, Err: fmt.Errorf("could not save credentials: %w", err)}
+		return &ExitError{Code: ExitFail, Err: fmt.Errorf("could not save credentials: %w", err)}
 	}
 	if email != "" {
 		fmt.Printf("\n✓ Logged in as %s\n", email)
@@ -156,7 +156,7 @@ func saveLogin(apiURL, token, email string) error {
 
 func runAuthLogout(cmd *cobra.Command, args []string) error {
 	if err := dashboard.ClearCredentials(); err != nil {
-		return &ExitError{Code: 1, Err: fmt.Errorf("could not remove credentials: %w", err)}
+		return &ExitError{Code: ExitFail, Err: fmt.Errorf("could not remove credentials: %w", err)}
 	}
 	fmt.Println("✓ Logged out")
 	return nil
@@ -165,7 +165,7 @@ func runAuthLogout(cmd *cobra.Command, args []string) error {
 func runAuthStatus(cmd *cobra.Command, args []string) error {
 	creds, err := dashboard.LoadCredentials()
 	if err != nil {
-		return &ExitError{Code: 1, Err: err}
+		return &ExitError{Code: ExitFail, Err: err}
 	}
 	if creds == nil || creds.Token == "" {
 		fmt.Println("Not logged in. Run 'preflight auth login' to connect your account.")

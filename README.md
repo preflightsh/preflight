@@ -414,7 +414,9 @@ All services have validation checks that verify proper integration (env vars, SD
 
 Codes 1 and 2 mean the scan ran and reported something. Code 64 means it
 never got that far, so CI can tell "this project has problems" apart from
-"this invocation was wrong".
+"this invocation was wrong". The other commands (`auth`, `history`) exit 0 on
+success, 2 when they fail (not logged in, network error), and 64 on a usage
+error; they never exit 1.
 
 ## Shell Completions
 
