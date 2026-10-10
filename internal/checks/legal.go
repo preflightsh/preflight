@@ -1,7 +1,10 @@
 package checks
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -61,13 +64,19 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 		}
 		client := &clientCopy
 
+		// An SPA rewrite (/* -> /index.html 200) or catch-all route answers
+		// 200 for every path. On such a host a 200 that serves the same
+		// shell as a path that cannot exist proves nothing, so it falls
+		// through to the source-file search below.
+		shell := catchAllDigest(ctx, client, baseURL)
+
 		// A redirect counts as "found" only if it stays on the same
 		// domain, isn't a login/auth bounce, and actually lands on a
 		// matching URL (not a path-clean or homepage bounce).
-		accepting := func(keywords ...string) func(int, http.Header) bool {
-			return func(status int, header http.Header) bool {
+		accepting := func(keywords ...string) func(int, http.Header, []byte) bool {
+			return func(status int, header http.Header, digest []byte) bool {
 				if status >= 200 && status < 300 {
-					return true
+					return shell == nil || !bytes.Equal(digest, shell)
 				}
 				if status >= 300 && status < 400 {
 					loc := header.Get("Location")
@@ -577,6 +586,31 @@ func redirectMentions(location string, keywords ...string) bool {
 	return false
 }
 
+// catchAllProbePath is a path no real site serves.
+const catchAllProbePath = "/preflight-404-probe-please-do-not-exist"
+
+// catchAllDigest returns the body digest a host serves for a path that
+// cannot exist when it answers that with 2xx (an SPA rewrite or a catch-all
+// route), and nil for a host that 404s or redirects unknown paths.
+func catchAllDigest(ctx Context, client *http.Client, baseURL string) []byte {
+	resp, err := getWithContext(ctx.reqContext(), client, strings.TrimSuffix(baseURL, "/")+catchAllProbePath)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil
+	}
+	return bodyDigest(resp.Body)
+}
+
+// bodyDigest is the sha256 of the first MiB of a response body.
+func bodyDigest(r io.Reader) []byte {
+	h := sha256.New()
+	_, _ = io.Copy(h, io.LimitReader(r, 1<<20))
+	return h.Sum(nil)
+}
+
 // legalProbeBatch is how many candidate paths probeFirstHit requests at once.
 const legalProbeBatch = 5
 
@@ -586,7 +620,10 @@ const legalProbeBatch = 5
 // one round of requests, while a miss no longer costs one timeout per
 // candidate in series: on a slow host, 14 sequential probes at the scan
 // timeout was over two minutes for one check.
-func probeFirstHit(ctx Context, client *http.Client, baseURL string, paths []string, accept func(status int, header http.Header) bool) (string, bool) {
+//
+// accept also gets the digest of a 2xx body (nil otherwise), so a catch-all
+// host's shell page can be told apart from a real page.
+func probeFirstHit(ctx Context, client *http.Client, baseURL string, paths []string, accept func(status int, header http.Header, digest []byte) bool) (string, bool) {
 	for start := 0; start < len(paths); start += legalProbeBatch {
 		end := min(start+legalProbeBatch, len(paths))
 		hits := make([]bool, end-start)
@@ -599,8 +636,12 @@ func probeFirstHit(ctx Context, client *http.Client, baseURL string, paths []str
 				if err != nil {
 					return
 				}
-				resp.Body.Close()
-				hits[i] = accept(resp.StatusCode, resp.Header)
+				defer resp.Body.Close()
+				var digest []byte
+				if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+					digest = bodyDigest(resp.Body)
+				}
+				hits[i] = accept(resp.StatusCode, resp.Header, digest)
 			}(i, path)
 		}
 		wg.Wait()

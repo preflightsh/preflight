@@ -1,6 +1,7 @@
 package checks
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
 	"strings"
@@ -57,8 +58,15 @@ func (c HealthCheck) Run(ctx Context) (CheckResult, error) {
 		pathsToTry = []string{"/health", "/healthz", "/api/health", "/_health", "/status"}
 	}
 
+	// A catch-all host (SPA rewrite) answers 200 with its shell for every
+	// path, which is not a health endpoint. Learn each host's shell once.
+	shells := map[string][]byte{}
+	for _, base := range baseURLs {
+		shells[base] = catchAllDigest(ctx, ctx.Client, base)
+	}
+
 	for _, path := range pathsToTry {
-		if result, ok := c.probePath(ctx, baseURLs, path); ok {
+		if result, ok := c.probePath(ctx, baseURLs, path, shells); ok {
 			return result, nil
 		}
 	}
@@ -69,6 +77,11 @@ func (c HealthCheck) Run(ctx Context) (CheckResult, error) {
 	// confirm the site is live.
 	if result, ok := c.probeRoot(ctx, baseURLs); ok {
 		if strict {
+			// The user named a health path and it isn't there: that is a
+			// finding, not a pass. A reachable homepage only stands in when
+			// no path was configured.
+			result.Passed = false
+			result.Severity = SeverityWarn
 			result.Message = "Site reachable, but no health endpoint at " +
 				strings.TrimSuffix(baseURL, "/") + cfg.Path
 			result.Suggestions = []string{
@@ -96,18 +109,23 @@ func (c HealthCheck) unreachable(baseURL string) CheckResult {
 	}
 }
 
-// probePath tries a path and returns (result, true) on a 200 response.
-// Returns (_, false) on any error or non-200 so the caller can keep trying.
-func (c HealthCheck) probePath(ctx Context, baseURLs []string, path string) (CheckResult, bool) {
-	for _, baseURL := range baseURLs {
-		baseURL = strings.TrimSuffix(baseURL, "/")
+// probePath tries a path and returns (result, true) on a 200 response that
+// is not the host's catch-all shell (shells, keyed by base URL). Returns
+// (_, false) on any error or other response so the caller can keep trying.
+func (c HealthCheck) probePath(ctx Context, baseURLs []string, path string, shells map[string][]byte) (CheckResult, bool) {
+	for _, base := range baseURLs {
+		baseURL := strings.TrimSuffix(base, "/")
 		resp, actualURL, err := tryURL(ctx.reqContext(), ctx.Client, baseURL+path)
 		if err != nil {
 			continue
 		}
 		status := resp.StatusCode
+		var digest []byte
+		if status == http.StatusOK && shells[base] != nil {
+			digest = bodyDigest(resp.Body)
+		}
 		resp.Body.Close()
-		if status == http.StatusOK {
+		if status == http.StatusOK && (shells[base] == nil || !bytes.Equal(digest, shells[base])) {
 			return CheckResult{
 				ID:       c.ID(),
 				Title:    c.Title(),
