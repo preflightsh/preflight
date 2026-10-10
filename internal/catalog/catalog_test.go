@@ -42,3 +42,11 @@ func TestCheckIDsAreSnakeCase(t *testing.T) {
 		}
 	}
 }
+
+// "indexnow" is the IndexNow service ID, but the check is index_now. Before
+// the alias, --only indexnow was rejected and ignore: [indexnow] did nothing.
+func TestIndexNowServiceIDResolvesToCheck(t *testing.T) {
+	if got := Canonical("indexnow"); got != "index_now" {
+		t.Errorf("Canonical(indexnow) = %q, want index_now", got)
+	}
+}

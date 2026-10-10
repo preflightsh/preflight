@@ -87,6 +87,7 @@ var Aliases = map[string]string{
 	"adsTxt":          "ads_txt",
 	"humansTxt":       "humans_txt",
 	"indexNow":        "index_now",
+	"indexnow":        "index_now", // the IndexNow service ID, which has no check of its own
 }
 
 // Canonical returns the current ID for id, following Aliases. IDs the

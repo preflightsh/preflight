@@ -356,6 +356,7 @@ separate schema and did not change.
 | `adsTxt` | `ads_txt` |
 | `humansTxt` | `humans_txt` |
 | `indexNow` | `index_now` |
+| `indexnow` | `index_now` |
 
 ### A note on scanning code you don't trust
 
@@ -382,7 +383,7 @@ All services have validation checks that verify proper integration (env vars, SD
 
 **Email Marketing:** `mailchimp`, `convertkit`, `beehiiv`, `aweber`, `activecampaign`, `campaignmonitor`, `drip`, `klaviyo`, `buttondown`
 
-**Analytics:** `plausible`, `fathom`, `google_analytics`, `fullres`, `datafast`, `posthog`, `mixpanel`, `amplitude`, `segment`, `hotjar`
+**Analytics:** `plausible`, `fathom`, `umami`, `google_analytics`, `fullres`, `datafast`, `posthog`, `mixpanel`, `amplitude`, `segment`, `hotjar`
 
 **Auth:** `auth0`, `clerk`, `workos`, `firebase`, `supabase`
 
