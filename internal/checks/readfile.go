@@ -24,7 +24,7 @@ func openRegular(path string) (*os.File, error) {
 	if !fi.Mode().IsRegular() {
 		return nil, fmt.Errorf("%s: not a regular file", path)
 	}
-	f, err := os.Open(path) // #nosec G304 -- paths come from walking the scanned project
+	f, err := os.Open(path) //nolint:gosec // paths come from walking the scanned project
 	if err != nil {
 		return nil, err
 	}

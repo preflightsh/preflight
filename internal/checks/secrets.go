@@ -351,7 +351,7 @@ type secretFinding struct {
 
 // googleAPIKeyType labels AIza keys. They serve Maps, Firebase, Gemini and
 // every other Google API alike, so the label names none of them.
-const googleAPIKeyType = "Google API key"
+const googleAPIKeyType = "Google API key" //nolint:gosec // a finding label, not a credential
 
 // browserGoogleKeyHints on the same line mark a key meant for the browser.
 var browserGoogleKeyHints = []string{"maps.googleapis.com", "maps/api/js", "google.maps", "firebaseconfig", "authdomain"}
