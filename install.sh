@@ -5,7 +5,9 @@
 set -e
 
 REPO="preflightsh/preflight"
-INSTALL_DIR="/usr/local/bin"
+# Optional: install somewhere else, e.g. PREFLIGHT_INSTALL_DIR="$HOME/.local/bin"
+# on a machine without sudo.
+INSTALL_DIR="${PREFLIGHT_INSTALL_DIR:-/usr/local/bin}"
 BINARY_NAME="preflight"
 # Optional: pin a specific release by setting PREFLIGHT_VERSION (e.g. v0.15.1).
 PREFLIGHT_VERSION="${PREFLIGHT_VERSION:-}"
@@ -24,8 +26,10 @@ warn() {
     printf "${YELLOW}[WARN]${NC} %s\n" "$1"
 }
 
+# Errors go to stderr: detect_os and friends run inside $(...), where a
+# message on stdout would be captured into the variable and never shown.
 error() {
-    printf "${RED}[ERROR]${NC} %s\n" "$1"
+    printf "${RED}[ERROR]${NC} %s\n" "$1" >&2
     exit 1
 }
 
@@ -48,11 +52,14 @@ detect_arch() {
     esac
 }
 
-# Get latest version from GitHub
+# Get the latest version from the releases/latest redirect. The REST API
+# allows 60 unauthenticated requests per hour per IP, which shared CI runners
+# exhaust; the redirect has no such limit.
 get_latest_version() {
-    curl -sSL "https://api.github.com/repos/${REPO}/releases/latest" | \
-        grep '"tag_name":' | \
-        sed -E 's/.*"([^"]+)".*/\1/'
+    url=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest") || return 0
+    case "$url" in
+        */releases/tag/*) echo "${url##*/}";;
+    esac
 }
 
 # Download and install
@@ -88,6 +95,9 @@ install() {
     FILENAME="preflight_${VERSION#v}_${OS}_${ARCH}.tar.gz"
     if [ "$OS" = "windows" ]; then
         FILENAME="preflight_${VERSION#v}_${OS}_${ARCH}.zip"
+        # The Windows archive holds preflight.exe.
+        BINARY_NAME="preflight.exe"
+        command -v unzip >/dev/null 2>&1 || error "unzip is required but not installed"
     fi
 
     DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/${FILENAME}"
@@ -142,7 +152,16 @@ install() {
     # script after the install already succeeded.
     chmod +x "${BINARY_NAME}"
 
-    # Install
+    # Install. A fresh Apple Silicon Mac without Homebrew has no
+    # /usr/local/bin, so create the directory first.
+    if [ ! -d "${INSTALL_DIR}" ]; then
+        if mkdir -p "${INSTALL_DIR}" 2>/dev/null; then
+            :
+        else
+            info "Requesting sudo access to create ${INSTALL_DIR}"
+            sudo mkdir -p "${INSTALL_DIR}"
+        fi
+    fi
     if [ -w "${INSTALL_DIR}" ]; then
         mv "${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"
     else
