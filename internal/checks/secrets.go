@@ -111,27 +111,27 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 		"tmp":          true,
 	}
 
-	// File extensions to check
+	// File extensions to check: source, templates, config and infra files.
+	// Markdown stays out on purpose, since docs routinely show example keys.
 	codeExtensions := map[string]bool{
-		".js":   true,
-		".ts":   true,
-		".tsx":  true,
-		".jsx":  true,
-		".rb":   true,
-		".py":   true,
-		".php":  true,
-		".go":   true,
-		".java": true,
-		".yml":  true,
-		".yaml": true,
-		".json": true,
-		".env":  true,
-		".sh":   true,
-		".bash": true,
-		".zsh":  true,
-		".conf": true,
-		".cfg":  true,
-		".ini":  true,
+		// JavaScript and friends, including ESM/CJS configs and SFCs
+		".js": true, ".mjs": true, ".cjs": true, ".ts": true, ".mts": true, ".cts": true,
+		".tsx": true, ".jsx": true, ".vue": true, ".svelte": true, ".astro": true,
+		// Server languages
+		".rb": true, ".py": true, ".php": true, ".go": true, ".java": true, ".kt": true,
+		".kts": true, ".scala": true, ".groovy": true, ".gradle": true, ".cs": true,
+		".rs": true, ".swift": true, ".dart": true, ".ex": true, ".exs": true,
+		".lua": true, ".pl": true,
+		// Templates
+		".html": true, ".htm": true, ".erb": true, ".twig": true, ".liquid": true,
+		".njk": true, ".hbs": true,
+		// Config and infrastructure
+		".yml": true, ".yaml": true, ".json": true, ".toml": true, ".xml": true,
+		".properties": true, ".tf": true, ".tfvars": true, ".hcl": true,
+		".env": true, ".conf": true, ".cfg": true, ".ini": true, ".txt": true,
+		".npmrc": true, ".pypirc": true, ".netrc": true,
+		// Shell
+		".sh": true, ".bash": true, ".zsh": true, ".ps1": true,
 	}
 
 	// Resolve git status once. A secrets scanner's job is to catch
