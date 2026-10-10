@@ -1,6 +1,11 @@
 package cmd
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/preflightsh/preflight/internal/checks"
+)
 
 // One repository must map to one dashboard project however it was cloned.
 // Before this test, ssh:// and https://user@ forms hashed differently from
@@ -35,5 +40,21 @@ func TestTruncateIsRuneSafe(t *testing.T) {
 	}
 	if got := truncate("short", 28); got != "short" {
 		t.Errorf("truncate should leave short strings alone, got %q", got)
+	}
+}
+
+// The IndexNow key is cleared from the published config, so the index_now
+// check's messages must not carry it either.
+func TestRedactChecksMasksIndexNowKey(t *testing.T) {
+	key := "23a74777e94982ce283db6a0ee3ad917"
+	got := redactChecks([]checks.CheckResult{
+		{ID: "index_now", Passed: true, Message: "Key file found at public/" + key + ".txt"},
+		{ID: "seo_meta", Passed: true, Message: "hash " + key},
+	})
+	if strings.Contains(got[0].Message, key) {
+		t.Errorf("index_now message still carries the key: %q", got[0].Message)
+	}
+	if !strings.Contains(got[1].Message, key) {
+		t.Errorf("other checks should be left alone: %q", got[1].Message)
 	}
 }

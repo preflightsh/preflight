@@ -56,3 +56,22 @@ func TestReleaseVersion(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveLoginToken(t *testing.T) {
+	cases := []struct {
+		flag, env, stdin, want string
+		wantErr                bool
+	}{
+		{"", "", "", "", false},
+		{"abc", "env", "", "abc", false},
+		{"", " env-token \n", "", "env-token", false},
+		{"-", "env", "stdin-token\n", "stdin-token", false},
+		{"-", "", "", "", true},
+	}
+	for _, tc := range cases {
+		got, err := resolveLoginToken(tc.flag, tc.env, strings.NewReader(tc.stdin))
+		if (err != nil) != tc.wantErr || got != tc.want {
+			t.Errorf("resolveLoginToken(%q, %q, %q) = %q, %v; want %q, err %v", tc.flag, tc.env, tc.stdin, got, err, tc.want, tc.wantErr)
+		}
+	}
+}

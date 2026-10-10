@@ -20,6 +20,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/preflightsh/preflight/internal/fsutil"
 )
 
 // ErrQuotaExceeded is returned by PublishRun when the account is out of free
@@ -79,14 +81,25 @@ func (c *Credentials) Save() error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	// MkdirAll leaves an existing directory alone, and ~/.preflight is often
+	// created earlier by the first-run markers, so tighten it explicitly.
+	if err := os.Chmod(dir, 0o700); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o600)
+	if err := fsutil.WriteFile(path, data, 0o600); err != nil {
+		return err
+	}
+	// WriteFile keeps an existing file's mode; a token file must be 0600
+	// even if it was loosened by hand.
+	return os.Chmod(path, 0o600)
 }
 
 // ClearCredentials removes any stored credentials (logout).
@@ -195,9 +208,22 @@ func (c *Client) Poll(deviceCode string) (*PollStatus, error) {
 		return &PollStatus{Status: out.Status, Token: out.Token}, nil
 	default:
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("auth poll failed: %s: %s", resp.Status, string(b))
+		err := fmt.Errorf("auth poll failed: %s: %s", resp.Status, string(b))
+		// A 4xx (other than rate limiting) will not fix itself: the device
+		// code is unknown or the request is malformed. Callers stop polling
+		// instead of looping silently for the full timeout.
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusTooManyRequests {
+			return nil, &PermanentError{Err: err}
+		}
+		return nil, err
 	}
 }
+
+// PermanentError marks a failure that retrying cannot fix.
+type PermanentError struct{ Err error }
+
+func (e *PermanentError) Error() string { return e.Err.Error() }
+func (e *PermanentError) Unwrap() error { return e.Err }
 
 // PublishRequest is the body posted to /api/runs. SchemaVersion and
 // CLIVersion mirror the JSON report (see output.SchemaVersion) so the

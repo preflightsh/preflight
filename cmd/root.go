@@ -149,7 +149,7 @@ func markFirstRunComplete(marker string) {
 		return
 	}
 	// Create state directory if it doesn't exist
-	if err := os.MkdirAll(stateDir, 0755); err != nil {
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return
 	}
 	markerPath := filepath.Join(stateDir, marker)

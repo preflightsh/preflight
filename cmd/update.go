@@ -126,7 +126,7 @@ func markUpdateChecked() {
 	if stateDir == "" {
 		return
 	}
-	if err := os.MkdirAll(stateDir, 0755); err != nil {
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return
 	}
 	checkFile := filepath.Join(stateDir, "last_update_check")

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 
 	"github.com/preflightsh/preflight/internal/checks"
@@ -51,7 +52,7 @@ func publishScanResults(cfg *config.PreflightConfig, projectDir string, results 
 	if err != nil {
 		if errors.Is(err, dashboard.ErrQuotaExceeded) {
 			fmt.Fprintln(os.Stderr, "\n"+strings.TrimPrefix(err.Error(), "free run quota exceeded: "))
-			fmt.Fprintf(os.Stderr, "Upgrade or add your own API key at %s/billing\n", creds.APIURL)
+			fmt.Fprintf(os.Stderr, "Upgrade or add your own API key at %s/billing\n", client.BaseURL)
 			return nil
 		}
 		fmt.Fprintln(os.Stderr, "\nCould not publish run:", err)
@@ -68,15 +69,23 @@ func publishSummary(results []checks.CheckResult) dashboard.PublishSummary {
 	return dashboard.PublishSummary{OK: s.OK, Warn: s.Warn, Fail: s.Fail}
 }
 
+// indexNowKeyRe matches an IndexNow key (32 hex characters) inside a message.
+var indexNowKeyRe = regexp.MustCompile(`\b[a-fA-F0-9]{32}\b`)
+
 // redactChecks converts results to the publish shape, stripping sensitive
 // content from the secrets check (file paths, line numbers, secret types) so it
-// never leaves the machine.
+// never leaves the machine. The index_now messages name the key ("key file
+// found at public/<key>.txt"); it is cleared from the published config, so it
+// is masked here too.
 func redactChecks(results []checks.CheckResult) []dashboard.PublishCheck {
 	out := make([]dashboard.PublishCheck, 0, len(results))
 	for _, r := range results {
 		msg := r.Message
 		if r.ID == "secrets" && !r.Passed {
 			msg = "Potential secrets detected (details hidden for privacy)."
+		}
+		if r.ID == "index_now" {
+			msg = indexNowKeyRe.ReplaceAllString(msg, "<key>")
 		}
 		out = append(out, dashboard.PublishCheck{
 			ID:       r.ID,

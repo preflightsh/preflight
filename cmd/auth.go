@@ -1,10 +1,15 @@
 package cmd
 
 import (
+	"bufio"
+	"errors"
 	"fmt"
+	"io"
 	"net/url"
+	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/preflightsh/preflight/internal/dashboard"
@@ -38,7 +43,7 @@ var authStatusCmd = &cobra.Command{
 }
 
 func init() {
-	authLoginCmd.Flags().StringVar(&loginToken, "token", "", "Authenticate with a pasted token instead of the browser flow")
+	authLoginCmd.Flags().StringVar(&loginToken, "token", "", "Authenticate with a token instead of the browser flow (use - to read it from stdin, or set PREFLIGHT_TOKEN)")
 	authCmd.AddCommand(authLoginCmd, authLogoutCmd, authStatusCmd)
 	rootCmd.AddCommand(authCmd)
 }
@@ -46,7 +51,14 @@ func init() {
 func runAuthLogin(cmd *cobra.Command, args []string) error {
 	client := dashboard.NewClient()
 
-	// Headless / paste fallback: validate the token and store it.
+	// Headless / paste fallback: validate the token and store it. A token
+	// on the command line lands in shell history and `ps`, so "-" reads it
+	// from stdin and PREFLIGHT_TOKEN reads it from the environment.
+	token, err := resolveLoginToken(loginToken, os.Getenv("PREFLIGHT_TOKEN"), os.Stdin)
+	if err != nil {
+		return &ExitError{Code: ExitUsage, Err: err}
+	}
+	loginToken = token
 	if loginToken != "" {
 		email, err := client.Whoami(loginToken)
 		if err != nil {
@@ -78,10 +90,19 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 		time.Sleep(interval)
 		status, err := client.Poll(start.DeviceCode)
 		if err != nil {
+			var permanent *dashboard.PermanentError
+			if errors.As(err, &permanent) {
+				fmt.Println()
+				return &ExitError{Code: 1, Err: fmt.Errorf("login failed: %w", err)}
+			}
 			continue // transient; keep polling
 		}
 		switch status.Status {
 		case "approved":
+			if status.Token == "" {
+				fmt.Println()
+				return &ExitError{Code: 1, Err: fmt.Errorf("the dashboard approved the login but sent no token; run 'preflight auth login' again")}
+			}
 			fmt.Println(" done.")
 			email, err := client.Whoami(status.Token)
 			if err != nil {
@@ -97,6 +118,27 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println()
 	return &ExitError{Code: 1, Err: fmt.Errorf("timed out waiting for authorization")}
+}
+
+// resolveLoginToken picks the token from --token ("-" means stdin) or, when
+// the flag is empty, from PREFLIGHT_TOKEN. An empty result means the browser
+// flow.
+func resolveLoginToken(flag, env string, stdin io.Reader) (string, error) {
+	if flag == "-" {
+		line, err := bufio.NewReader(stdin).ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return "", fmt.Errorf("could not read token from stdin: %w", err)
+		}
+		token := strings.TrimSpace(line)
+		if token == "" {
+			return "", fmt.Errorf("no token on stdin")
+		}
+		return token, nil
+	}
+	if flag != "" {
+		return flag, nil
+	}
+	return strings.TrimSpace(env), nil
 }
 
 func saveLogin(apiURL, token, email string) error {
