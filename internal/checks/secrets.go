@@ -48,7 +48,7 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 		{regexp.MustCompile(`sk-[a-zA-Z0-9]{48,}`), "OpenAI API key"},
 		{regexp.MustCompile(`sk-proj-[a-zA-Z0-9_-]{48,}`), "OpenAI project key"},
 		{regexp.MustCompile(`sk-ant-[a-zA-Z0-9_-]{90,}`), "Anthropic API key"},
-		{regexp.MustCompile(`AIza[0-9A-Za-z_-]{35}`), "Google AI/Firebase API key"},
+		{regexp.MustCompile(`AIza[0-9A-Za-z_-]{35}`), googleAPIKeyType},
 		{regexp.MustCompile(`r8_[a-zA-Z0-9]{37}`), "Replicate API token"},
 		{regexp.MustCompile(`hf_[a-zA-Z0-9]{34}`), "Hugging Face API token"},
 		{regexp.MustCompile(`xai-[a-zA-Z0-9]{48,}`), "Grok/xAI API key"},
@@ -309,10 +309,23 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 		displayMessages[len(displayMessages)-1] += suffix
 	}
 
+	// Browser-side Google keys alone are a warning: they ship to every
+	// visitor by design, so the fix is a referrer restriction, not removal.
+	severity := SeverityWarn
+	for _, f := range findings {
+		if !f.browserKey {
+			severity = SeverityError
+			break
+		}
+	}
+	if severity == SeverityWarn {
+		message = fmt.Sprintf("Browser-side Google API key(s) in %d place(s), check they are restricted by HTTP referrer", len(findings))
+	}
+
 	return CheckResult{
 		ID:       c.ID(),
 		Title:    c.Title(),
-		Severity: SeverityError,
+		Severity: severity,
 		Passed:   false,
 		Message:  message,
 		Suggestions: append(displayMessages,
@@ -330,6 +343,39 @@ type secretFinding struct {
 	secretType  string
 	fingerprint string // "sha256:<hex>" of the matched secret value
 	gitState    string // "tracked", "committable", or "" (not a git repo)
+	// browserKey marks a Google API key used from the browser (Maps, a
+	// Firebase web config), which is public by design and secured by
+	// referrer restrictions rather than secrecy.
+	browserKey bool
+}
+
+// googleAPIKeyType labels AIza keys. They serve Maps, Firebase, Gemini and
+// every other Google API alike, so the label names none of them.
+const googleAPIKeyType = "Google API key"
+
+// browserGoogleKeyHints on the same line mark a key meant for the browser.
+var browserGoogleKeyHints = []string{"maps.googleapis.com", "maps/api/js", "google.maps", "firebaseconfig", "authdomain"}
+
+// browserServedDirs hold files shipped to the browser as they are.
+var browserServedDirs = []string{"public/", "static/", "assets/", "web/js/", "wwwroot/"}
+
+// isBrowserGoogleKey reports whether an AIza key on line looks like a
+// browser-side key: used with Maps or a Firebase web config, or committed in
+// a directory served to browsers.
+func isBrowserGoogleKey(path, line string) bool {
+	lower := strings.ToLower(line)
+	for _, h := range browserGoogleKeyHints {
+		if strings.Contains(lower, h) {
+			return true
+		}
+	}
+	slashed := filepath.ToSlash(path)
+	for _, d := range browserServedDirs {
+		if strings.Contains(slashed, "/"+d) {
+			return true
+		}
+	}
+	return false
 }
 
 // gitStatus captures which project-relative paths git is tracking and
@@ -478,6 +524,7 @@ func scanFileForSecrets(path string, patterns []secretPattern) ([]secretFinding,
 					line:        lineNum,
 					secretType:  sp.description,
 					fingerprint: fp,
+					browserKey:  sp.description == googleAPIKeyType && isBrowserGoogleKey(path, line),
 				})
 			}
 		}
