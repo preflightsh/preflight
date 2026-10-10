@@ -3,7 +3,6 @@ package checks
 import (
 	"bufio"
 	"net/http"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -48,103 +47,22 @@ func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {
 		scanEnvFile(path, keysToScan, foundKeys)
 	}
 
-	// Check required keys
-	for _, key := range requiredKeys {
-		if !foundKeys[key] {
-			issues = append(issues, key+" not found in env files")
-			suggestions = append(suggestions, "Add "+key+" to .env.example")
-		}
+	// The secret key is required. The publishable key only matters for
+	// Stripe.js in the browser (a Checkout-only server app never needs it),
+	// so its absence is noted rather than failed.
+	if !foundKeys["STRIPE_SECRET_KEY"] {
+		issues = append(issues, "STRIPE_SECRET_KEY not found in env files")
+		suggestions = append(suggestions, "Add STRIPE_SECRET_KEY to .env.example")
+	}
+	publishableNote := ""
+	if !foundKeys["STRIPE_PUBLISHABLE_KEY"] {
+		publishableNote = ", no publishable key (only needed for Stripe.js)"
 	}
 
 	// Check webhook secret (warn but don't fail)
 	hasWebhookSecret := foundKeys[webhookKey]
 
-	// Check for Stripe initialization in code
-	initPatterns := []*regexp.Regexp{
-		regexp.MustCompile(`Stripe\.api_key`),    // Ruby
-		regexp.MustCompile(`stripe\.Key`),        // Go
-		regexp.MustCompile(`new Stripe\(`),       // Node
-		regexp.MustCompile(`Stripe\(`),           // Node alt
-		regexp.MustCompile(`stripe\.setApiKey`),  // Node alt
-		regexp.MustCompile(`STRIPE_SECRET_KEY`),  // Generic env usage
-		regexp.MustCompile(`stripe/stripe-php`),  // PHP
-		regexp.MustCompile(`gem ['"]stripe['"]`), // Ruby Gemfile
-		regexp.MustCompile(`"stripe":`),          // package.json
-	}
-
-	initFound := false
-	searchDirs := []string{"config", "config/initializers", "src", "app", "lib"}
-
-	for _, dir := range searchDirs {
-		dirPath := filepath.Join(ctx.RootDir, dir)
-		if _, err := os.Stat(dirPath); os.IsNotExist(err) {
-			continue
-		}
-
-		_ = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
-			if err != nil || initFound {
-				return nil
-			}
-			// Match dependency trees by directory name and prune them
-			// before descending. A substring test on file paths walked
-			// every file inside them, and a file such as vendor_helpers.js
-			// returned SkipDir and dropped the rest of its own directory.
-			if info.IsDir() {
-				name := info.Name()
-				if name == "node_modules" || name == "vendor" || toolchainDirs[name] {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-
-			ext := filepath.Ext(path)
-			if ext != ".rb" && ext != ".js" && ext != ".ts" && ext != ".go" && ext != ".php" {
-				return nil
-			}
-
-			content, err := readSourceFile(path)
-			if err != nil {
-				return nil
-			}
-
-			// Match against code only. initPatterns are broad on purpose
-			// (`Stripe\(` alone counts), so a file whose only mention of
-			// Stripe is "// TODO: call Stripe() here once we sign up" would
-			// otherwise report the integration as present and configured.
-			code := stripCodeComments(string(content))
-
-			for _, pattern := range initPatterns {
-				if pattern.MatchString(code) {
-					initFound = true
-					return filepath.SkipAll
-				}
-			}
-
-			return nil
-		})
-
-		if initFound {
-			break
-		}
-	}
-
-	// Also check Gemfile and package.json. stripComments rather than
-	// stripCodeComments here: a Gemfile comments with "#", so a
-	// commented-out `# gem "stripe"` must not count as a dependency.
-	for _, depFile := range []string{"Gemfile", "Gemfile.lock", "package.json"} {
-		path := filepath.Join(ctx.RootDir, depFile)
-		content, err := readSourceFile(path)
-		if err != nil {
-			continue
-		}
-		deps := stripComments(string(content))
-		for _, pattern := range initPatterns {
-			if pattern.MatchString(deps) {
-				initFound = true
-				break
-			}
-		}
-	}
+	initFound := stripeInitFound(ctx.RootDir)
 
 	if !initFound {
 		issues = append(issues, "Stripe initialization not found")
@@ -173,9 +91,9 @@ func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {
 		if hasWebhookSecret {
 			message += ", webhook secret present"
 		} else {
-			message += " (webhook secret not found - needed for webhooks)"
+			message += " (webhook secret not found, needed for webhooks)"
 		}
-		message += webhookNote
+		message += publishableNote + webhookNote
 		return CheckResult{
 			ID:       c.ID(),
 			Title:    c.Title(),
@@ -211,12 +129,68 @@ func scanEnvFile(path string, keys []string, foundKeys map[string]bool) {
 	for scanner.Scan() {
 		name := envVarName(scanner.Text())
 		for _, key := range keys {
-			if name == key {
+			// NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY, VITE_STRIPE_..., and so
+			// on: frameworks expose browser vars under a prefix.
+			if name == key || strings.HasSuffix(name, "_"+key) {
 				foundKeys[key] = true
 			}
 		}
 	}
 	_ = scanner.Err()
+}
+
+// stripeCodePatterns match Stripe being set up in code, across the
+// languages with an official Stripe SDK.
+var stripeCodePatterns = []*regexp.Regexp{
+	regexp.MustCompile(`Stripe\.api_key`),                 // Ruby
+	regexp.MustCompile(`stripe\.(?:Key|api_key)\b`),       // Go, Python
+	regexp.MustCompile(`new Stripe\(`),                    // Node
+	regexp.MustCompile(`Stripe\(`),                        // Node alt
+	regexp.MustCompile(`stripe\.setApiKey`),               // Node alt
+	regexp.MustCompile(`\\Stripe\\StripeClient|Stripe::`), // PHP, Ruby
+	regexp.MustCompile(`STRIPE_SECRET_KEY`),               // Generic env usage
+}
+
+// stripeDependencyPatterns match Stripe declared in a package manifest.
+var stripeDependencyPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`stripe/stripe-php`),                                 // composer.json
+	regexp.MustCompile(`gem ['"]stripe['"]`),                                // Gemfile
+	regexp.MustCompile(`(?m)^\s+stripe \(`),                                 // Gemfile.lock
+	regexp.MustCompile(`"(?:stripe|@stripe/[\w-]+)"\s*:`),                   // package.json
+	regexp.MustCompile(`github\.com/stripe/stripe-go`),                      // go.mod
+	regexp.MustCompile(`(?im)(?:^|["'\s,\[])stripe\s*(?:[=<>~!\[]|["']|$)`), // requirements.txt, pyproject, Pipfile
+}
+
+// stripeInitFound reports whether Stripe is initialized anywhere in the
+// project's source or declared as a dependency. Manifests are compared with
+// comments stripped (a Gemfile comments with "#", so `# gem "stripe"` must not
+// count), and source with code comments stripped: the patterns are broad on
+// purpose (`Stripe\(` alone counts), so "// TODO: call Stripe() here" must not.
+func stripeInitFound(rootDir string) bool {
+	for _, name := range append([]string{"Gemfile.lock"}, dependencyManifests...) {
+		content, err := readSourceFile(filepath.Join(rootDir, name))
+		if err != nil {
+			continue
+		}
+		deps := stripComments(string(content))
+		for _, p := range stripeDependencyPatterns {
+			if p.MatchString(deps) {
+				return true
+			}
+		}
+	}
+	return walkSourceFiles(rootDir, func(path string, content []byte) bool {
+		code := stripCodeComments(string(content))
+		if ext := filepath.Ext(path); ext == ".rb" || ext == ".py" {
+			code = stripComments(code) // "#" comments too
+		}
+		for _, p := range stripeCodePatterns {
+			if p.MatchString(code) {
+				return true
+			}
+		}
+		return false
+	})
 }
 
 // envVarName returns the upper-cased variable name assigned on a .env line,
