@@ -254,6 +254,19 @@ func TestRunChecksHonorsCancellation(t *testing.T) {
 	}
 }
 
+// A Ctrl-C that lands while the last checks are in flight must still read
+// as cancelled. It used to come back as a failed scan (exit 2) full of
+// "context canceled" errors, and got published.
+func TestRunChecksCancelledMidFlight(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	list := []checks.Check{fakeCheck{id: "a", delay: 60 * time.Millisecond}, fakeCheck{id: "b", delay: 60 * time.Millisecond}}
+	time.AfterFunc(20*time.Millisecond, cancel)
+	_, cancelled := runChecks(ctx, checks.Context{}, list, 4, func(int, string) {})
+	if !cancelled {
+		t.Error("cancelling while every check is in flight should report cancelled")
+	}
+}
+
 // The pre-1.0 camelCase IDs are accepted by --only/--skip and the ignore
 // list, resolve to the same check, and produce a note rather than an error.
 func TestRenamedIDsStillWork(t *testing.T) {

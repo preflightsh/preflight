@@ -154,6 +154,12 @@ func runScan(cmd *cobra.Command, args []string) error {
 	// of leaving the process hung on a long timeout.
 	scanCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
+	// Once the first signal has cancelled the scan, restore default signal
+	// handling so a second Ctrl-C kills a check stuck on non-context work.
+	go func() {
+		<-scanCtx.Done()
+		stopSignals()
+	}()
 
 	exitCode, err := executeScan(scanCtx, scanOptions{
 		ProjectDir: projectDir,
@@ -374,7 +380,8 @@ func prefetchHomepages(ctx context.Context, cctx *checks.Context, httpClient *ht
 // results in list order, so the report reads exactly as it did when checks
 // ran one at a time. progress is called as each check finishes. Checks not
 // yet started when ctx is cancelled are skipped and cancelled reports it;
-// the ones in flight finish on their own (their requests carry ctx).
+// the ones in flight finish on their own (their requests carry ctx), and
+// their results are discarded.
 func runChecks(ctx context.Context, cctx checks.Context, list []checks.Check, workers int, progress func(done int, title string)) (results []checks.CheckResult, cancelled bool) {
 	results = make([]checks.CheckResult, len(list))
 	if workers < 1 {
@@ -415,6 +422,12 @@ func runChecks(ctx context.Context, cctx checks.Context, list []checks.Check, wo
 		}(i, check)
 	}
 	wg.Wait()
+	// A cancel that arrives after the last check started is still a cancel:
+	// the in-flight checks came back with "context canceled" errors, and
+	// reporting (or publishing) them as a failed scan would be wrong.
+	if ctx.Err() != nil {
+		cancelled = true
+	}
 	return results, cancelled
 }
 
