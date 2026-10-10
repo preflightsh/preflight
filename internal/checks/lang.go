@@ -176,7 +176,9 @@ func hasLangAttribute(content, stack string) bool {
 
 	// Next.js App Router - lang is set in RootLayout
 	// Check for lang prop or hardcoded lang
-	nextjsLang := regexp.MustCompile(`(?i)lang[:=]\s*["'][a-z]{2}`)
+	// A whole-word lang, so hreflang="en" on an alternate link or a
+	// data-lang attribute doesn't count as the document language.
+	nextjsLang := regexp.MustCompile(`(?i)(?:^|[^\w-])lang\s*[:=]\s*["'][a-z]{2}`)
 	return nextjsLang.MatchString(content)
 }
 

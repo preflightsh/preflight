@@ -109,7 +109,7 @@ func (c CanonicalURLCheck) Run(ctx Context) (CheckResult, error) {
 
 // canonicalPatterns covers the full set of template / framework idioms
 // we recognize as declaring a canonical URL. Compiled once so
-// hasCanonicalURL doesn't rebuild 14 regexes per invocation.
+// hasCanonicalURL doesn't rebuild a dozen regexes per invocation.
 var canonicalPatterns = []*regexp.Regexp{
 	// Standard HTML canonical link (rel before href)
 	regexp.MustCompile(`(?i)<link[^>]+rel=["']canonical["'][^>]*>`),
@@ -117,8 +117,6 @@ var canonicalPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)<link[^>]+href=["'][^"']+["'][^>]+rel=["']canonical["'][^>]*>`),
 	// Next.js App Router metadata API
 	regexp.MustCompile(`(?i)alternates\s*:\s*\{[^}]*canonical`),
-	// Next.js metadataBase (implies canonical handling)
-	regexp.MustCompile(`(?i)metadataBase\s*[:=]`),
 	// React Helmet / react-helmet-async
 	regexp.MustCompile(`(?i)<Helmet[^>]*>.*canonical.*</Helmet>`),
 	// Vue Meta
@@ -137,8 +135,11 @@ var canonicalPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\{\{.*canonical.*\}\}|@.*canonical`),
 	// Hugo canonical
 	regexp.MustCompile(`(?i)\{\{.*\.Permalink.*\}\}.*rel=["']canonical["']|\.Site\.BaseURL`),
-	// Astro canonical
-	regexp.MustCompile(`(?i)Astro\.url|canonical\s*=`),
+	// Astro canonical. Astro.url alone is everywhere (nav highlighting);
+	// it only counts in the same statement as a canonical. Next.js
+	// metadataBase is not here either: it resolves relative URLs and emits
+	// no canonical unless alternates.canonical is set.
+	regexp.MustCompile(`(?i)canonical[^\n]*Astro\.url|Astro\.url[^\n]*canonical|canonical\s*=`),
 }
 
 func hasCanonicalURL(content, stack string) bool {
