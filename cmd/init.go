@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/preflightsh/preflight/internal/catalog"
 	"github.com/preflightsh/preflight/internal/config"
+	"github.com/preflightsh/preflight/internal/fsutil"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -24,11 +24,15 @@ var initCmd = &cobra.Command{
 	Short: "Initialize preflight configuration for your project",
 	Long: `Initialize preflight by detecting your stack and services,
 then generating a preflight.yml configuration file.`,
+	Args: cobra.NoArgs,
 	RunE: runInit,
 }
 
+var initForce bool
+
 func init() {
 	rootCmd.AddCommand(initCmd)
+	initCmd.Flags().BoolVar(&initForce, "force", false, "Overwrite an existing preflight.yml")
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
@@ -43,6 +47,17 @@ func runInit(cmd *cobra.Command, args []string) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get current directory: %w", err)
+	}
+
+	// Re-running init used to overwrite preflight.yml without asking,
+	// wiping the ignore list, the secrets allowlist and any comments.
+	if _, err := os.Lstat(filepath.Join(cwd, "preflight.yml")); err == nil && !initForce {
+		fmt.Println("preflight.yml already exists. Init would replace it, dropping your ignore list,")
+		fmt.Println("secrets allowlist and comments.")
+		if !promptYesNo(reader, "Overwrite preflight.yml?", false) {
+			fmt.Println("Kept the existing preflight.yml. Edit it directly, or use 'preflight ignore'.")
+			return nil
+		}
 	}
 
 	// Detect stack
@@ -147,7 +162,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 				if err := os.MkdirAll(filepath.Dir(keyFilePath), 0755); err != nil {
 					fmt.Printf("  ⚠️  Could not create directory: %v\n", err)
 					fmt.Printf("     Create %s/%s.txt containing: %s\n", webRoot, indexNowKey, indexNowKey)
-				} else if err := os.WriteFile(keyFilePath, []byte(indexNowKey+"\n"), 0644); err == nil {
+				} else if err := fsutil.WriteFile(keyFilePath, []byte(indexNowKey+"\n"), 0644); err == nil {
 					fmt.Printf("  ✅ Created %s/%s.txt\n", webRoot, indexNowKey)
 				} else {
 					fmt.Printf("  ⚠️  Could not create key file: %v\n", err)
@@ -202,34 +217,23 @@ func runInit(cmd *cobra.Command, args []string) error {
 		// and "!preflight.yml" negations).
 		if !gitignoreCoversPreflightYml(content) {
 			if promptYesNo(reader, "Add preflight.yml to .gitignore?", true) {
-				// Append to .gitignore
-				f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_WRONLY, 0644)
-				if err == nil {
-					var errs []error
-					if len(content) > 0 && content[len(content)-1] != '\n' {
-						if _, werr := f.WriteString("\n"); werr != nil {
-							errs = append(errs, werr)
-						}
-					}
-					if _, werr := f.WriteString("preflight.yml\n"); werr != nil {
-						errs = append(errs, werr)
-					}
-					if cerr := f.Close(); cerr != nil {
-						errs = append(errs, cerr)
-					}
-					if joined := errors.Join(errs...); joined != nil {
-						fmt.Fprintln(os.Stderr, "⚠️  Could not update .gitignore:", joined)
-					} else {
-						gitignoreUpdated = true
-						fmt.Println("✅ Added preflight.yml to .gitignore")
-					}
+				updated := append([]byte{}, content...)
+				if len(updated) > 0 && updated[len(updated)-1] != '\n' {
+					updated = append(updated, '\n')
+				}
+				updated = append(updated, "preflight.yml\n"...)
+				if err := fsutil.WriteFile(gitignorePath, updated, 0644); err != nil {
+					fmt.Fprintln(os.Stderr, "⚠️  Could not update .gitignore:", err)
+				} else {
+					gitignoreUpdated = true
+					fmt.Println("✅ Added preflight.yml to .gitignore")
 				}
 			}
 		}
 	} else if os.IsNotExist(err) {
 		// No .gitignore exists, offer to create one
 		if promptYesNo(reader, "Create .gitignore with preflight.yml?", true) {
-			if err := os.WriteFile(gitignorePath, []byte("preflight.yml\n"), 0644); err != nil {
+			if err := fsutil.WriteFile(gitignorePath, []byte("preflight.yml\n"), 0644); err != nil {
 				fmt.Fprintf(os.Stderr, "⚠️  Could not create .gitignore: %v\n", err)
 			} else {
 				gitignoreUpdated = true
@@ -550,7 +554,7 @@ func writeConfig(path string, cfg *config.PreflightConfig) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	return fsutil.WriteFile(path, data, 0644)
 }
 
 func formatServiceName(svc string) string {

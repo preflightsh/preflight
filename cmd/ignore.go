@@ -10,6 +10,7 @@ import (
 
 	"github.com/preflightsh/preflight/internal/catalog"
 	"github.com/preflightsh/preflight/internal/checks"
+	"github.com/preflightsh/preflight/internal/fsutil"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -243,7 +244,7 @@ func (d *configDocument) write() error {
 	if err := enc.Close(); err != nil {
 		return fmt.Errorf("failed to serialize config: %w", err)
 	}
-	if err := os.WriteFile(d.path, buf.Bytes(), 0644); err != nil {
+	if err := fsutil.WriteFile(d.path, buf.Bytes(), 0644); err != nil {
 		return fmt.Errorf("failed to write config: %w", err)
 	}
 	return nil
