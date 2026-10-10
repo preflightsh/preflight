@@ -42,6 +42,12 @@ curl -sSL https://preflight.sh/install.sh | sh
 
 Download the latest release from [GitHub Releases](https://github.com/preflightsh/preflight/releases).
 
+From v0.23.0 each archive carries signed build provenance. To check that a download was built by this repo's release workflow:
+
+```bash
+gh attestation verify preflight_<version>_<os>_<arch>.tar.gz --repo preflightsh/preflight
+```
+
 ## Quick Start
 
 ```bash
