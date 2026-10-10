@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/preflightsh/preflight/internal/netutil"
@@ -41,6 +42,21 @@ func (c SSLCheck) Run(ctx Context) (CheckResult, error) {
 			Severity: SeverityWarn,
 			Passed:   false,
 			Message:  "Invalid production URL",
+		}, nil
+	}
+
+	if parsedURL.Scheme == "" || parsedURL.Host == "" {
+		// "example.com" parses as a bare path. Saying the site doesn't use
+		// HTTPS would be wrong; the config is missing the scheme.
+		return CheckResult{
+			ID:       c.ID(),
+			Title:    c.Title(),
+			Severity: SeverityWarn,
+			Passed:   false,
+			Message:  "Production URL has no scheme: " + ctx.Config.URLs.Production,
+			Suggestions: []string{
+				"Write the production URL in preflight.yml with its scheme, e.g. https://" + strings.TrimPrefix(ctx.Config.URLs.Production, "//"),
+			},
 		}, nil
 	}
 
