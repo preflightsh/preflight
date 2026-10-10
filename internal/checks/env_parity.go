@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -75,6 +76,11 @@ func (c EnvParityCheck) Run(ctx Context) (CheckResult, error) {
 		}
 	}
 
+	// Map order is random; sort so the message is stable run to run (it is
+	// compared across runs on the dashboard and in old-vs-new diffs).
+	sort.Strings(missingInExample)
+	sort.Strings(missingInEnv)
+
 	if len(missingInExample) == 0 && len(missingInEnv) == 0 {
 		return CheckResult{
 			ID:       c.ID(),
@@ -125,6 +131,9 @@ func parseEnvFile(path string) (map[string]bool, error) {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
+
+		// `export KEY=value` is valid dotenv (and what shells source).
+		line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
 
 		// Extract key (everything before =)
 		if idx := strings.Index(line, "="); idx > 0 {
