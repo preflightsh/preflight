@@ -172,6 +172,18 @@ func (c OGTwitterCheck) Run(ctx Context) (CheckResult, error) {
 			// checks below run against the rendered values.
 			missing = nil
 			found = append(found, staticMissing...)
+			// A CMS-rendered og:image never appears in the template, so take
+			// the rendered production values for the dimension checks.
+			rendered := parseRenderedHTML(ctx.PageHTMLProduction)
+			if ogImageURL == "" {
+				ogImageURL = rendered.metaProperty["og:image"]
+			}
+			if twitterImageURL == "" {
+				twitterImageURL = rendered.metaName["twitter:image"]
+				if twitterImageURL == "" {
+					twitterImageURL = rendered.metaProperty["twitter:image"]
+				}
+			}
 		}
 	}
 
