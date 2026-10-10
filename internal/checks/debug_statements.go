@@ -367,7 +367,7 @@ func scanForDebugStatements(rootDir string, ignore []string) []string {
 		}
 
 		// Read file content
-		content, err := os.ReadFile(path)
+		content, err := readSourceFile(path)
 		if err != nil {
 			return nil
 		}

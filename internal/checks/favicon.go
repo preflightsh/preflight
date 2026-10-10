@@ -179,7 +179,7 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 		cfg := ctx.Config.Checks.SEOMeta
 		if cfg != nil && cfg.MainLayout != "" {
 			layoutPath := filepath.Join(ctx.RootDir, cfg.MainLayout)
-			if content, err := os.ReadFile(layoutPath); err == nil {
+			if content, err := readSourceFile(layoutPath); err == nil {
 				if appleTouchIconRe.Match(content) {
 					hasAppleIcon = true
 					found = append(found, "apple-touch-icon (in HTML)")
@@ -204,7 +204,7 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 			}
 			for _, tplPath := range templatePaths {
 				fullPath := filepath.Join(ctx.RootDir, tplPath)
-				if content, err := os.ReadFile(fullPath); err == nil {
+				if content, err := readSourceFile(fullPath); err == nil {
 					if appleTouchIconRe.Match(content) {
 						hasAppleIcon = true
 						found = append(found, "apple-touch-icon (in HTML)")
@@ -234,7 +234,7 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 
 			for _, layoutPath := range allLayoutPaths {
 				fullPath := filepath.Join(ctx.RootDir, layoutPath)
-				if content, err := os.ReadFile(fullPath); err == nil {
+				if content, err := readSourceFile(fullPath); err == nil {
 					// Check for Next.js metadata icons with apple property
 					if nextAppleIconRe.Match(content) {
 						hasAppleIcon = true

@@ -156,7 +156,7 @@ func (c SentryCheck) Run(ctx Context) (CheckResult, error) {
 				return nil
 			}
 
-			content, err := os.ReadFile(path)
+			content, err := readSourceFile(path)
 			if err != nil {
 				return nil
 			}

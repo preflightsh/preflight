@@ -62,7 +62,7 @@ func (c OGTwitterCheck) Run(ctx Context) (CheckResult, error) {
 	}
 
 	layoutPath := filepath.Join(ctx.RootDir, layoutFile)
-	content, err := os.ReadFile(layoutPath)
+	content, err := readSourceFile(layoutPath)
 	if err != nil {
 		return CheckResult{
 			ID:       c.ID(),
@@ -105,7 +105,7 @@ func (c OGTwitterCheck) Run(ctx Context) (CheckResult, error) {
 				!strings.HasSuffix(nameLower, ".jsx") && !strings.HasSuffix(nameLower, ".js") {
 				return nil
 			}
-			fileContent, err := os.ReadFile(path)
+			fileContent, err := readSourceFile(path)
 			if err != nil {
 				return nil
 			}
@@ -635,7 +635,7 @@ func fetchImageDimensions(ctx Context, url string) (width, height int, err error
 
 // getLocalImageDimensions reads a local image file and returns its dimensions
 func getLocalImageDimensions(path string) (width, height int, err error) {
-	f, err := os.Open(path)
+	f, err := openRegular(path)
 	if err != nil {
 		return 0, 0, fmt.Errorf("open %s: %w", path, err)
 	}

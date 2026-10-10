@@ -52,7 +52,7 @@ func (c PlausibleCheck) Run(ctx Context) (CheckResult, error) {
 
 	for _, file := range filesToCheck {
 		path := filepath.Join(ctx.RootDir, file)
-		content, err := os.ReadFile(path)
+		content, err := readSourceFile(path)
 		if err != nil {
 			continue
 		}
@@ -101,7 +101,7 @@ func (c PlausibleCheck) Run(ctx Context) (CheckResult, error) {
 					return nil
 				}
 
-				content, err := os.ReadFile(path)
+				content, err := readSourceFile(path)
 				if err != nil {
 					return nil
 				}

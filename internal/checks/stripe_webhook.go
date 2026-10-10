@@ -102,7 +102,7 @@ func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {
 				return nil
 			}
 
-			content, err := os.ReadFile(path)
+			content, err := readSourceFile(path)
 			if err != nil {
 				return nil
 			}
@@ -133,7 +133,7 @@ func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {
 	// commented-out `# gem "stripe"` must not count as a dependency.
 	for _, depFile := range []string{"Gemfile", "Gemfile.lock", "package.json"} {
 		path := filepath.Join(ctx.RootDir, depFile)
-		content, err := os.ReadFile(path)
+		content, err := readSourceFile(path)
 		if err != nil {
 			continue
 		}
@@ -196,7 +196,7 @@ func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {
 }
 
 func scanEnvFile(path string, keys []string, foundKeys map[string]bool) {
-	file, err := os.Open(path)
+	file, err := openRegular(path)
 	if err != nil {
 		return
 	}

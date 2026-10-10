@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"os"
 	"path/filepath"
 	"regexp"
 )
@@ -47,7 +46,7 @@ func (c StructuredDataCheck) Run(ctx Context) (CheckResult, error) {
 	// Check main layout if configured
 	if cfg != nil && cfg.MainLayout != "" {
 		layoutPath := filepath.Join(ctx.RootDir, cfg.MainLayout)
-		content, err := os.ReadFile(layoutPath)
+		content, err := readSourceFile(layoutPath)
 		if err == nil {
 			if hasStructuredData(string(content), ctx.Config.Stack) {
 				if ctx.Verbose {
@@ -246,7 +245,7 @@ func checkStructuredDataPartialsWithDetails(rootDir, stack string) string {
 
 	for _, partialPath := range partialPaths {
 		fullPath := filepath.Join(rootDir, partialPath)
-		content, err := os.ReadFile(fullPath)
+		content, err := readSourceFile(fullPath)
 		if err != nil {
 			continue
 		}

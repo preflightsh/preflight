@@ -341,7 +341,7 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 				break
 			}
 			filePath := filepath.Join(ctx.RootDir, file)
-			if content, err := os.ReadFile(filePath); err == nil {
+			if content, err := readSourceFile(filePath); err == nil {
 				contentLower := strings.ToLower(string(content))
 				if !hasPrivacy && (strings.Contains(contentLower, "/privacy") ||
 					strings.Contains(contentLower, "privacy-policy") ||
@@ -455,7 +455,7 @@ func layoutChrome(rootDir, mainLayout string) []string {
 	for depth := 0; depth < maxDepth && len(queue) > 0; depth++ {
 		var next []string
 		for _, file := range queue {
-			content, err := os.ReadFile(file)
+			content, err := readSourceFile(file)
 			if err != nil {
 				continue
 			}

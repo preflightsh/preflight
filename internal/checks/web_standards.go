@@ -236,7 +236,7 @@ func detectIndexNowInSource(ctx Context, key string) (string, bool) {
 			if !sourceExts[strings.ToLower(filepath.Ext(info.Name()))] {
 				return nil
 			}
-			content, err := os.ReadFile(path)
+			content, err := readSourceFile(path)
 			if err != nil {
 				return nil
 			}
@@ -283,7 +283,7 @@ func (c RobotsTxtCheck) Run(ctx Context) (CheckResult, error) {
 			path = root + "/robots.txt"
 		}
 		fullPath := filepath.Join(ctx.RootDir, path)
-		if content, err := os.ReadFile(fullPath); err == nil {
+		if content, err := readSourceFile(fullPath); err == nil {
 			// Check if it has meaningful content
 			contentStr := strings.TrimSpace(string(content))
 			if len(contentStr) > 0 {
@@ -301,7 +301,7 @@ func (c RobotsTxtCheck) Run(ctx Context) (CheckResult, error) {
 	// Check monorepo public directories for static robots.txt
 	monorepoStaticPaths := findMonorepoPublicFiles(ctx.RootDir, "robots.txt")
 	for _, path := range monorepoStaticPaths {
-		if content, err := os.ReadFile(path); err == nil {
+		if content, err := readSourceFile(path); err == nil {
 			contentStr := strings.TrimSpace(string(content))
 			if len(contentStr) > 0 {
 				relPath := relPath(ctx.RootDir, path)
@@ -472,7 +472,7 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 			path = root + "/sitemap.xml"
 		}
 		fullPath := filepath.Join(ctx.RootDir, path)
-		if content, err := os.ReadFile(fullPath); err == nil {
+		if content, err := readSourceFile(fullPath); err == nil {
 			// Check if it has meaningful content
 			contentStr := strings.TrimSpace(string(content))
 			if len(contentStr) > 0 {
@@ -490,7 +490,7 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 	// Check monorepo public directories for static sitemap.xml
 	monorepoStaticPaths := findMonorepoPublicFiles(ctx.RootDir, "sitemap.xml")
 	for _, path := range monorepoStaticPaths {
-		if content, err := os.ReadFile(path); err == nil {
+		if content, err := readSourceFile(path); err == nil {
 			contentStr := strings.TrimSpace(string(content))
 			if len(contentStr) > 0 {
 				relPath := relPath(ctx.RootDir, path)
@@ -737,7 +737,7 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 
 	// Craft CMS: Check for SEO plugins in composer.json
 	craftComposerPath := filepath.Join(ctx.RootDir, "composer.json")
-	if content, err := os.ReadFile(craftComposerPath); err == nil {
+	if content, err := readSourceFile(craftComposerPath); err == nil {
 		// Check for Craft CMS SEO plugins that generate sitemaps
 		craftSeoPlugins := []string{
 			"nystudio107/craft-seomatic",
@@ -958,7 +958,7 @@ func (c LLMsTxtCheck) Run(ctx Context) (CheckResult, error) {
 		}
 		for _, path := range paths {
 			fullPath := filepath.Join(ctx.RootDir, path)
-			if content, err := os.ReadFile(fullPath); err == nil {
+			if content, err := readSourceFile(fullPath); err == nil {
 				// Check if it has meaningful content
 				contentStr := strings.TrimSpace(string(content))
 				if len(contentStr) > 0 {
@@ -977,7 +977,7 @@ func (c LLMsTxtCheck) Run(ctx Context) (CheckResult, error) {
 	// Check monorepo public directories
 	monorepoPublicPaths := findMonorepoPublicFiles(ctx.RootDir, "llms.txt")
 	for _, path := range monorepoPublicPaths {
-		if content, err := os.ReadFile(path); err == nil {
+		if content, err := readSourceFile(path); err == nil {
 			contentStr := strings.TrimSpace(string(content))
 			if len(contentStr) > 0 {
 				relPath := relPath(ctx.RootDir, path)
@@ -1195,7 +1195,7 @@ func (c AdsTxtCheck) Run(ctx Context) (CheckResult, error) {
 			path = root + "/ads.txt"
 		}
 		fullPath := filepath.Join(ctx.RootDir, path)
-		if content, err := os.ReadFile(fullPath); err == nil {
+		if content, err := readSourceFile(fullPath); err == nil {
 			// Check if it has meaningful content
 			contentStr := strings.TrimSpace(string(content))
 			if len(contentStr) > 0 {
@@ -1272,7 +1272,7 @@ func (c IndexNowCheck) Run(ctx Context) (CheckResult, error) {
 			}
 			for _, path := range paths {
 				fullPath := filepath.Join(ctx.RootDir, path)
-				if content, err := os.ReadFile(fullPath); err == nil {
+				if content, err := readSourceFile(fullPath); err == nil {
 					contentStr := strings.TrimSpace(string(content))
 					if contentStr == key {
 						return CheckResult{
@@ -1299,7 +1299,7 @@ func (c IndexNowCheck) Run(ctx Context) (CheckResult, error) {
 		for _, entry := range entries {
 			if !entry.IsDir() && hexPattern.MatchString(entry.Name()) {
 				foundKey := strings.TrimSuffix(entry.Name(), ".txt")
-				content, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+				content, err := readSourceFile(filepath.Join(dir, entry.Name()))
 				if err == nil && strings.TrimSpace(string(content)) == foundKey {
 					path := entry.Name()
 					if root != "" {
@@ -1383,7 +1383,7 @@ func (c IndexNowCheck) Run(ctx Context) (CheckResult, error) {
 				continue
 			}
 			filePath := filepath.Join(dirPath, entry.Name())
-			content, err := os.ReadFile(filePath)
+			content, err := readSourceFile(filePath)
 			if err != nil {
 				continue
 			}
@@ -1409,7 +1409,7 @@ func (c IndexNowCheck) Run(ctx Context) (CheckResult, error) {
 	}
 	for _, path := range routeFiles {
 		fullPath := filepath.Join(ctx.RootDir, path)
-		content, err := os.ReadFile(fullPath)
+		content, err := readSourceFile(fullPath)
 		if err != nil {
 			continue
 		}
@@ -1429,7 +1429,7 @@ func (c IndexNowCheck) Run(ctx Context) (CheckResult, error) {
 	envFiles := []string{".env", ".env.example", ".env.development", ".env.production", ".env.local"}
 	for _, path := range envFiles {
 		fullPath := filepath.Join(ctx.RootDir, path)
-		content, err := os.ReadFile(fullPath)
+		content, err := readSourceFile(fullPath)
 		if err != nil {
 			continue
 		}
@@ -1576,7 +1576,7 @@ func (c HumansTxtCheck) Run(ctx Context) (CheckResult, error) {
 			path = root + "/humans.txt"
 		}
 		fullPath := filepath.Join(ctx.RootDir, path)
-		if content, err := os.ReadFile(fullPath); err == nil {
+		if content, err := readSourceFile(fullPath); err == nil {
 			contentStr := strings.TrimSpace(string(content))
 			if len(contentStr) > 0 {
 				return CheckResult{
@@ -1684,7 +1684,7 @@ func findMonorepoPublicFiles(rootDir, filename string) []string {
 // and require-dev), Gemfile (gem "name" lines) and requirements.txt.
 // Unknown manifests yield nothing.
 func dependencyNames(path string) []string {
-	content, err := os.ReadFile(path)
+	content, err := readSourceFile(path)
 	if err != nil {
 		return nil
 	}
@@ -1767,7 +1767,7 @@ func hasDependencyMentioning(rootDir, file string, substrs ...string) bool {
 // mentions substr outside of comments. Framework config files are code,
 // so a commented-out module line or a TODO must not count.
 func configMentions(rootDir, file, substr string) bool {
-	content, err := os.ReadFile(filepath.Join(rootDir, file))
+	content, err := readSourceFile(filepath.Join(rootDir, file))
 	if err != nil {
 		return false
 	}

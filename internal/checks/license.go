@@ -34,7 +34,7 @@ func (c LicenseCheck) Run(ctx Context) (CheckResult, error) {
 	for _, dir := range dirsToCheck {
 		for _, name := range licenseNames {
 			fullPath := filepath.Join(dir, name)
-			if content, err := os.ReadFile(fullPath); err == nil {
+			if content, err := readSourceFile(fullPath); err == nil {
 				contentStr := strings.TrimSpace(string(content))
 				if len(contentStr) > 0 {
 					// Try to detect license type

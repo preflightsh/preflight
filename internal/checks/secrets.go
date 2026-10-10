@@ -441,7 +441,7 @@ func matchesSecretAllowlist(relPath, fingerprint string, entries []config.Secret
 func scanFileForSecrets(path string, patterns []secretPattern) ([]secretFinding, error) {
 	var findings []secretFinding
 
-	file, err := os.Open(path)
+	file, err := openRegular(path)
 	if err != nil {
 		return nil, err
 	}

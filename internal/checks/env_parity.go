@@ -3,7 +3,6 @@ package checks
 import (
 	"bufio"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -110,7 +109,7 @@ func (c EnvParityCheck) Run(ctx Context) (CheckResult, error) {
 }
 
 func parseEnvFile(path string) (map[string]bool, error) {
-	file, err := os.Open(path)
+	file, err := openRegular(path)
 	if err != nil {
 		return nil, err
 	}

@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"os"
 	"path/filepath"
 	"regexp"
 )
@@ -37,7 +36,7 @@ func (c LangAttributeCheck) Run(ctx Context) (CheckResult, error) {
 	}
 
 	layoutPath := filepath.Join(ctx.RootDir, layoutFile)
-	content, err := os.ReadFile(layoutPath)
+	content, err := readSourceFile(layoutPath)
 	if err != nil {
 		return CheckResult{
 			ID:       c.ID(),
@@ -63,7 +62,7 @@ func (c LangAttributeCheck) Run(ctx Context) (CheckResult, error) {
 
 	// Check included template files
 	for _, includePath := range resolveTemplateIncludes(contentStr, ctx.RootDir, ctx.Config.Stack) {
-		includeContent, err := os.ReadFile(includePath)
+		includeContent, err := readSourceFile(includePath)
 		if err != nil {
 			continue
 		}
@@ -232,7 +231,7 @@ func checkLangPartials(rootDir, stack string) bool {
 
 	for _, layoutPath := range layoutPaths {
 		fullPath := filepath.Join(rootDir, layoutPath)
-		content, err := os.ReadFile(fullPath)
+		content, err := readSourceFile(fullPath)
 		if err != nil {
 			continue
 		}

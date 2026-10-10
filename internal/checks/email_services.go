@@ -400,7 +400,7 @@ func hasEnvVar(rootDir, prefix string) bool {
 // prefix (uppercased). Lives in its own function so defer can close the
 // file even if scanning panics on a pathological line.
 func envFileHasPrefix(path, prefix string) bool {
-	file, err := os.Open(path)
+	file, err := openRegular(path)
 	if err != nil {
 		return false
 	}
@@ -456,7 +456,7 @@ func hasEnvVarReference(rootDir string, prefixes ...string) (string, bool) {
 		if err != nil || fi.IsDir() || fi.Size() > maxEnvRefScanBytes {
 			return false
 		}
-		content, err := os.ReadFile(path)
+		content, err := readSourceFile(path)
 		if err != nil {
 			return false
 		}

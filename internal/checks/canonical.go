@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"os"
 	"path/filepath"
 	"regexp"
 )
@@ -37,7 +36,7 @@ func (c CanonicalURLCheck) Run(ctx Context) (CheckResult, error) {
 	}
 
 	layoutPath := filepath.Join(ctx.RootDir, layoutFile)
-	content, err := os.ReadFile(layoutPath)
+	content, err := readSourceFile(layoutPath)
 	if err != nil {
 		return CheckResult{
 			ID:       c.ID(),
@@ -207,7 +206,7 @@ func checkSEOPartials(rootDir, stack string) bool {
 
 	for _, partialPath := range partialPaths {
 		fullPath := filepath.Join(rootDir, partialPath)
-		content, err := os.ReadFile(fullPath)
+		content, err := readSourceFile(fullPath)
 		if err != nil {
 			continue
 		}

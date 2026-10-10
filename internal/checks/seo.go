@@ -38,7 +38,7 @@ func (c SEOMetadataCheck) Run(ctx Context) (CheckResult, error) {
 	}
 
 	layoutPath := filepath.Join(ctx.RootDir, layoutFile)
-	content, err := os.ReadFile(layoutPath)
+	content, err := readSourceFile(layoutPath)
 	if err != nil {
 		return CheckResult{
 			ID:       c.ID(),
@@ -86,7 +86,7 @@ func (c SEOMetadataCheck) Run(ctx Context) (CheckResult, error) {
 				!strings.HasSuffix(nameLower, ".jsx") && !strings.HasSuffix(nameLower, ".js") {
 				return nil
 			}
-			fileContent, err := os.ReadFile(path)
+			fileContent, err := readSourceFile(path)
 			if err != nil {
 				return nil
 			}

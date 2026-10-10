@@ -274,7 +274,7 @@ var dependencyManifests = []string{
 // content (manifests are JSON/text, not commented source).
 func scanDependencyManifests(rootDir string, patterns []*regexp.Regexp) (string, bool) {
 	for _, name := range dependencyManifests {
-		content, err := os.ReadFile(filepath.Join(rootDir, name))
+		content, err := readSourceFile(filepath.Join(rootDir, name))
 		if err != nil {
 			continue
 		}
@@ -298,7 +298,7 @@ func searchForPatterns(rootDir, stack string, patterns []*regexp.Regexp) bool {
 
 	for _, file := range layoutFiles {
 		path := filepath.Join(rootDir, file)
-		content, err := os.ReadFile(path)
+		content, err := readSourceFile(path)
 		if err != nil {
 			continue
 		}
@@ -338,7 +338,7 @@ func searchForPatternsWithDetails(rootDir, stack string, patterns []*regexp.Rege
 
 	for _, file := range layoutFiles {
 		path := filepath.Join(rootDir, file)
-		content, err := os.ReadFile(path)
+		content, err := readSourceFile(path)
 		if err != nil {
 			continue
 		}
@@ -436,7 +436,7 @@ func walkSourceFiles(rootDir string, visit func(path string, content []byte) boo
 			return nil
 		}
 
-		content, err := os.ReadFile(path)
+		content, err := readSourceFile(path)
 		if err != nil {
 			return nil
 		}
