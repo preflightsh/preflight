@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/preflightsh/preflight/internal/netutil"
@@ -185,9 +186,49 @@ func servesHTML404(ctx Context, baseURL string) bool {
 	}
 	lower := strings.ToLower(strings.TrimSpace(string(body)))
 	ct := strings.ToLower(resp.Header.Get("Content-Type"))
-	return strings.Contains(ct, "text/html") ||
+	isHTML := strings.Contains(ct, "text/html") ||
 		strings.Contains(lower, "<html") ||
 		strings.Contains(lower, "<!doctype html")
+	return isHTML && !isStockErrorPage(lower)
+}
+
+// stockErrorPageMarkers identify the default 404 pages web servers and
+// platforms render on their own. They are HTML, but they are nobody's
+// custom error page.
+var stockErrorPageMarkers = []string{
+	"<center>nginx",                               // nginx, openresty
+	"<address>apache",                             // Apache httpd
+	"was not found on this server",                // Apache, LiteSpeed
+	"<h2>404 - file or directory not found.</h2>", // IIS
+	"cannot get /",                                // Express default
+	"404: not_found",                              // Vercel
+	"code: <code>not_found</code>",                // Vercel
+	"looks like you've followed a broken link",    // Netlify
+}
+
+// reHTMLTag matches one HTML tag, for reducing a page to its text.
+var reHTMLTag = regexp.MustCompile(`<[^>]*>`)
+
+// bareNotFoundTexts are the entire visible text of a default 404 page once
+// tags are dropped: a title and a heading saying the same thing.
+var bareNotFoundTexts = map[string]bool{
+	"404": true, "not found": true, "404 not found": true, "404 not found 404 not found": true,
+	"page not found": true, "404 page not found": true, "file not found": true,
+}
+
+// isStockErrorPage reports whether a lowercased 404 body is a server or
+// platform default rather than the site's own page.
+func isStockErrorPage(lower string) bool {
+	text := strings.Join(strings.Fields(reHTMLTag.ReplaceAllString(lower, " ")), " ")
+	if bareNotFoundTexts[text] {
+		return true
+	}
+	for _, m := range stockErrorPageMarkers {
+		if strings.Contains(lower, m) {
+			return true
+		}
+	}
+	return false
 }
 
 // getErrorPagePaths returns the expected paths for 404 and 500 error pages based on stack
