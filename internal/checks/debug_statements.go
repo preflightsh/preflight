@@ -58,9 +58,19 @@ func (c DebugStatementsCheck) Run(ctx Context) (CheckResult, error) {
 
 type debugPattern struct {
 	pattern     *regexp.Regexp
+	exclude     *regexp.Regexp // a match on the same line cancels the finding
 	description string
 	extensions  []string // file extensions to check (empty = all supported)
 }
+
+// reDebuggerStatement matches `debugger` used as a statement: alone on its
+// line or between statement separators (`if (x) { debugger }`), with an
+// optional semicolon, or as a Ruby modifier (`debugger if ENV["X"]`).
+var reDebuggerStatement = regexp.MustCompile(`(?:^|[;{}])\s*debugger\s*(?:;|\}|$|\s+(?:if|unless)\b)`)
+
+// reInlineCodeSpan matches a <code> or <pre> element opened and closed on
+// the same line: documentation that names a debug call.
+var reInlineCodeSpan = regexp.MustCompile(`(?i)<(code|pre)\b[^>]*>.*?</(?:code|pre)>`)
 
 func scanForDebugStatements(rootDir string, ignore []string) []string {
 	var findings []string
@@ -74,7 +84,9 @@ func scanForDebugStatements(rootDir string, ignore []string) []string {
 			extensions:  []string{".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".vue", ".svelte", ".html", ".htm", ".twig", ".blade.php", ".erb", ".ejs", ".hbs", ".njk", ".astro"},
 		},
 		{
-			pattern:     regexp.MustCompile(`\bdebugger\b`),
+			// The statement, not the word: "og-debugger" in a string or
+			// <code>debugger</code> in docs is not a breakpoint.
+			pattern:     reDebuggerStatement,
 			description: "debugger",
 			extensions:  []string{".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".vue", ".svelte", ".html", ".htm", ".twig", ".blade.php", ".erb", ".ejs", ".hbs", ".njk", ".astro"},
 		},
@@ -96,7 +108,7 @@ func scanForDebugStatements(rootDir string, ignore []string) []string {
 			extensions:  []string{".rb", ".erb", ".rake"},
 		},
 		{
-			pattern:     regexp.MustCompile(`\bdebugger\b`),
+			pattern:     reDebuggerStatement,
 			description: "debugger",
 			extensions:  []string{".rb", ".erb", ".rake"},
 		},
@@ -108,12 +120,14 @@ func scanForDebugStatements(rootDir string, ignore []string) []string {
 
 		// PHP
 		{
-			pattern:     regexp.MustCompile(`\bdd\s*\(`),
+			// The global helpers only: Yaml::dump($config), $dumper->dump()
+			// and $collection->dd() are ordinary method calls.
+			pattern:     regexp.MustCompile(`(?:^|[^\w:>.$])dd\s*\(`),
 			description: "dd()",
 			extensions:  []string{".php", ".blade.php"},
 		},
 		{
-			pattern:     regexp.MustCompile(`\bdump\s*\(`),
+			pattern:     regexp.MustCompile(`(?:^|[^\w:>.$])dump\s*\(`),
 			description: "dump()",
 			extensions:  []string{".php", ".blade.php"},
 		},
@@ -123,7 +137,9 @@ func scanForDebugStatements(rootDir string, ignore []string) []string {
 			extensions:  []string{".php", ".blade.php"},
 		},
 		{
+			// print_r($x, true) returns the string instead of printing it.
 			pattern:     regexp.MustCompile(`\bprint_r\s*\(`),
+			exclude:     regexp.MustCompile(`\bprint_r\s*\([^;]*,\s*true\s*\)`),
 			description: "print_r()",
 			extensions:  []string{".php", ".blade.php"},
 		},
@@ -261,11 +277,21 @@ func scanForDebugStatements(rootDir string, ignore []string) []string {
 		}
 	}
 
-	skipFiles := []string{
+	// Bundles, tests and configs, matched anywhere in the file name.
+	skipInfixes := []string{
 		".min.js",
 		".bundle.js",
 		".config.js",
 		".config.ts",
+		".test.",
+		".spec.",
+		"_test.go",
+		"_test.rb",
+	}
+	// Build tooling and vendored libraries, matched as the start of the
+	// file name only: a bare substring hid members.ts ("ember"),
+	// moments.ts ("moment") and piechart.tsx ("chart.") from the scan.
+	skipPrefixes := []string{
 		"webpack.config",
 		"vite.config",
 		// Build scripts log to the terminal by design and never ship.
@@ -276,11 +302,9 @@ func scanForDebugStatements(rootDir string, ignore []string) []string {
 		"tailwind.config",
 		"postcss.config",
 		"eslint",
+		"eslintrc",
 		"prettier",
-		".test.",
-		".spec.",
-		"_test.go",
-		"_test.rb",
+		"prettierrc",
 		"test_",
 		"alpine",
 		"jquery",
@@ -303,6 +327,26 @@ func scanForDebugStatements(rootDir string, ignore []string) []string {
 		"hyperscript",
 		"turbo",
 		"stimulus",
+	}
+	skipFile := func(name string) bool {
+		for _, s := range skipInfixes {
+			if strings.Contains(name, s) {
+				return true
+			}
+		}
+		name = strings.TrimLeft(name, ".") // .eslintrc.js, .prettierrc.cjs
+		for _, p := range skipPrefixes {
+			if !strings.HasPrefix(name, p) {
+				continue
+			}
+			// "jquery.js", "jquery-3.7.js" and "htmx_ext.js" are the library;
+			// "moments.ts" and "turbocharge.ts" are the project's own code.
+			rest := name[len(p):]
+			if strings.HasSuffix(p, ".") || strings.HasSuffix(p, "_") || rest == "" || strings.ContainsRune(".-_", rune(rest[0])) {
+				return true
+			}
+		}
+		return false
 	}
 
 	// Walk the project
@@ -342,11 +386,8 @@ func scanForDebugStatements(rootDir string, ignore []string) []string {
 		}
 
 		// Check if file should be skipped
-		filename := strings.ToLower(d.Name())
-		for _, skip := range skipFiles {
-			if strings.Contains(filename, skip) {
-				return nil
-			}
+		if skipFile(strings.ToLower(d.Name())) {
+			return nil
 		}
 
 		// Get file extension
@@ -372,8 +413,11 @@ func scanForDebugStatements(rootDir string, ignore []string) []string {
 			return nil
 		}
 
-		// Check each line for patterns
-		lines := strings.Split(string(content), "\n")
+		// Check each line for patterns. Multi-line block comments are blanked
+		// first (newlines kept, so line numbers hold): a console.log inside a
+		// /* ... */ or <!-- ... --> spanning several lines is commented out,
+		// and no per-line test can tell.
+		lines := strings.Split(blankBlockComments(string(content)), "\n")
 		for lineNum, line := range lines {
 			// Skip commented lines (basic check). This only catches whole-line
 			// comments; hash-style ones in particular have to be handled here,
@@ -395,6 +439,8 @@ func scanForDebugStatements(rootDir string, ignore []string) []string {
 			// strip inline comments before matching. stripCodeComments leaves
 			// URLs intact, so a logged https:// link keeps its line.
 			line = stripCodeComments(line)
+			// <code>console.log()</code> on one line is documentation.
+			line = reInlineCodeSpan.ReplaceAllString(line, "")
 
 			for _, p := range patterns {
 				// Check if this pattern applies to this file type
@@ -411,7 +457,7 @@ func scanForDebugStatements(rootDir string, ignore []string) []string {
 					}
 				}
 
-				if p.pattern.MatchString(line) {
+				if p.pattern.MatchString(line) && (p.exclude == nil || !p.exclude.MatchString(line)) {
 					if !isDevGuarded(lines, lineNum) && !isInCodeExample(lines, lineNum) {
 						relPath := relPath(rootDir, path)
 						findings = append(findings, fmt.Sprintf("%s:%d - %s", relPath, lineNum+1, p.description))
@@ -445,7 +491,7 @@ func isDevGuarded(lines []string, lineNum int) bool {
 		"== 'development'",
 
 		// Vite/Astro
-		"import.meta.env",
+		"import.meta.env.SSR",
 
 		// SvelteKit
 		"from '$app/environment'",
@@ -541,15 +587,54 @@ func isDevGuarded(lines []string, lineNum int) bool {
 		// Strip line/block comments first so a nearby comment that
 		// happens to mention NODE_ENV (or whatever) doesn't get
 		// mis-read as an actual guard expression.
-		lineLower := strings.ToLower(stripCodeComments(lines[i]))
+		line := stripCodeComments(lines[i])
+		// A guard is a condition. Reading an env value nearby
+		// (const api = import.meta.env.VITE_API_URL) guards nothing.
+		if !reConditional.MatchString(line) {
+			continue
+		}
+		lineLower := strings.ToLower(line)
 		for _, pattern := range devPatterns {
-			if strings.Contains(lineLower, strings.ToLower(pattern)) {
+			if devGuardMatches(lineLower, strings.ToLower(pattern)) {
 				return true
 			}
 		}
 	}
 
 	return false
+}
+
+// reConditional matches the syntax of a condition or a conditional block in
+// the languages devPatterns covers: if/unless/when, ternaries, short-circuit
+// operators, preprocessor and attribute guards, and template conditionals.
+var reConditional = regexp.MustCompile(`\b(?:if|unless|elif|elsif|when)\b|&&|\|\||\?|#\[cfg|cfg!|@env|@production|@unless`)
+
+// reIdentifierToken matches a dev-guard token that is a bare identifier.
+var reIdentifierToken = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
+
+// devGuardMatches reports whether lineLower contains the guard token. Bare
+// identifiers must match as whole words, so isDev does not match
+// isDeviceMobile; every other token is distinctive enough as a substring.
+func devGuardMatches(lineLower, token string) bool {
+	if !reIdentifierToken.MatchString(token) {
+		return strings.Contains(lineLower, token)
+	}
+	for i := strings.Index(lineLower, token); i >= 0; {
+		end := i + len(token)
+		if (i == 0 || !isIdentByte(lineLower[i-1])) && (end == len(lineLower) || !isIdentByte(lineLower[end])) {
+			return true
+		}
+		next := strings.Index(lineLower[i+1:], token)
+		if next < 0 {
+			break
+		}
+		i += 1 + next
+	}
+	return false
+}
+
+func isIdentByte(b byte) bool {
+	return b == '_' || b >= 'a' && b <= 'z' || b >= '0' && b <= '9' || b >= 'A' && b <= 'Z'
 }
 
 // heredocStart matches Ruby heredocs: <<~WORD, <<-WORD, <<WORD. Package

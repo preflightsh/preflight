@@ -597,3 +597,22 @@ func stripCodeComments(content string) string {
 	content = reERBComment.ReplaceAllString(content, "")
 	return restoreURLSlashes(content)
 }
+
+// reLeadingBlockComment matches a /* ... */ comment that opens a line. A
+// "/*" mid-line is as often a glob or route in a string ("/api/*") as a
+// comment opener, and treating it as one would blank everything up to the
+// next "*/" in the file; mid-line comments are left to per-line stripping.
+var reLeadingBlockComment = regexp.MustCompile(`(?ms)^[ \t]*/\*.*?\*/`)
+
+// blankBlockComments blanks multi-line block comments (leading /* */,
+// <!-- -->, {# #}, <%# %>) while keeping every newline, so line numbers in
+// findings still match the file. Line-by-line scanners can't see that a
+// line sits inside a block comment opened several lines earlier.
+func blankBlockComments(content string) string {
+	keepNewlines := func(s string) string { return strings.Repeat("\n", strings.Count(s, "\n")) }
+	content = protectURLSlashes(content)
+	for _, re := range []*regexp.Regexp{reLeadingBlockComment, reHTMLComment, reTwigComment, reERBComment} {
+		content = re.ReplaceAllStringFunc(content, keepNewlines)
+	}
+	return restoreURLSlashes(content)
+}
