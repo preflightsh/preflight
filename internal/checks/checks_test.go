@@ -73,7 +73,7 @@ func TestRelPath(t *testing.T) {
 			name:   "target inside base",
 			base:   tmp,
 			target: filepath.Join(tmp, "sub", "file.go"),
-			want:   filepath.Join("sub", "file.go"),
+			want:   "sub/file.go",
 		},
 		{
 			name:   "target equals base",
