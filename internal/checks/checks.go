@@ -24,7 +24,8 @@ func relPath(base, target string) string {
 		// user-facing output.
 		return filepath.Base(target)
 	}
-	return rel
+	// Reports and glob patterns use one portable representation on every OS.
+	return filepath.ToSlash(rel)
 }
 
 type Severity string

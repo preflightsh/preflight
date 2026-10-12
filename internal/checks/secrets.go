@@ -285,10 +285,7 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 
 	var displayMessages []string
 	for _, f := range displayFindings {
-		rp, err := filepath.Rel(ctx.RootDir, f.file)
-		if err != nil {
-			rp = f.file
-		}
+		rp := relPath(ctx.RootDir, f.file)
 		tag := ""
 		switch f.gitState {
 		case "tracked":
