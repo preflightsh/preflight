@@ -50,6 +50,7 @@ func runHistory(cmd *cobra.Command, args []string) error {
 		return &ExitError{Code: ExitFail, Err: fmt.Errorf("not logged in; run 'preflight auth login' to view your dashboard history")}
 	}
 	client, warning := dashboard.ClientForCredentials(creds)
+	client.Ctx = cmd.Context()
 	if warning != "" {
 		fmt.Fprintln(os.Stderr, warning)
 	}

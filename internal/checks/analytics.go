@@ -279,7 +279,7 @@ func scanDependencyManifests(rootDir string, patterns []*regexp.Regexp) (string,
 			continue
 		}
 		for _, pattern := range patterns {
-			if pattern.Match(content) {
+			if pattern.MatchString(stripComments(string(content))) {
 				return name, true
 			}
 		}
@@ -304,7 +304,7 @@ func searchForPatterns(rootDir, stack string, patterns []*regexp.Regexp) bool {
 		}
 
 		for _, pattern := range patterns {
-			if pattern.Match(content) {
+			if pattern.MatchString(stripComments(string(content))) {
 				return true
 			}
 		}
@@ -312,7 +312,7 @@ func searchForPatterns(rootDir, stack string, patterns []*regexp.Regexp) bool {
 
 	return walkSourceFiles(rootDir, func(_ string, content []byte) bool {
 		for _, pattern := range patterns {
-			if pattern.Match(content) {
+			if pattern.MatchString(stripComments(string(content))) {
 				return true
 			}
 		}
@@ -397,6 +397,7 @@ var sourceExtensions = map[string]bool{
 	".rb": true,
 	// Go
 	".go": true, ".tmpl": true, ".gohtml": true,
+	".rs": true, ".java": true, ".kt": true, ".kts": true, ".cs": true, ".ex": true, ".exs": true,
 }
 
 // walkSourceFiles calls visit with the content of every source file in the

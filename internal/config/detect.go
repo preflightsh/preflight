@@ -158,7 +158,7 @@ func DetectStack(rootDir string) string {
 		}
 
 		// Check for specific frameworks in package.json
-		if pkgJSON, err := os.ReadFile(filepath.Join(rootDir, "package.json")); err == nil {
+		if pkgJSON, err := fsutil.ReadFile(filepath.Join(rootDir, "package.json"), 8<<20); err == nil {
 			content := string(pkgJSON)
 			// Check for React
 			if strings.Contains(content, "\"react\"") {
@@ -207,7 +207,7 @@ func DetectStack(rootDir string) string {
 // fileContains checks if a file exists and contains a specific string
 func fileContains(rootDir, relativePath, search string) bool {
 	path := filepath.Join(rootDir, relativePath)
-	content, err := os.ReadFile(path)
+	content, err := fsutil.ReadFile(path, 8<<20)
 	if err != nil {
 		return false
 	}
@@ -261,7 +261,7 @@ func DetectServices(rootDir string) map[string]bool {
 	}
 
 	// Check package.json at root
-	if pkgJSON, err := os.ReadFile(filepath.Join(rootDir, "package.json")); err == nil {
+	if pkgJSON, err := fsutil.ReadFile(filepath.Join(rootDir, "package.json"), 8<<20); err == nil {
 		content := strings.ToLower(string(pkgJSON))
 		detectServicesFromContent(content, services, "node")
 	}
@@ -279,7 +279,7 @@ func DetectServices(rootDir string) map[string]bool {
 				continue
 			}
 			pkgPath := filepath.Join(monoDir, entry.Name(), "package.json")
-			if pkgJSON, err := os.ReadFile(pkgPath); err == nil {
+			if pkgJSON, err := fsutil.ReadFile(pkgPath, 8<<20); err == nil {
 				content := strings.ToLower(string(pkgJSON))
 				detectServicesFromContent(content, services, "node")
 			}
@@ -287,19 +287,19 @@ func DetectServices(rootDir string) map[string]bool {
 	}
 
 	// Check Gemfile
-	if gemfile, err := os.ReadFile(filepath.Join(rootDir, "Gemfile")); err == nil {
+	if gemfile, err := fsutil.ReadFile(filepath.Join(rootDir, "Gemfile"), 8<<20); err == nil {
 		content := strings.ToLower(string(gemfile))
 		detectServicesFromContent(content, services, "ruby")
 	}
 
 	// Check Gemfile.lock for more precise detection
-	if gemfileLock, err := os.ReadFile(filepath.Join(rootDir, "Gemfile.lock")); err == nil {
+	if gemfileLock, err := fsutil.ReadFile(filepath.Join(rootDir, "Gemfile.lock"), 8<<20); err == nil {
 		content := strings.ToLower(string(gemfileLock))
 		detectServicesFromContent(content, services, "ruby")
 	}
 
 	// Check composer.json for Laravel
-	if composer, err := os.ReadFile(filepath.Join(rootDir, "composer.json")); err == nil {
+	if composer, err := fsutil.ReadFile(filepath.Join(rootDir, "composer.json"), 8<<20); err == nil {
 		content := strings.ToLower(string(composer))
 		detectServicesFromContent(content, services, "php")
 	}
@@ -745,7 +745,7 @@ func detectServicesFromEnv(rootDir string, services map[string]bool) map[string]
 }
 
 func scanEnvFile(path string, envPatterns map[string][]string, services map[string]bool) {
-	file, err := os.Open(path)
+	file, err := fsutil.OpenRegularFile(path)
 	if err != nil {
 		return
 	}
@@ -1256,7 +1256,7 @@ func isNodeApp(rootDir string, packageJSON string) bool {
 			// index.js/ts alone isn't enough - could be a build tool config
 			// Check if it looks like an app entry point
 			if entry == "index.js" || entry == "index.ts" {
-				content, err := os.ReadFile(filepath.Join(rootDir, entry))
+				content, err := fsutil.ReadFile(filepath.Join(rootDir, entry), 8<<20)
 				if err == nil {
 					contentStr := string(content)
 					// Look for server/app patterns

@@ -384,7 +384,7 @@ func (c AWSSESCheck) Run(ctx Context) (CheckResult, error) {
 
 // hasEnvVar checks if an environment variable with the given prefix exists
 func hasEnvVar(rootDir, prefix string) bool {
-	envFiles := []string{".env", ".env.example", ".env.local", ".env.development"}
+	envFiles := []string{".env", ".env.local", ".env.development", ".env.production"}
 
 	for _, envFile := range envFiles {
 		path := filepath.Join(rootDir, envFile)
@@ -411,8 +411,18 @@ func envFileHasPrefix(path, prefix string) bool {
 	// degrade to "not found", same as the os.Open path above.
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
-		if strings.HasPrefix(strings.ToUpper(scanner.Text()), prefix) {
-			return true
+		name, value, ok := envAssignment(scanner.Text())
+		if !ok || !meaningfulEnvValue(value) {
+			continue
+		}
+		names := serviceEnvNames[prefix]
+		if len(names) == 0 {
+			names = []string{prefix + "KEY", prefix + "API_KEY", prefix + "TOKEN"}
+		}
+		for _, candidate := range names {
+			if name == candidate {
+				return true
+			}
 		}
 	}
 	_ = scanner.Err()

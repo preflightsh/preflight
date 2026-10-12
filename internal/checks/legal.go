@@ -125,6 +125,16 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 			Message:  "Found privacy at " + privacyPath + ", terms at " + termsPath,
 		}, nil
 	}
+	if ctx.Config.URLs.Production != "" || ctx.Config.URLs.Staging != "" {
+		var missing []string
+		if !hasPrivacy {
+			missing = append(missing, "privacy policy")
+		}
+		if !hasTerms {
+			missing = append(missing, "terms of service")
+		}
+		return CheckResult{ID: c.ID(), Title: c.Title(), Severity: SeverityWarn, Passed: false, Message: "Could not verify deployed " + strings.Join(missing, ", ")}, nil
+	}
 
 	// Common privacy policy paths/filenames
 	privacyPatterns := []string{
@@ -187,7 +197,7 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 			}
 			for _, ext := range extensions {
 				checkPath := filepath.Join(ctx.RootDir, dir, pattern+ext)
-				if _, err := os.Stat(checkPath); err == nil {
+				if regularFileExists(checkPath) {
 					hasPrivacy = true
 					privacyPath = filepath.Join(dir, pattern+ext)
 					break
@@ -195,7 +205,7 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 				// Also check with /page pattern for Next.js app router
 				if dir == "app" || dir == "src/app" {
 					pagePath := filepath.Join(ctx.RootDir, dir, pattern, "page"+ext)
-					if _, err := os.Stat(pagePath); err == nil {
+					if regularFileExists(pagePath) {
 						hasPrivacy = true
 						privacyPath = filepath.Join(dir, pattern, "page"+ext)
 						break
@@ -216,7 +226,7 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 			}
 			for _, ext := range extensions {
 				checkPath := filepath.Join(ctx.RootDir, dir, pattern+ext)
-				if _, err := os.Stat(checkPath); err == nil {
+				if regularFileExists(checkPath) {
 					hasTerms = true
 					termsPath = filepath.Join(dir, pattern+ext)
 					break
@@ -224,7 +234,7 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 				// Also check with /page pattern for Next.js app router
 				if dir == "app" || dir == "src/app" {
 					pagePath := filepath.Join(ctx.RootDir, dir, pattern, "page"+ext)
-					if _, err := os.Stat(pagePath); err == nil {
+					if regularFileExists(pagePath) {
 						hasTerms = true
 						termsPath = filepath.Join(dir, pattern, "page"+ext)
 						break
@@ -259,6 +269,9 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 					return nil
 				}
 
+				if !info.Mode().IsRegular() {
+					return nil
+				}
 				nameLower := strings.ToLower(info.Name())
 				relPath := relPath(ctx.RootDir, path)
 				parentDir := strings.ToLower(filepath.Base(filepath.Dir(path)))
@@ -351,7 +364,7 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 			}
 			filePath := filepath.Join(ctx.RootDir, file)
 			if content, err := readSourceFile(filePath); err == nil {
-				contentLower := strings.ToLower(string(content))
+				contentLower := strings.ToLower(stripComments(string(content)))
 				if !hasPrivacy && (strings.Contains(contentLower, "/privacy") ||
 					strings.Contains(contentLower, "privacy-policy") ||
 					strings.Contains(contentLower, "privacy.php") ||
@@ -453,7 +466,7 @@ func layoutChrome(rootDir, mainLayout string) []string {
 		if seen[abs] {
 			continue
 		}
-		if info, err := os.Stat(abs); err != nil || info.IsDir() {
+		if !regularFileExists(abs) {
 			continue
 		}
 		seen[abs] = true
@@ -518,7 +531,7 @@ func resolveTemplate(rootDir, fromDir, target string) string {
 		for _, name := range names {
 			for _, ext := range exts {
 				candidate := filepath.Join(rootDir, dir, filepath.FromSlash(name)+ext)
-				if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+				if regularFileExists(candidate) {
 					return candidate
 				}
 			}
@@ -533,18 +546,19 @@ func isSameDomainRedirect(baseURL, location string) bool {
 		return false
 	}
 	// Relative redirects are same-domain
-	if strings.HasPrefix(location, "/") {
+	if strings.HasPrefix(location, "/") && !strings.HasPrefix(location, "//") {
 		return true
 	}
 	baseU, err := url.Parse(baseURL)
 	if err != nil {
 		return false
 	}
-	locU, err := url.Parse(location)
+	reference, err := url.Parse(location)
 	if err != nil {
 		return false
 	}
-	return strings.EqualFold(baseU.Hostname(), locU.Hostname())
+	locU := baseU.ResolveReference(reference)
+	return locU.User == nil && strings.EqualFold(baseU.Scheme, locU.Scheme) && strings.EqualFold(baseU.Host, locU.Host)
 }
 
 // isAuthRedirect reports whether a redirect Location points to a login or
@@ -655,4 +669,9 @@ func probeFirstHit(ctx Context, client *http.Client, baseURL string, paths []str
 		}
 	}
 	return "", false
+}
+
+func regularFileExists(path string) bool {
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode().IsRegular()
 }

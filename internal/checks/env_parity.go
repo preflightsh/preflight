@@ -2,7 +2,10 @@ package checks
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -36,12 +39,15 @@ func (c EnvParityCheck) Run(ctx Context) (CheckResult, error) {
 	// Check if .env.example exists first
 	exampleKeys, exampleErr := parseEnvFile(examplePath)
 	if exampleErr != nil {
+		if !errors.Is(exampleErr, os.ErrNotExist) {
+			return c.readFailure(exampleErr), nil
+		}
 		// No .env.example - that's fine, skip this check
 		return CheckResult{
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
-			Passed:   true,
+			Skipped:  true,
 			Message:  "No " + cfg.ExampleFile + " found (skipped)",
 		}, nil
 	}
@@ -49,13 +55,16 @@ func (c EnvParityCheck) Run(ctx Context) (CheckResult, error) {
 	// .env.example exists - now check if .env exists
 	envKeys, envErr := parseEnvFile(envPath)
 	if envErr != nil {
+		if !errors.Is(envErr, os.ErrNotExist) {
+			return c.readFailure(envErr), nil
+		}
 		// .env.example exists but .env doesn't - this is expected for repos
 		// Just note that .env.example documents the required vars
 		return CheckResult{
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
-			Passed:   true,
+			Skipped:  true,
 			Message:  cfg.ExampleFile + " documents " + fmt.Sprintf("%d", len(exampleKeys)) + " required variables",
 		}, nil
 	}
@@ -122,9 +131,15 @@ func parseEnvFile(path string) (map[string]bool, error) {
 	defer file.Close()
 
 	keys := make(map[string]bool)
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(io.LimitReader(file, maxSourceFileSize+1))
+	scanner.Buffer(make([]byte, 64*1024), maxSourceFileSize)
+	var consumed int
 
 	for scanner.Scan() {
+		consumed += len(scanner.Bytes()) + 1
+		if consumed > maxSourceFileSize {
+			return nil, fmt.Errorf("env file exceeds read limit")
+		}
 		line := strings.TrimSpace(scanner.Text())
 
 		// Skip empty lines and comments
@@ -143,4 +158,8 @@ func parseEnvFile(path string) (map[string]bool, error) {
 	}
 
 	return keys, scanner.Err()
+}
+
+func (c EnvParityCheck) readFailure(err error) CheckResult {
+	return CheckResult{ID: c.ID(), Title: c.Title(), Severity: SeverityWarn, Inconclusive: true, Message: fmt.Sprintf("Environment comparison incomplete: %v", err)}
 }

@@ -18,6 +18,17 @@ func (c SEOMetadataCheck) Title() string {
 }
 
 func (c SEOMetadataCheck) Run(ctx Context) (CheckResult, error) {
+	if r, ok := renderedResult(ctx, c, func(doc renderedDoc) []string {
+		var missing []string
+		for _, name := range []string{"title", "description", "og:title", "og:description"} {
+			if !renderedHasSEOTag(doc, name) {
+				missing = append(missing, name)
+			}
+		}
+		return missing
+	}); ok {
+		return r, nil
+	}
 	cfg := ctx.Config.Checks.SEOMeta
 
 	// Get configured layout or auto-detect
@@ -149,8 +160,7 @@ func renderedHasSEOTag(doc renderedDoc, name string) bool {
 	case "title":
 		return doc.title != ""
 	case "description":
-		_, ok := doc.metaName["description"]
-		return ok
+		return strings.TrimSpace(doc.metaName["description"]) != ""
 	case "og:title", "og:description":
 		return doc.hasMeta(name)
 	}
@@ -307,9 +317,9 @@ func hasNextJSMetadata(content, name string) bool {
 	metadataExport := regexp.MustCompile(`(?s)export\s+(const|let|var)\s+metadata\s*[=:]`)
 	generateMetadata := regexp.MustCompile(`(?s)export\s+(async\s+)?function\s+generateMetadata`)
 
-	// If using generateMetadata, assume all metadata is handled dynamically
+	// A dynamic generator is not evidence that any required field exists.
 	if generateMetadata.MatchString(content) {
-		return true
+		return false
 	}
 
 	if !metadataExport.MatchString(content) {

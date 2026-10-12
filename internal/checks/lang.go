@@ -16,6 +16,14 @@ func (c LangAttributeCheck) Title() string {
 }
 
 func (c LangAttributeCheck) Run(ctx Context) (CheckResult, error) {
+	if r, ok := renderedResult(ctx, c, func(doc renderedDoc) []string {
+		if doc.htmlLang != "" {
+			return nil
+		}
+		return []string{"lang"}
+	}); ok {
+		return r, nil
+	}
 	cfg := ctx.Config.Checks.SEOMeta
 
 	// Get configured layout or auto-detect

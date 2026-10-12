@@ -42,6 +42,9 @@ const (
 )
 
 func (c OGTwitterCheck) Run(ctx Context) (CheckResult, error) {
+	if ctx.Config.URLs.Production != "" || ctx.Config.URLs.Staging != "" {
+		return c.runRendered(ctx), nil
+	}
 	cfg := ctx.Config.Checks.SEOMeta
 
 	// Get configured layout or auto-detect
@@ -408,9 +411,9 @@ func hasNextJSOGTwitterMeta(content, name string) bool {
 	metadataExport := regexp.MustCompile(`(?s)export\s+(const|let|var)\s+metadata\s*[=:]`)
 	generateMetadata := regexp.MustCompile(`(?s)export\s+(async\s+)?function\s+generateMetadata`)
 
-	// If using generateMetadata, assume all metadata is handled dynamically
+	// A dynamic generator is not evidence that any required field exists.
 	if generateMetadata.MatchString(content) {
-		return true
+		return false
 	}
 
 	if !metadataExport.MatchString(content) {

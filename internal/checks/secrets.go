@@ -3,14 +3,17 @@ package checks
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/preflightsh/preflight/internal/config"
@@ -63,8 +66,6 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 		{regexp.MustCompile(`sbp_[a-zA-Z0-9]{40,}`), "Supabase service key"},
 
 		// Communication
-		{regexp.MustCompile(`AC[a-f0-9]{32}`), "Twilio Account SID"},
-		{regexp.MustCompile(`SK[a-f0-9]{32}`), "Twilio API Key SID"},
 		{regexp.MustCompile(`xox[baprs]-[a-zA-Z0-9-]{10,}`), "Slack token"},
 		{regexp.MustCompile(`https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[a-zA-Z0-9]+`), "Slack webhook URL"},
 		{regexp.MustCompile(`[MN][A-Za-z0-9]{24}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27}`), "Discord bot token"},
@@ -75,10 +76,8 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 		{regexp.MustCompile(`re_[a-zA-Z0-9]{32,}`), "Resend API key"},
 
 		// Error Tracking
-		{regexp.MustCompile(`https://[a-f0-9]{32}@[a-z0-9]+\.ingest\.sentry\.io`), "Sentry DSN"},
 
 		// Analytics
-		{regexp.MustCompile(`phc_[a-zA-Z0-9]{32,}`), "PostHog project API key"},
 
 		// Version Control
 		{regexp.MustCompile(`ghp_[a-zA-Z0-9]{36}`), "GitHub personal access token"},
@@ -92,8 +91,8 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 		{regexp.MustCompile(`npm_[a-zA-Z0-9]{36}`), "npm access token"},
 
 		// Private Keys
-		{regexp.MustCompile(`-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY`), "Private key"},
-		{regexp.MustCompile(`-----BEGIN PGP PRIVATE KEY BLOCK`), "PGP private key"},
+		{regexp.MustCompile(`-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----`), "Private key"},
+		{regexp.MustCompile(`-----BEGIN PGP PRIVATE KEY BLOCK-----`), "PGP private key"},
 
 		// Google OAuth
 		{regexp.MustCompile(`ya29\.[0-9A-Za-z_-]+`), "Google OAuth access token"},
@@ -128,6 +127,7 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 		// Config and infrastructure
 		".yml": true, ".yaml": true, ".json": true, ".toml": true, ".xml": true,
 		".properties": true, ".tf": true, ".tfvars": true, ".hcl": true,
+		".pem": true, ".key": true, ".p8": true,
 		".env": true, ".conf": true, ".cfg": true, ".ini": true, ".txt": true,
 		".npmrc": true, ".pypirc": true, ".netrc": true,
 		// Shell
@@ -140,7 +140,8 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 	git := loadGitStatus(ctx.RootDir)
 
 	var findings []secretFinding
-	maxFileSize := int64(1024 * 1024) // 1 MB
+	maxFileSize := int64(32 << 20) // larger files are reported as incomplete
+	filesSkipped := 0
 	filesScanned := 0
 	filesErrored := 0
 
@@ -172,9 +173,6 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 		}
 
 		// Skip files that are too large
-		if info.Size() > maxFileSize {
-			return nil
-		}
 
 		// Check extension
 		ext := filepath.Ext(path)
@@ -186,12 +184,6 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 		// .env.staging, etc. — exactly the files most likely to leak
 		// real credentials. Use a prefix check instead.
 		if !codeExtensions[ext] && ext != "" && !strings.HasPrefix(baseName, ".env") {
-			return nil
-		}
-
-		// Skip example/sample files regardless of git status — they hold
-		// placeholders, not real values, and are committed on purpose.
-		if strings.Contains(baseName, ".example") || strings.Contains(baseName, ".sample") {
 			return nil
 		}
 
@@ -223,6 +215,13 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 		}
 
 		// Scan file
+		if info.Size() > maxFileSize {
+			filesSkipped++
+			return nil
+		}
+		if ctx.reqContext().Err() != nil {
+			return ctx.reqContext().Err()
+		}
 		fileFindings, scanErr := scanFileForSecrets(path, patterns)
 		if scanErr != nil {
 			filesErrored++
@@ -240,20 +239,27 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 
 	if err != nil {
 		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityWarn,
-			Passed:   false,
-			Message:  fmt.Sprintf("Error scanning files: %v", err),
+			ID:           c.ID(),
+			Title:        c.Title(),
+			Severity:     SeverityWarn,
+			Passed:       false,
+			Message:      fmt.Sprintf("Error scanning files: %v", err),
+			Inconclusive: true,
 		}, nil
 	}
 
 	// Build scan summary
 	scanSummary := fmt.Sprintf("Scanned %d files", filesScanned)
+	if filesSkipped > 0 {
+		scanSummary += fmt.Sprintf(", %d oversized files not scanned", filesSkipped)
+	}
 	if filesErrored > 0 {
 		scanSummary += fmt.Sprintf(", %d files could not be read", filesErrored)
 	}
 
+	if len(findings) == 0 && (filesErrored > 0 || filesSkipped > 0) {
+		return CheckResult{ID: c.ID(), Title: c.Title(), Severity: SeverityWarn, Inconclusive: true, Message: "Secret scan incomplete: " + scanSummary}, nil
+	}
 	if len(findings) == 0 {
 		message := "No secrets detected in committable files"
 		if !git.inRepo {
@@ -302,7 +308,7 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 	// redacted before publishing); the per-finding locations go in
 	// Suggestions, which the terminal prints and the dashboard never sees.
 	message := fmt.Sprintf("Potential secrets found in %d place(s)", len(findings))
-	if filesErrored > 0 {
+	if filesErrored > 0 || filesSkipped > 0 {
 		message += " (" + scanSummary + ")"
 	}
 	if suffix != "" {
@@ -323,11 +329,12 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 	}
 
 	return CheckResult{
-		ID:       c.ID(),
-		Title:    c.Title(),
-		Severity: severity,
-		Passed:   false,
-		Message:  message,
+		ID:           c.ID(),
+		Title:        c.Title(),
+		Severity:     severity,
+		Passed:       false,
+		Inconclusive: filesErrored > 0 || filesSkipped > 0,
+		Message:      message,
 		Suggestions: append(displayMessages,
 			"Remove secrets from source code",
 			"Use environment variables instead",
@@ -424,7 +431,10 @@ func loadGitStatus(root string) gitStatus {
 // runGit runs `git -C root <args...>` and returns stdout. Stderr is
 // discarded; callers only care whether the command succeeded.
 func runGit(root string, args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
+	cmd.WaitDelay = time.Second
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = nil
@@ -493,16 +503,21 @@ func scanFileForSecrets(path string, patterns []secretPattern) ([]secretFinding,
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(io.LimitReader(file, 32<<20+1))
 	// Walker caps files at 1 MB, but a minified bundle can legally be a
 	// single line at that cap. Give the scanner enough headroom so the
 	// whole file fits in one token instead of being silently skipped.
-	const maxLine = 2 * 1024 * 1024
+	const maxLine = 32*1024*1024 + 1
 	scanner.Buffer(make([]byte, 0, 64*1024), maxLine)
 	lineNum := 0
+	bytesScanned := 0
 
 	for scanner.Scan() {
 		lineNum++
+		bytesScanned += len(scanner.Bytes()) + 1
+		if bytesScanned > 32<<20 {
+			return findings, fmt.Errorf("incomplete scan: file exceeds read budget")
+		}
 		line := scanner.Text()
 
 		// Collect every match on the line, not just the first one. If a

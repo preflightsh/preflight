@@ -16,6 +16,14 @@ func (c StructuredDataCheck) Title() string {
 }
 
 func (c StructuredDataCheck) Run(ctx Context) (CheckResult, error) {
+	if r, ok := renderedResult(ctx, c, func(doc renderedDoc) []string {
+		if doc.hasJSONLD {
+			return nil
+		}
+		return []string{"structured data"}
+	}); ok {
+		return r, nil
+	}
 	cfg := ctx.Config.Checks.SEOMeta
 	var details []string
 

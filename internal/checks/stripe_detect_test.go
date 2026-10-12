@@ -21,7 +21,7 @@ func TestStripeGoProjectWithPrefixedPublishableKey(t *testing.T) {
 	root := t.TempDir()
 	writeFixture(t, root, "go.mod", "module x\n\nrequire github.com/stripe/stripe-go/v82 v82.0.0\n")
 	writeFixture(t, root, "cmd/server/main.go", "package main\nfunc main(){ stripe.Key = os.Getenv(\"STRIPE_SECRET_KEY\") }\n")
-	writeFixture(t, root, ".env.example", "STRIPE_SECRET_KEY=\nNEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=\n")
+	writeFixture(t, root, ".env", "STRIPE_SECRET_KEY=sk_test_fixture\nNEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_fixture\n")
 
 	res, _ := StripeWebhookCheck{}.Run(stripeCtx(root))
 	if !res.Passed {
@@ -37,7 +37,7 @@ func TestStripeGoProjectWithPrefixedPublishableKey(t *testing.T) {
 func TestStripeCheckoutOnlyNeedsNoPublishableKey(t *testing.T) {
 	root := t.TempDir()
 	writeFixture(t, root, "requirements.txt", "django>=5\nstripe==11.1.0\n")
-	writeFixture(t, root, ".env.example", "STRIPE_SECRET_KEY=\n")
+	writeFixture(t, root, ".env", "STRIPE_SECRET_KEY=sk_test_fixture\n")
 
 	res, _ := StripeWebhookCheck{}.Run(stripeCtx(root))
 	if !res.Passed || !strings.Contains(res.Message, "no publishable key") {

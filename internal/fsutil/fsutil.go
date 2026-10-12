@@ -67,18 +67,49 @@ func WriteFile(path string, data []byte, perm os.FileMode) error {
 // FIFO, a device, or a huge file by a hostile repo. ok is false when the
 // file was skipped or unreadable.
 func ReadRegularFile(path string, maxBytes int64) (data []byte, ok bool) {
+	data, err := ReadFile(path, maxBytes)
+	return data, err == nil
+}
+
+// OpenRegularFile refuses symlinks and special files. The platform opener
+// prevents a swapped-in FIFO from blocking between inspection and opening.
+func OpenRegularFile(path string) (*os.File, error) {
 	info, err := os.Lstat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Size() > maxBytes {
-		return nil, false
-	}
-	f, err := os.Open(path)
 	if err != nil {
-		return nil, false
+		return nil, err
 	}
-	defer func() { _ = f.Close() }()
-	data, err = io.ReadAll(io.LimitReader(f, maxBytes))
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s: not a regular file", path)
+	}
+	f, err := openFile(path)
 	if err != nil {
-		return nil, false
+		return nil, err
 	}
-	return data, true
+	info, err = f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		_ = f.Close()
+		return nil, fmt.Errorf("%s: not a regular file", path)
+	}
+	return f, nil
+}
+
+// ReadFile reads an entire regular file within maxBytes. Oversized files are
+// errors rather than successful, truncated input.
+func ReadFile(path string, maxBytes int64) ([]byte, error) {
+	if maxBytes <= 0 {
+		return nil, fmt.Errorf("invalid read limit")
+	}
+	f, err := OpenRegularFile(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("%s: exceeds %d byte read limit", path, maxBytes)
+	}
+	return data, nil
 }

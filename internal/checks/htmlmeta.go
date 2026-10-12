@@ -93,14 +93,18 @@ func parseRenderedHTML(doc string) renderedDoc {
 // but plugins emit either, so both maps are consulted.
 func (d renderedDoc) hasMeta(name string) bool {
 	key := strings.ToLower(name)
-	if _, ok := d.metaProperty[key]; ok {
+	if strings.TrimSpace(d.metaProperty[key]) != "" {
 		return true
 	}
-	_, ok := d.metaName[key]
-	return ok
+	return strings.TrimSpace(d.metaName[key]) != ""
 }
 
 // hasLinkRel reports whether any <link> carries the given rel token.
 func (d renderedDoc) hasLinkRel(rel string) bool {
-	return len(d.linkRels[strings.ToLower(rel)]) > 0
+	for _, href := range d.linkRels[strings.ToLower(rel)] {
+		if strings.TrimSpace(href) != "" {
+			return true
+		}
+	}
+	return false
 }

@@ -16,6 +16,14 @@ func (c CanonicalURLCheck) Title() string {
 }
 
 func (c CanonicalURLCheck) Run(ctx Context) (CheckResult, error) {
+	if r, ok := renderedResult(ctx, c, func(doc renderedDoc) []string {
+		if doc.hasLinkRel("canonical") {
+			return nil
+		}
+		return []string{"canonical"}
+	}); ok {
+		return r, nil
+	}
 	cfg := ctx.Config.Checks.SEOMeta
 
 	// Get configured layout or auto-detect

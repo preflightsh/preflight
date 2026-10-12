@@ -1,6 +1,7 @@
 package checks
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -79,11 +80,11 @@ func (c SSLCheck) Run(ctx Context) (CheckResult, error) {
 		host += ":443"
 	}
 
-	conn, err := netutil.SafeTLSDial("tcp", host, &tls.Config{
+	conn, err := netutil.SafeTLSDialContext(ctx.reqContext(), "tcp", host, &tls.Config{
 		MinVersion: tls.VersionTLS12,
 	}, 10*time.Second)
 	if err != nil {
-		return c.classifyDialError(host, err), nil
+		return c.classifyDialErrorContext(ctx.reqContext(), host, err), nil
 	}
 	defer func() { _ = conn.Close() }()
 
@@ -153,6 +154,10 @@ func (c SSLCheck) expiryResult(cert *x509.Certificate) CheckResult {
 // can't be pointed at a private address) and nothing is sent over it; the
 // leaf is read and the connection closed.
 func (c SSLCheck) classifyDialError(host string, err error) CheckResult {
+	return c.classifyDialErrorContext(context.Background(), host, err)
+}
+
+func (c SSLCheck) classifyDialErrorContext(ctx context.Context, host string, err error) CheckResult {
 	if errors.Is(err, netutil.ErrPrivateAddress) {
 		return CheckResult{
 			ID:       c.ID(),
@@ -174,7 +179,7 @@ func (c SSLCheck) classifyDialError(host string, err error) CheckResult {
 	}
 
 	message, suggestions := "Certificate verification failed", []string{"Check the certificate installed on your production host"}
-	if leaf := peekLeafCertificate(host); leaf != nil {
+	if leaf := peekLeafCertificateContext(ctx, host); leaf != nil {
 		now := time.Now()
 		hostname, _, _ := net.SplitHostPort(host)
 		switch {
@@ -206,8 +211,8 @@ func (c SSLCheck) classifyDialError(host string, err error) CheckResult {
 
 // peekLeafCertificate fetches the leaf certificate a host presents without
 // verifying it. Returns nil when the host cannot be reached at all.
-func peekLeafCertificate(host string) *x509.Certificate {
-	conn, err := netutil.SafeTLSDial("tcp", host, &tls.Config{
+func peekLeafCertificateContext(ctx context.Context, host string) *x509.Certificate {
+	conn, err := netutil.SafeTLSDialContext(ctx, "tcp", host, &tls.Config{
 		MinVersion:         tls.VersionTLS12,
 		InsecureSkipVerify: true, //nolint:gosec // read-only peek to classify a cert the verified dial already rejected
 	}, 10*time.Second)

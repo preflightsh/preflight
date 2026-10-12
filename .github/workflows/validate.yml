@@ -1,0 +1,97 @@
+name: Validate
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26'
+          check-latest: true
+          cache: true
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: Verify modules
+        run: go mod verify
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test (race)
+        run: go test ./... -race -count=1
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26'
+          check-latest: true
+          cache: true
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.13.2
+          args: --timeout=5m
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26'
+          check-latest: true
+      - name: Vulnerability scan
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+      - name: Formatting
+        run: test -z "$(gofmt -l cmd internal main.go)"
+      - name: ShellCheck
+        run: shellcheck install.sh
+      - name: Fuzz trust boundaries
+        run: |
+          go test ./internal/checks -run '^$' -fuzz FuzzRenderedHTML -fuzztime 10s
+          go test ./internal/config -run '^$' -fuzz FuzzConfig -fuzztime 10s
+      - name: Container smoke test
+        run: |
+          CGO_ENABLED=0 go build -o preflight .
+          docker build -t preflight-validation .
+          docker run --rm preflight-validation version
+          mkdir -p /tmp/preflight-container-fixture
+          printf 'projectName: container-test\n' > /tmp/preflight-container-fixture/preflight.yml
+          printf '{"lockfileVersion": 3}\n' > /tmp/preflight-container-fixture/package-lock.json
+          docker run --rm -v /tmp/preflight-container-fixture:/app:ro preflight-validation scan --ci --format json --only vulnerability > /tmp/container-result.json && exit 1 || status=$?
+          test "$status" = 1
+          python3 -c 'import json; r=json.load(open("/tmp/container-result.json")); assert r["summary"]["warn"] == 1 and r["checks"][0]["inconclusive"]'

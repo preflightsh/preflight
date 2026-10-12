@@ -9,6 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/bmatcuk/doublestar/v4"
+	"github.com/preflightsh/preflight/internal/catalog"
+	"github.com/preflightsh/preflight/internal/fsutil"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -94,7 +98,8 @@ type IndexNowConfig struct {
 }
 
 type EmailAuthConfig struct {
-	Enabled bool `yaml:"enabled"`
+	Enabled bool   `yaml:"enabled"`
+	Domain  string `yaml:"domain,omitempty"`
 }
 
 type HumansTxtConfig struct {
@@ -105,7 +110,7 @@ type HumansTxtConfig struct {
 func Load(rootDir string) (*PreflightConfig, error) {
 	configPath := filepath.Join(rootDir, "preflight.yml")
 
-	data, err := os.ReadFile(configPath)
+	data, err := fsutil.ReadFile(configPath, 8<<20)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("preflight.yml not found in %s", rootDir)
@@ -126,8 +131,59 @@ func Load(rootDir string) (*PreflightConfig, error) {
 
 	// Apply defaults
 	applyDefaults(&cfg)
+	if err := Validate(&cfg); err != nil {
+		return nil, fmt.Errorf("invalid preflight.yml: %w", err)
+	}
 
 	return &cfg, nil
+}
+
+// Validate checks values that yaml's KnownFields cannot validate, including
+// map keys and ignore IDs. Source-file globs remain supported for debug checks.
+func Validate(cfg *PreflightConfig) error {
+	for id := range cfg.Services {
+		if _, ok := catalog.LookupService(id); !ok {
+			return fmt.Errorf("unknown service ID %q", id)
+		}
+	}
+	for _, id := range cfg.Ignore {
+		current := catalog.Canonical(id)
+		_, check := catalog.LookupCheck(current)
+		_, service := catalog.LookupService(current)
+		if check || service {
+			continue
+		}
+		if !strings.ContainsAny(id, "/*?[.") || !doublestar.ValidatePattern(filepath.ToSlash(id)) {
+			return fmt.Errorf("unknown check ID or invalid glob %q", id)
+		}
+	}
+	if c := cfg.Checks.Secrets; c != nil {
+		for _, entry := range c.Allowlist {
+			if entry.Path == "" || !doublestar.ValidatePattern(filepath.ToSlash(entry.Path)) {
+				return fmt.Errorf("invalid secrets allowlist path %q", entry.Path)
+			}
+		}
+	}
+	if c := cfg.Checks.EmailAuth; c != nil && c.Enabled {
+		domain := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(c.Domain)), ".")
+		if domain == "" || strings.ContainsAny(domain, "/:@ ?#") || !strings.Contains(domain, ".") {
+			return fmt.Errorf("emailAuth.domain must name the email sending domain, e.g. mail.example.com")
+		}
+		for _, label := range strings.Split(domain, ".") {
+			if len(label) == 0 || len(label) > 63 || strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
+				return fmt.Errorf("invalid emailAuth.domain")
+			}
+			for _, r := range label {
+				letter := r >= 'a' && r <= 'z'
+				digit := r >= '0' && r <= '9'
+				if !letter && !digit && r != '-' {
+					return fmt.Errorf("emailAuth.domain must be an ASCII DNS name")
+				}
+			}
+		}
+		c.Domain = domain
+	}
+	return nil
 }
 
 func applyDefaults(cfg *PreflightConfig) {

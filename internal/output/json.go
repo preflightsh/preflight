@@ -2,9 +2,7 @@ package output
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
-	"os"
 
 	"github.com/preflightsh/preflight/internal/checks"
 )
@@ -14,10 +12,11 @@ import (
 // guessing from the fields present. It is bumped only when an existing
 // field changes meaning or goes away; adding a field does not count.
 //
+//	2: skipped and inconclusive outcomes; skipped checks no longer pass.
 //	1: the 1.0 contract. Check IDs are snake_case (see catalog.Aliases).
 //	   Output without a schema_version is from a pre-1.0 CLI, with the old
 //	   camelCase IDs.
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 // JSONOutputter renders the machine-readable report. CLIVersion is the
 // version of the binary producing it, stamped into the output.
@@ -34,23 +33,23 @@ type JSONOutput struct {
 }
 
 type JSONCheckResult struct {
-	ID          string   `json:"id"`
-	Title       string   `json:"title"`
-	Passed      bool     `json:"passed"`
-	Severity    string   `json:"severity"`
-	Message     string   `json:"message,omitempty"`
-	Suggestions []string `json:"suggestions,omitempty"`
+	ID           string   `json:"id"`
+	Title        string   `json:"title"`
+	Passed       bool     `json:"passed"`
+	Skipped      bool     `json:"skipped,omitempty"`
+	Inconclusive bool     `json:"inconclusive,omitempty"`
+	Severity     string   `json:"severity"`
+	Message      string   `json:"message,omitempty"`
+	Suggestions  []string `json:"suggestions,omitempty"`
 }
 
-func (j JSONOutputter) Output(w io.Writer, projectName string, results []checks.CheckResult) {
+func (j JSONOutputter) Output(w io.Writer, projectName string, results []checks.CheckResult) error {
 	output := BuildJSONOutput(projectName, results)
 	output.CLIVersion = j.CLIVersion
 
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(output); err != nil {
-		fmt.Fprintf(os.Stderr, "Error encoding JSON: %v\n", err)
-	}
+	return encoder.Encode(output)
 }
 
 // BuildJSONOutput maps check results onto the wire format. Kept separate
@@ -65,9 +64,10 @@ func BuildJSONOutput(projectName string, results []checks.CheckResult) JSONOutpu
 
 	for i, r := range results {
 		output.Checks[i] = JSONCheckResult{
-			ID:          r.ID,
-			Title:       r.Title,
-			Passed:      r.Passed,
+			ID:      r.ID,
+			Title:   r.Title,
+			Passed:  r.Passed,
+			Skipped: r.Skipped, Inconclusive: r.Inconclusive,
 			Severity:    string(r.Severity),
 			Message:     r.Message,
 			Suggestions: r.Suggestions,

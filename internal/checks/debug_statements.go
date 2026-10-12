@@ -457,8 +457,13 @@ func scanForDebugStatements(rootDir string, ignore []string) []string {
 					}
 				}
 
-				if p.pattern.MatchString(line) && (p.exclude == nil || !p.exclude.MatchString(line)) {
-					if !isDevGuarded(lines, lineNum) && !isInCodeExample(lines, lineNum) {
+				codeLine := maskCodeStrings(line)
+				matchLine := codeLine
+				if strings.HasPrefix(p.description, "fmt.Print") && strings.Contains(codeLine, "fmt.Print") {
+					matchLine = line
+				}
+				if loc := p.pattern.FindStringIndex(matchLine); loc != nil && (p.exclude == nil || !p.exclude.MatchString(line)) {
+					if !isDevGuarded(lines, lineNum, loc[0]) && !isInCodeExample(lines, lineNum) {
 						relPath := relPath(rootDir, path)
 						findings = append(findings, fmt.Sprintf("%s:%d - %s", relPath, lineNum+1, p.description))
 					}
@@ -472,170 +477,44 @@ func scanForDebugStatements(rootDir string, ignore []string) []string {
 	return findings
 }
 
-func isDevGuarded(lines []string, lineNum int) bool {
-	devPatterns := []string{
-		// JavaScript/Node.js
-		"process.env.NODE_ENV",
-		"NODE_ENV",
-		"import.meta.env.DEV",
-		"import.meta.env.MODE",
-		"import.meta.env.PROD",
-		"__DEV__",
-		"isDev",
-		"isDevelopment",
-		"isDebug",
-		"!production",
-		"!== 'production'",
-		"!= 'production'",
-		"=== 'development'",
-		"== 'development'",
-
-		// Vite/Astro
-		"import.meta.env.SSR",
-
-		// SvelteKit
-		"from '$app/environment'",
-		"if (dev)",
-		"if(dev)",
-
-		// PHP/Laravel
-		"config('app.debug')",
-		"config('app.env')",
-		"app()->environment",
-		"app()->isLocal()",
-		"App::environment",
-		"App::isLocal()",
-		"env('APP_DEBUG')",
-		"env('APP_ENV')",
-		"APP_DEBUG",
-		"APP_ENV",
-
-		// Craft CMS (Twig)
-		"devMode",
-		"craft.app.config.general.devMode",
-		"{% if devmode",
-		"{% if craft.app.config.general.devmode",
-
-		// Symfony (Twig)
-		"app.debug",
-		"app.environment",
-		"{% if app.debug",
-		"{% if app.environment",
-
-		// Django/Python
-		"settings.DEBUG",
-		"DEBUG =",
-		"DEBUG=",
-		"if settings.DEBUG",
-		"os.environ",
-		"os.getenv",
-		"DJANGO_DEBUG",
-		"FLASK_DEBUG",
-		"FLASK_ENV",
-
-		// Ruby on Rails
-		"Rails.env.development",
-		"Rails.env.local",
-		"Rails.env.test",
-		"Rails.env.development?",
-		"<% if Rails.env.development",
-		"unless Rails.env.production",
-
-		// Go
-		"gin.DebugMode",
-		"GO_ENV",
-		"GIN_MODE",
-
-		// Rust
-		"#[cfg(debug_assertions)]",
-		"cfg!(debug_assertions)",
-		"debug_assertions",
-
-		// ASP.NET/C#
-		"IsDevelopment()",
-		"Environment.IsDevelopment",
-		"#if DEBUG",
-		"ASPNETCORE_ENVIRONMENT",
-
-		// Elixir/Phoenix
-		"Mix.env()",
-		":dev",
-		"Application.get_env",
-
-		// Hugo
-		".Site.IsServer",
-		"hugo.IsServer",
-
-		// Jekyll
-		"jekyll.environment",
-
-		// Blade (Laravel)
-		"@if(config('app.debug'))",
-		"@if(app()->isLocal())",
-		"@env('local')",
-		"@production",
-		"@unless(app()->environment('production'))",
-	}
-
-	// Look up to 10 lines back to find dev guards (handles nested code)
-	start := lineNum - 10
-	if start < 0 {
-		start = 0
-	}
-
-	for i := start; i <= lineNum; i++ {
-		// Strip line/block comments first so a nearby comment that
-		// happens to mention NODE_ENV (or whatever) doesn't get
-		// mis-read as an actual guard expression.
-		line := stripCodeComments(lines[i])
-		// A guard is a condition. Reading an env value nearby
-		// (const api = import.meta.env.VITE_API_URL) guards nothing.
-		if !reConditional.MatchString(line) {
-			continue
+func isDevGuarded(lines []string, lineNum, position int) bool {
+	var frames []bool
+	for i := 0; i <= lineNum; i++ {
+		raw := stripCodeComments(lines[i])
+		code := maskCodeStrings(raw)
+		limit := len(code)
+		if i == lineNum {
+			limit = min(position, limit)
 		}
-		lineLower := strings.ToLower(line)
-		for _, pattern := range devPatterns {
-			if devGuardMatches(lineLower, strings.ToLower(pattern)) {
-				return true
+		dev := isDevelopmentCondition(raw)
+		// A simple inline if has no block; nothing after a completed statement
+		// or an else inherits its condition.
+		if i == lineNum && dev && !strings.Contains(code[:limit], "{") && !strings.Contains(code[:limit], ";") {
+			return true
+		}
+		for j := 0; j < limit; j++ {
+			switch code[j] {
+			case '{':
+				frames = append(frames, dev)
+				dev = false
+			case '}':
+				if len(frames) > 0 {
+					frames = frames[:len(frames)-1]
+				}
 			}
 		}
 	}
-
-	return false
-}
-
-// reConditional matches the syntax of a condition or a conditional block in
-// the languages devPatterns covers: if/unless/when, ternaries, short-circuit
-// operators, preprocessor and attribute guards, and template conditionals.
-var reConditional = regexp.MustCompile(`\b(?:if|unless|elif|elsif|when)\b|&&|\|\||\?|#\[cfg|cfg!|@env|@production|@unless`)
-
-// reIdentifierToken matches a dev-guard token that is a bare identifier.
-var reIdentifierToken = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
-
-// devGuardMatches reports whether lineLower contains the guard token. Bare
-// identifiers must match as whole words, so isDev does not match
-// isDeviceMobile; every other token is distinctive enough as a substring.
-func devGuardMatches(lineLower, token string) bool {
-	if !reIdentifierToken.MatchString(token) {
-		return strings.Contains(lineLower, token)
-	}
-	for i := strings.Index(lineLower, token); i >= 0; {
-		end := i + len(token)
-		if (i == 0 || !isIdentByte(lineLower[i-1])) && (end == len(lineLower) || !isIdentByte(lineLower[end])) {
+	for _, dev := range frames {
+		if dev {
 			return true
 		}
-		next := strings.Index(lineLower[i+1:], token)
-		if next < 0 {
-			break
-		}
-		i += 1 + next
 	}
 	return false
 }
 
-func isIdentByte(b byte) bool {
-	return b == '_' || b >= 'a' && b <= 'z' || b >= '0' && b <= '9' || b >= 'A' && b <= 'Z'
-}
+var developmentCondition = regexp.MustCompile(`^\s*if\s*\(\s*(?:import\.meta\.env\.DEV|!\s*import\.meta\.env\.PROD|__DEV__|isDev|isDevelopment|process\.env\.NODE_ENV\s*(?:!==|!=)\s*['"]production['"]|process\.env\.NODE_ENV\s*(?:===|==)\s*['"]development['"])\s*\)`)
+
+func isDevelopmentCondition(line string) bool { return developmentCondition.MatchString(line) }
 
 // heredocStart matches Ruby heredocs: <<~WORD, <<-WORD, <<WORD. Package
 // level because isInCodeExample runs once per debug-statement match.

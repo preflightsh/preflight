@@ -1,9 +1,9 @@
 package checks
 
 import (
-	"fmt"
-	"io"
 	"os"
+
+	"github.com/preflightsh/preflight/internal/fsutil"
 )
 
 // maxSourceFileSize caps how much of any one project file a check reads.
@@ -17,32 +17,12 @@ const maxSourceFileSize = 2 << 20 // 2 MiB
 // so those are refused before open, then re-check the opened descriptor in case
 // the path was swapped in between.
 func openRegular(path string) (*os.File, error) {
-	fi, err := os.Stat(path)
-	if err != nil {
-		return nil, err
-	}
-	if !fi.Mode().IsRegular() {
-		return nil, fmt.Errorf("%s: not a regular file", path)
-	}
-	f, err := os.Open(path) //nolint:gosec // paths come from walking the scanned project
-	if err != nil {
-		return nil, err
-	}
-	if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() {
-		_ = f.Close()
-		return nil, fmt.Errorf("%s: not a regular file", path)
-	}
-	return f, nil
+	return fsutil.OpenRegularFile(path)
 }
 
 // readSourceFile is the os.ReadFile every check uses for project files: it
 // refuses anything that is not a regular file and reads at most
-// maxSourceFileSize bytes, returning the prefix of larger files.
+// maxSourceFileSize bytes, rejecting larger files as incomplete input.
 func readSourceFile(path string) ([]byte, error) {
-	f, err := openRegular(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	return io.ReadAll(io.LimitReader(f, maxSourceFileSize))
+	return fsutil.ReadFile(path, maxSourceFileSize)
 }

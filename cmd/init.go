@@ -131,7 +131,15 @@ func runInit(cmd *cobra.Command, args []string) error {
 	hasAds := promptYesNo(reader, "Does this site serve ads or advertisements?", false)
 
 	// Ask about email authentication
-	checkEmailAuth := promptYesNo(reader, "Check email deliverability on prod (SPF/DMARC records)?", false)
+	checkEmailAuth := promptYesNo(reader, "Check email authentication (SPF/DMARC)?", false)
+	mailDomain := ""
+	if checkEmailAuth {
+		mailDomain = promptOptional(reader, "Email sending domain (e.g. mail.example.com)")
+		if mailDomain == "" {
+			checkEmailAuth = false
+			fmt.Println("Email authentication disabled until emailAuth.domain is configured.")
+		}
+	}
 
 	// Ask about humans.txt
 	checkHumansTxt := promptYesNo(reader, "Got a humans.txt crediting the team?", false)
@@ -199,6 +207,12 @@ func runInit(cmd *cobra.Command, args []string) error {
 		Checks:   buildDefaultChecks(cwd, stack, allServices, productionURL, hasLicense, hasAds, indexNowKey, checkEmailAuth, checkHumansTxt),
 	}
 
+	if cfg.Checks.EmailAuth != nil {
+		cfg.Checks.EmailAuth.Domain = mailDomain
+	}
+	if err := config.Validate(&cfg); err != nil {
+		return fmt.Errorf("configuration: %w", err)
+	}
 	// Write config file
 	configPath := "preflight.yml"
 	if err := writeConfig(configPath, &cfg); err != nil {
@@ -211,7 +225,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// Check and update .gitignore
 	gitignorePath := filepath.Join(cwd, ".gitignore")
 	gitignoreUpdated := false
-	if content, err := os.ReadFile(gitignorePath); err == nil {
+	if content, err := fsutil.ReadFile(gitignorePath, 8<<20); err == nil {
 		// .gitignore exists, check if preflight.yml is already covered
 		// by an effective rule (handles globs, leading "/", comments,
 		// and "!preflight.yml" negations).
@@ -596,7 +610,7 @@ func detectStackVersion(cwd, stack string) string {
 	case "wordpress":
 		// Check wp-includes/version.php for WordPress version
 		versionFile := filepath.Join(cwd, "wp-includes", "version.php")
-		if content, err := os.ReadFile(versionFile); err == nil {
+		if content, err := fsutil.ReadFile(versionFile, 8<<20); err == nil {
 			re := regexp.MustCompile(`\$wp_version\s*=\s*'([^']+)'`)
 			if matches := re.FindStringSubmatch(string(content)); len(matches) > 1 {
 				return matches[1]
@@ -630,7 +644,7 @@ func detectStackVersion(cwd, stack string) string {
 
 func detectComposerVersion(cwd, pkg string) string {
 	composerLock := filepath.Join(cwd, "composer.lock")
-	if content, err := os.ReadFile(composerLock); err == nil {
+	if content, err := fsutil.ReadFile(composerLock, 8<<20); err == nil {
 		var lock struct {
 			Packages []struct {
 				Name    string `json:"name"`
@@ -647,7 +661,7 @@ func detectComposerVersion(cwd, pkg string) string {
 	}
 	// Fallback to composer.json
 	composerJSON := filepath.Join(cwd, "composer.json")
-	if content, err := os.ReadFile(composerJSON); err == nil {
+	if content, err := fsutil.ReadFile(composerJSON, 8<<20); err == nil {
 		var composer struct {
 			Require map[string]string `json:"require"`
 		}
@@ -662,7 +676,7 @@ func detectComposerVersion(cwd, pkg string) string {
 
 func detectNpmVersion(cwd, pkg string) string {
 	packageLock := filepath.Join(cwd, "package-lock.json")
-	if content, err := os.ReadFile(packageLock); err == nil {
+	if content, err := fsutil.ReadFile(packageLock, 8<<20); err == nil {
 		var lock struct {
 			Packages map[string]struct {
 				Version string `json:"version"`
@@ -684,7 +698,7 @@ func detectNpmVersion(cwd, pkg string) string {
 	}
 	// Fallback to package.json
 	packageJSON := filepath.Join(cwd, "package.json")
-	if content, err := os.ReadFile(packageJSON); err == nil {
+	if content, err := fsutil.ReadFile(packageJSON, 8<<20); err == nil {
 		var pkg2 struct {
 			Dependencies    map[string]string `json:"dependencies"`
 			DevDependencies map[string]string `json:"devDependencies"`
@@ -703,7 +717,7 @@ func detectNpmVersion(cwd, pkg string) string {
 
 func detectGemVersion(cwd, gem string) string {
 	gemfileLock := filepath.Join(cwd, "Gemfile.lock")
-	if content, err := os.ReadFile(gemfileLock); err == nil {
+	if content, err := fsutil.ReadFile(gemfileLock, 8<<20); err == nil {
 		// Parse Gemfile.lock for gem version
 		re := regexp.MustCompile(`(?m)^\s+` + regexp.QuoteMeta(gem) + ` \(([^)]+)\)`)
 		if matches := re.FindStringSubmatch(string(content)); len(matches) > 1 {
@@ -729,7 +743,7 @@ func detectIndexNowKey(cwd string) string {
 
 	for _, envFile := range envFiles {
 		path := filepath.Join(cwd, envFile)
-		content, err := os.ReadFile(path)
+		content, err := fsutil.ReadFile(path, 8<<20)
 		if err != nil {
 			continue
 		}

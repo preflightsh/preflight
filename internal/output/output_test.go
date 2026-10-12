@@ -53,7 +53,7 @@ func TestJSONOutputterGolden(t *testing.T) {
 	// schema_version is part of the contract from 1.0 on; its absence is
 	// how the dashboard recognizes output from a pre-1.0 CLI.
 	const want = `{
-  "schema_version": 1,
+  "schema_version": 2,
   "project": "demo",
   "summary": {
     "ok": 1,
@@ -171,6 +171,16 @@ func TestCalculateSummary(t *testing.T) {
 			name:    "empty results",
 			results: nil,
 			want:    Summary{},
+		},
+		{
+			name:    "incomplete scanning preserves detected failure",
+			results: []checks.CheckResult{{Severity: checks.SeverityError, Inconclusive: true}},
+			want:    Summary{Fail: 1, Inconclusive: 1},
+		},
+		{
+			name:    "skipped and inconclusive are not verified passes",
+			results: []checks.CheckResult{{Passed: true, Skipped: true}, {Passed: true, Inconclusive: true}},
+			want:    Summary{Skipped: 1, Inconclusive: 1, Warn: 1},
 		},
 	}
 	for _, tc := range cases {

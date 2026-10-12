@@ -36,13 +36,15 @@ const (
 )
 
 type CheckResult struct {
-	ID          string   `json:"id"`
-	Title       string   `json:"title"`
-	Severity    Severity `json:"severity"`
-	Passed      bool     `json:"passed"`
-	Message     string   `json:"message"`
-	Suggestions []string `json:"suggestions,omitempty"`
-	Details     []string `json:"details,omitempty"` // Verbose output details
+	ID           string   `json:"id"`
+	Title        string   `json:"title"`
+	Severity     Severity `json:"severity"`
+	Passed       bool     `json:"passed"`
+	Skipped      bool     `json:"skipped,omitempty"`
+	Inconclusive bool     `json:"inconclusive,omitempty"`
+	Message      string   `json:"message"`
+	Suggestions  []string `json:"suggestions,omitempty"`
+	Details      []string `json:"details,omitempty"` // Verbose output details
 }
 
 type Context struct {

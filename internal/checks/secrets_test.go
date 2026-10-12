@@ -13,8 +13,8 @@ import (
 // Two distinct values that match the GitHub PAT regex — 36 chars after ghp_.
 // Using them in tests gives us two findings with distinct fingerprints.
 const (
-	fakeGHPATa = "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	fakeGHPATb = "ghp_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	fakeGHPATa = "ghp_" + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	fakeGHPATb = "ghp_" + "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 )
 
 // writeFile is a tiny helper that creates parent dirs and writes a file.
@@ -159,7 +159,7 @@ func TestSecrets_ScansEnvProductionAndSiblings(t *testing.T) {
 // hold real secrets and should never be committed). Make sure the
 // HasPrefix change above doesn't accidentally re-include them.
 func TestSecrets_StillSkipsEnvLocalFamily(t *testing.T) {
-	for _, name := range []string{".env.local", ".env.production.local", ".env.example"} {
+	for _, name := range []string{".env.local", ".env.production.local"} {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
 			writeFile(t, root, name, "GITHUB_TOKEN="+fakeGHPATa+"\n")

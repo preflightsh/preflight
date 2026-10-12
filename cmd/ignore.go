@@ -204,7 +204,7 @@ func loadConfigDocument() (*configDocument, error) {
 	}
 	d := &configDocument{path: filepath.Join(cwd, "preflight.yml")}
 
-	data, err := os.ReadFile(d.path)
+	data, err := fsutil.ReadFile(d.path, 8<<20)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, &ExitError{Code: ExitUsage, Err: fmt.Errorf("preflight.yml not found. Run 'preflight init' first")}

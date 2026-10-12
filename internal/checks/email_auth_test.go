@@ -1,10 +1,21 @@
 package checks
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 )
+
+func TestMailDNSHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	start := time.Now()
+	if _, err := lookupTXT(ctx, "cancelled.invalid"); err == nil || time.Since(start) > time.Second {
+		t.Fatalf("err=%v elapsed=%s", err, time.Since(start))
+	}
+}
 
 func TestMailDomainCandidates(t *testing.T) {
 	cases := []struct {
@@ -57,18 +68,18 @@ func TestLookupFirst(t *testing.T) {
 		}
 	})
 
-	t.Run("a resolver failure on the subdomain does not mask the parent", func(t *testing.T) {
+	t.Run("a resolver failure cannot be hidden by the parent", func(t *testing.T) {
 		found, _, domain, err := lookupFirst(domains, func(d string) (bool, string, error) {
 			if d == "www.example.com" {
 				return false, "", errors.New("server misbehaving")
 			}
 			return true, "v=spf1 -all", nil
 		})
-		if !found || err != nil {
-			t.Fatalf("lookupFirst = (%v, %v), want the parent's record and no error", found, err)
+		if found || err == nil {
+			t.Fatalf("lookupFirst = (%v, %v), want an inconclusive child lookup", found, err)
 		}
-		if domain != "example.com" {
-			t.Errorf("lookupFirst domain = %q, want example.com", domain)
+		if domain != "www.example.com" {
+			t.Errorf("lookupFirst domain = %q, want www.example.com", domain)
 		}
 	})
 

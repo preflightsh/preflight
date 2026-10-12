@@ -1,6 +1,7 @@
 package netutil
 
 import (
+	"context"
 	"errors"
 	"net"
 	"net/http"
@@ -10,6 +11,26 @@ import (
 	"testing"
 	"time"
 )
+
+func TestSafeTLSDialTrustBoundaries(t *testing.T) {
+	t.Run("private address refused before dialing", func(t *testing.T) {
+		_, err := SafeTLSDialContext(context.Background(), "tcp", "127.0.0.1:443", nil, time.Second)
+		if !errors.Is(err, ErrPrivateAddress) {
+			t.Fatalf("err=%v, want private-address refusal", err)
+		}
+	})
+	t.Run("caller cancellation bounds DNS and TLS", func(t *testing.T) {
+		for _, addr := range []string{"cancelled.invalid:443", "1.1.1.1:443"} {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			start := time.Now()
+			_, err := SafeTLSDialContext(ctx, "tcp", addr, nil, 10*time.Second)
+			if err == nil || time.Since(start) > time.Second {
+				t.Fatalf("addr=%s err=%v elapsed=%s", addr, err, time.Since(start))
+			}
+		}
+	})
+}
 
 func TestIsPrivateIP(t *testing.T) {
 	cases := []struct {

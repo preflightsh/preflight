@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/url"
 	"strings"
 	"time"
 
@@ -23,39 +22,17 @@ func (c EmailAuthCheck) Title() string {
 }
 
 func (c EmailAuthCheck) Run(ctx Context) (CheckResult, error) {
-	if ctx.Config.URLs.Production == "" {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  "Skipped (no production URL)",
-		}, nil
+	cfg := ctx.Config.Checks.EmailAuth
+	if cfg == nil || !cfg.Enabled {
+		return CheckResult{ID: c.ID(), Title: c.Title(), Skipped: true, Severity: SeverityInfo, Message: "Email authentication not enabled"}, nil
 	}
-
-	host, err := extractDomain(ctx.Config.URLs.Production)
-	if err != nil {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  "Skipped (could not parse domain)",
-		}, nil
+	domain := cfg.Domain
+	if domain == "" {
+		return CheckResult{ID: c.ID(), Title: c.Title(), Severity: SeverityWarn, Inconclusive: true, Message: "Set emailAuth.domain to the email sending domain; website URLs are not mail identities"}, nil
 	}
-
-	// Mail authentication lives on the organizational domain: www.example.com
-	// is usually a CNAME with no TXT records of its own while example.com
-	// carries the SPF and DMARC records. DMARC mandates this fallback (RFC
-	// 7489 section 6.6.3), so checking only the host would report a domain
-	// with p=reject as unprotected.
-	domains := mailDomainCandidates(host)
-	// The domain to name in advice is the organizational one, since that's
-	// where a missing record belongs.
-	domain := domains[len(domains)-1]
-
-	hasSPF, spfRecord, spfDomain, spfErr := lookupFirst(domains, checkSPF)
-	hasDMARC, dmarcRecord, dmarcDomain, dmarcErr := lookupFirst(domains, checkDMARC)
+	hasSPF, spfRecord, spfErr := checkSPFContext(ctx.reqContext(), domain)
+	spfDomain := domain
+	hasDMARC, dmarcRecord, dmarcDomain, dmarcErr := lookupFirst(mailDomainCandidates(domain), func(d string) (bool, string, error) { return checkDMARCContext(ctx.reqContext(), d) })
 
 	// If DNS lookups failed, report the error instead of claiming records are missing
 	if spfErr != nil || dmarcErr != nil {
@@ -67,14 +44,15 @@ func (c EmailAuthCheck) Run(ctx Context) (CheckResult, error) {
 			errParts = append(errParts, fmt.Sprintf("DMARC lookup failed: %v", dmarcErr))
 		}
 		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityWarn,
-			Passed:   false,
-			Message:  fmt.Sprintf("DNS lookup error for %s: %s", domain, strings.Join(errParts, "; ")),
+			Inconclusive: true,
+			ID:           c.ID(),
+			Title:        c.Title(),
+			Severity:     SeverityWarn,
+			Passed:       false,
+			Message:      fmt.Sprintf("DNS lookup error for %s: %s", domain, strings.Join(errParts, "; ")),
 			Suggestions: []string{
 				"Check your network connection and DNS resolver",
-				"Verify the domain is correct in your production URL",
+				"Verify checks.emailAuth.domain is the email sending domain",
 			},
 		}, nil
 	}
@@ -146,39 +124,26 @@ func mailDomainCandidates(host string) []string {
 }
 
 // lookupFirst runs a record lookup down the candidate domains and returns
-// the first hit along with the domain it was found on. An error is only
-// reported when no candidate produced a record, so a resolver hiccup on a
-// subdomain can't mask a record that exists on the parent.
+// the first hit along with the domain it was found on. Only an absent record
+// permits organizational-domain fallback; errors or malformed child records
+// must not be hidden by a valid parent record.
 func lookupFirst(domains []string, lookup func(string) (bool, string, error)) (found bool, record, domain string, err error) {
-	var lastErr error
 	for _, d := range domains {
 		ok, rec, lookupErr := lookup(d)
 		if lookupErr != nil {
-			lastErr = lookupErr
-			continue
+			return false, "", d, lookupErr
 		}
 		if ok {
 			return true, rec, d, nil
 		}
 	}
-	return false, "", "", lastErr
-}
-
-func extractDomain(rawURL string) (string, error) {
-	if !strings.HasPrefix(rawURL, "http") {
-		rawURL = "https://" + rawURL
-	}
-	parsed, err := url.Parse(rawURL)
-	if err != nil {
-		return "", fmt.Errorf("parse %s: %w", rawURL, err)
-	}
-	return parsed.Hostname(), nil
+	return false, "", "", nil
 }
 
 const fallbackDNSServer = "1.1.1.1:53"
 
-func dnsLookupTXT(name string) ([]string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func lookupTXT(parent context.Context, name string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 
 	records, err := net.DefaultResolver.LookupTXT(ctx, name)
@@ -201,31 +166,16 @@ func dnsLookupTXT(name string) ([]string, error) {
 			return d.DialContext(ctx, network, fallbackDNSServer)
 		},
 	}
-	fbCtx, fbCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	fbCtx, fbCancel := context.WithTimeout(parent, 5*time.Second)
 	defer fbCancel()
 	return fallback.LookupTXT(fbCtx, name)
 }
 
-func checkSPF(domain string) (bool, string, error) {
-	records, err := dnsLookupTXT(domain)
-	if err != nil {
-		var dnsErr *net.DNSError
-		if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
-			return false, "", nil
-		}
-		return false, "", err
-	}
-
-	for _, record := range records {
-		if strings.HasPrefix(strings.ToLower(record), "v=spf1") {
-			return true, record, nil
-		}
-	}
-	return false, "", nil
+func checkSPFContext(ctx context.Context, domain string) (bool, string, error) {
+	records, err := lookupTXT(ctx, domain)
+	return evaluateSPF(records, err)
 }
-
-func checkDMARC(domain string) (bool, string, error) {
-	records, err := dnsLookupTXT("_dmarc." + domain)
+func evaluateSPF(records []string, err error) (bool, string, error) {
 	if err != nil {
 		var dnsErr *net.DNSError
 		if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
@@ -233,13 +183,97 @@ func checkDMARC(domain string) (bool, string, error) {
 		}
 		return false, "", err
 	}
-
+	found := ""
 	for _, record := range records {
-		if strings.HasPrefix(strings.ToLower(record), "v=dmarc1") {
-			return true, record, nil
+		fields := strings.Fields(record)
+		if len(fields) == 0 || strings.ToLower(fields[0]) != "v=spf1" {
+			continue
+		}
+		if found != "" {
+			return false, "", fmt.Errorf("multiple SPF records")
+		}
+		found = record
+	}
+	if found == "" {
+		return false, "", nil
+	}
+	fields := strings.Fields(found)
+	if len(fields) < 2 {
+		return false, "", fmt.Errorf("SPF record has no mechanisms")
+	}
+	for _, field := range fields[1:] {
+		field = strings.TrimLeft(strings.ToLower(field), "+-~?")
+		name, argument, hasArg := strings.Cut(field, ":")
+		if strings.Contains(name, "=") {
+			k, v, _ := strings.Cut(name, "=")
+			if v == "" || k == "" {
+				return false, "", fmt.Errorf("invalid SPF modifier")
+			}
+			continue
+		}
+		switch name {
+		case "all":
+			if hasArg {
+				return false, "", fmt.Errorf("invalid SPF all mechanism")
+			}
+		case "include", "exists", "ip4", "ip6":
+			if !hasArg || argument == "" {
+				return false, "", fmt.Errorf("SPF mechanism missing argument")
+			}
+		case "a", "mx", "ptr":
+		default:
+			if !strings.HasPrefix(name, "a/") && !strings.HasPrefix(name, "mx/") {
+				return false, "", fmt.Errorf("unknown SPF mechanism")
+			}
 		}
 	}
-	return false, "", nil
+	return true, found, nil
+}
+func checkDMARCContext(ctx context.Context, domain string) (bool, string, error) {
+	records, err := lookupTXT(ctx, "_dmarc."+domain)
+	return evaluateDMARC(records, err)
+}
+func evaluateDMARC(records []string, err error) (bool, string, error) {
+	if err != nil {
+		var dnsErr *net.DNSError
+		if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
+			return false, "", nil
+		}
+		return false, "", err
+	}
+	found := ""
+	for _, record := range records {
+		tags := strings.Split(record, ";")
+		if len(tags) == 0 || !strings.EqualFold(strings.TrimSpace(tags[0]), "v=DMARC1") {
+			continue
+		}
+		if found != "" {
+			return false, "", fmt.Errorf("multiple DMARC records")
+		}
+		policy := ""
+		seen := map[string]bool{}
+		for _, tag := range tags[1:] {
+			tag = strings.TrimSpace(tag)
+			if tag == "" {
+				continue
+			}
+			k, v, ok := strings.Cut(tag, "=")
+			k = strings.TrimSpace(k)
+			v = strings.TrimSpace(v)
+			if !ok || seen[k] {
+				return false, "", fmt.Errorf("invalid or duplicate DMARC tag")
+			}
+			seen[k] = true
+			if k == "p" {
+				policy = v
+			}
+		}
+		if policy != "none" && policy != "quarantine" && policy != "reject" {
+			return false, "", fmt.Errorf("DMARC record missing valid p policy")
+		}
+		found = record
+	}
+	return found != "", found, nil
 }
 
 func truncate(s string, max int) string {

@@ -55,7 +55,10 @@ type HumanOutputter struct {
 	Verbose bool
 }
 
-func (h HumanOutputter) Output(w io.Writer, projectName string, results []checks.CheckResult) {
+func (h HumanOutputter) Output(w io.Writer, projectName string, results []checks.CheckResult) error {
+	// Keep the first writer error even when subsequent writes succeed.
+	ew := &errorWriter{Writer: w}
+	w = ew
 	// Header
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "%s%s ✈  Preflight Scan Results%s\n", colorBold, colorCyan, colorReset)
@@ -68,6 +71,9 @@ func (h HumanOutputter) Output(w io.Writer, projectName string, results []checks
 	var coreResults []checks.CheckResult
 	var serviceResults []checks.CheckResult
 	for _, r := range results {
+		if r.Skipped {
+			continue
+		}
 		if r.Passed && (strings.Contains(strings.ToLower(r.Message), "skipping") ||
 			strings.Contains(strings.ToLower(r.Message), "skipped")) {
 			continue
@@ -164,8 +170,16 @@ func (h HumanOutputter) Output(w io.Writer, projectName string, results []checks
 	fmt.Fprintln(w)
 	fmt.Fprintln(w)
 
+	if summary.Skipped > 0 {
+		fmt.Fprintf(w, "  Skipped: %d (not verified)\n", summary.Skipped)
+	}
+	if summary.Inconclusive > 0 {
+		fmt.Fprintf(w, "  Inconclusive: %d\n", summary.Inconclusive)
+	}
 	// Final verdict
-	if summary.Fail > 0 {
+	if summary.OK == 0 && summary.Warn == 0 && summary.Fail == 0 {
+		fmt.Fprintln(w, "  No checks were verified.")
+	} else if summary.Fail > 0 {
 		fmt.Fprintf(w, "  %s%s✗ Not ready for launch%s\n", colorBold, colorRed, colorReset)
 	} else if summary.Warn > 0 {
 		fmt.Fprintf(w, "  %s%s⚠ Review warnings before launch%s\n", colorBold, colorYellow, colorReset)
@@ -173,6 +187,7 @@ func (h HumanOutputter) Output(w io.Writer, projectName string, results []checks
 		fmt.Fprintf(w, "  %s%s✓ Ready for launch!%s\n", colorBold, colorGreen, colorReset)
 	}
 	fmt.Fprintln(w)
+	return ew.err
 }
 
 // sanitize strips the control characters a terminal would interpret. Titles

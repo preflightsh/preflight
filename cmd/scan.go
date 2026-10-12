@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -307,12 +308,14 @@ func executeScan(ctx context.Context, opts scanOptions, stdout, stderr io.Writer
 	} else {
 		outputter = output.HumanOutputter{Verbose: opts.Verbose}
 	}
-	outputter.Output(stdout, cfg.ProjectName, results)
+	if err := outputter.Output(stdout, cfg.ProjectName, results); err != nil {
+		return ExitFail, &ExitError{Code: ExitFail, Err: fmt.Errorf("write scan report: %w", err)}
+	}
 
 	// Publish to the dashboard if requested. Best-effort: it never changes
 	// the scan's exit code and prints to stderr so JSON output stays clean.
 	if opts.Publish {
-		_ = publishScanResults(cfg, opts.ProjectDir, results)
+		_ = publishScanResults(ctx, cfg, opts.ProjectDir, results)
 	}
 
 	return determineExitCode(results), nil
@@ -453,6 +456,11 @@ func runOneCheck(cctx checks.Context, check checks.Check) (result checks.CheckRe
 	if err != nil {
 		return failed(err)
 	}
+	message := strings.ToLower(result.Message)
+	if result.Passed && (strings.Contains(message, "skipping") || strings.Contains(message, "skipped") || message == "no production url configured" || message == "no urls configured to check" || message == "check not configured") {
+		result.Passed = false
+		result.Skipped = true
+	}
 	return result
 }
 
@@ -472,8 +480,10 @@ func buildEnabledChecks(cfg *config.PreflightConfig, rootDir string) []checks.Ch
 
 	// === SEO & Social ===
 	// Auto-enable SEO checks if layout can be detected or explicitly configured
-	seoEnabled := (cfg.Checks.SEOMeta != nil && cfg.Checks.SEOMeta.Enabled) ||
-		canAutoDetectLayout(rootDir, cfg.Stack)
+	seoEnabled := canAutoDetectLayout(rootDir, cfg.Stack) || cfg.URLs.Production != "" || cfg.URLs.Staging != ""
+	if cfg.Checks.SEOMeta != nil {
+		seoEnabled = cfg.Checks.SEOMeta.Enabled
+	}
 	if seoEnabled {
 		enabledChecks = append(enabledChecks, checks.SEOMetadataCheck{})
 		enabledChecks = append(enabledChecks, checks.CanonicalURLCheck{})
@@ -494,7 +504,7 @@ func buildEnabledChecks(cfg *config.PreflightConfig, rootDir string) []checks.Ch
 		enabledChecks = append(enabledChecks, checks.SSLCheck{})
 		enabledChecks = append(enabledChecks, checks.WWWRedirectCheck{})
 	}
-	if cfg.Checks.EmailAuth != nil && cfg.Checks.EmailAuth.Enabled && cfg.URLs.Production != "" {
+	if cfg.Checks.EmailAuth != nil && cfg.Checks.EmailAuth.Enabled {
 		enabledChecks = append(enabledChecks, checks.EmailAuthCheck{})
 	}
 	if cfg.Checks.Secrets != nil && cfg.Checks.Secrets.Enabled {
@@ -506,8 +516,11 @@ func buildEnabledChecks(cfg *config.PreflightConfig, rootDir string) []checks.Ch
 		enabledChecks = append(enabledChecks, checks.EnvParityCheck{})
 	}
 	// Health check runs if explicitly enabled OR if any URLs are configured
-	if (cfg.Checks.HealthEndpoint != nil && cfg.Checks.HealthEndpoint.Enabled) ||
-		cfg.URLs.Production != "" || cfg.URLs.Staging != "" {
+	healthEnabled := cfg.URLs.Production != "" || cfg.URLs.Staging != ""
+	if cfg.Checks.HealthEndpoint != nil {
+		healthEnabled = cfg.Checks.HealthEndpoint.Enabled
+	}
+	if healthEnabled {
 		enabledChecks = append(enabledChecks, checks.HealthCheck{})
 	}
 
@@ -564,6 +577,12 @@ func determineExitCode(results []checks.CheckResult) int {
 	hasWarning := false
 
 	for _, r := range results {
+		if r.Skipped {
+			continue
+		}
+		if r.Inconclusive {
+			hasWarning = true
+		}
 		if !r.Passed {
 			switch r.Severity {
 			case checks.SeverityError:
@@ -579,6 +598,17 @@ func determineExitCode(results []checks.CheckResult) int {
 	}
 	if hasWarning {
 		return ExitWarn
+	}
+	if len(results) > 0 {
+		verified := false
+		for _, r := range results {
+			if !r.Skipped {
+				verified = true
+			}
+		}
+		if !verified {
+			return ExitWarn
+		}
 	}
 	return ExitOK
 }

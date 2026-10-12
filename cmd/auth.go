@@ -50,6 +50,7 @@ func init() {
 
 func runAuthLogin(cmd *cobra.Command, args []string) error {
 	client := dashboard.NewClient()
+	client.Ctx = cmd.Context()
 
 	// Headless / paste fallback: validate the token and store it. A token
 	// on the command line lands in shell history and `ps`, so "-" reads it
@@ -87,7 +88,11 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 
 	fmt.Print("  Waiting for you to authorize in the browser...")
 	for time.Now().Before(deadline) {
-		time.Sleep(interval)
+		select {
+		case <-time.After(interval):
+		case <-cmd.Context().Done():
+			return &ExitError{Code: ExitCanceled, Err: cmd.Context().Err()}
+		}
 		status, err := client.Poll(start.DeviceCode)
 		if err != nil {
 			var permanent *dashboard.PermanentError

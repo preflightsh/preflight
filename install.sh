@@ -186,7 +186,7 @@ main() {
     install
 
     echo ""
-    printf "${GREEN}Installation complete!${NC}\n"
+    printf '%bInstallation complete!%b\n' "$GREEN" "$NC"
     echo ""
     echo "  Get started:"
     echo "    cd your-project"

@@ -110,7 +110,7 @@ npx --yes skills add preflightsh/preflight --skill preflight
 
 ## Dashboard & AI Suggestions
 
-Preflight is fully usable from the command line with no account. The optional dashboard at [app.preflight.sh](https://app.preflight.sh) adds a hosted history of your scans and AI-generated fix suggestions for each finding. Your code never leaves your machine: scanning runs locally, and only a redacted summary of results (check IDs, statuses, and messages, never secret values or file contents) is sent when you publish.
+Preflight is fully usable from the command line with no account. The optional dashboard at [app.preflight.sh](https://app.preflight.sh) adds a hosted history of your scans and AI-generated fix suggestions for each finding. Your code never leaves your machine: scanning runs locally, and only check IDs, statuses, controlled status messages, and a redacted configuration summary are sent when you publish. Website URLs are reduced to their origins; raw findings, subprocess output, paths, query strings, and secret values stay local. Dashboard bearer tokens are restricted to the origin that issued them, and authenticated redirects cannot cross origins or downgrade HTTPS.
 
 Create a free account, then connect the CLI:
 
@@ -126,7 +126,7 @@ Publish a scan to your dashboard with `--publish`. It prints a link to view the 
 preflight scan --publish
 ```
 
-On the dashboard you get each run's pass/warn/fail breakdown, the full list of findings, and a per-project history so you can see what changed between deploys.
+On the dashboard you get each run's pass/warn/fail breakdown, the list of check outcomes, and a per-project history so you can see what changed between deploys.
 
 You can also read that history from the terminal with `preflight history`:
 
@@ -161,7 +161,7 @@ Open any failed or warning check on a published run to generate a step-by-step f
 | **Security Headers** | Validates HSTS, CSP, X-Content-Type-Options on both prod and staging |
 | **SSL Certificate** | Checks SSL validity and warns before expiration |
 | **WWW Redirect** | Verifies www/non-www redirect to canonical URL |
-| **Email Auth** | Checks SPF/DMARC DNS records for email deliverability (opt-in) |
+| **Email Auth** | Checks SPF/DMARC records for the configured email sending domain (opt-in) |
 | **Secret Scanning** | Finds leaked API keys and credentials in code |
 | **Debug Statements** | Detects console.log, var_dump, debugger left in code |
 | **Error Pages** | Checks for custom 404/500 error pages |
@@ -272,7 +272,8 @@ checks:
     key: "your32characterhexkeyhere00000"
 
   emailAuth:
-    enabled: true  # opt-in, checks SPF/DMARC on production domain
+    enabled: true  # opt-in; independent of website URLs
+    domain: "mail.example.com"  # actual sending / envelope-from domain
 
   humansTxt:
     enabled: false  # opt-in, credits the team
@@ -364,6 +365,71 @@ separate schema and did not change.
 | `humansTxt` | `humans_txt` |
 | `indexNow` | `index_now` |
 | `indexnow` | `index_now` |
+
+### What a successful scan means
+
+A pass means the check verified its stated requirement. Skipped checks are
+reported separately and do not add to the passed count. Inconclusive checks
+produce warnings and exit code 1 unless another check produces an error.
+A scan containing only skipped checks also exits 1. Disabled checks are outside
+the scan's scope; a partial scan cannot establish overall launch readiness.
+
+JSON schema version **2** adds `skipped` and `inconclusive` to check outcomes
+and their summary counts. A skipped check has `passed: false`; inconclusive
+checks count as warnings. Consumers of schema 1 should update these semantics
+before consuming schema 2. Published payloads use the same version.
+
+When a website URL is configured, metadata checks verify all requirements
+against fetched HTML. Static templates cannot override missing deployed tags.
+Dynamic `generateMetadata()` functions require rendered verification. Offline
+source checks are heuristics; SDK references and local configuration do not
+prove that production credentials or integrations work.
+
+Secret scanning includes `.example` and `.sample` files and source/configuration
+files up to 32 MiB. Oversized or unreadable in-scope files make the scan
+inconclusive. Public telemetry identifiers such as Sentry DSNs and PostHog
+project tokens are not classified as private credentials. Use explicit,
+fingerprint-pinned allowlists for intentional secret-shaped test fixtures.
+
+### Dependency audit scope
+
+The vulnerability check discovers supported manifests and lockfiles recursively,
+excluding dependency trees, build outputs, and agent worktrees. It audits every
+discovered project/ecosystem target, including mixed-language projects and
+nested applications. Each directory/tool outcome appears in the report.
+Yarn takes precedence when both Yarn and npm lockfiles exist in one directory.
+
+Supported audit inputs are `Gemfile.lock`, `yarn.lock`, `package-lock.json`,
+`composer.lock`, `requirements.txt`, `go.mod`/`go.sum`, and `Cargo.lock`.
+`Pipfile.lock`, Poetry/uv locks, a bare `pyproject.toml`, pnpm/Bun lockfiles,
+Maven/Gradle projects, and Elixir projects cannot currently
+be audited directly. Export compatible pinned inputs or run those ecosystems'
+auditors separately. Missing tools and unsupported inputs produce inconclusive
+warnings rather than passes. A directory with no dependency manifests is skipped.
+
+Each tool has a 60-second limit, the complete audit has a five-minute budget,
+and discovery is limited to 64 targets. Scan smaller directories separately
+when these limits are exceeded. Cancellation terminates subprocess trees on
+Unix and Windows and bounds waits on inherited output pipes.
+
+The Docker image contains the CLI and CA certificates, without package-manager
+auditors. Dependency audits in that image report missing tools as inconclusive.
+Run package-manager audits on the host or in the relevant language image.
+
+### Email authentication domain
+
+Set `checks.emailAuth.domain` to the actual email sending domain. It is required
+when email authentication is enabled and is independent of `urls.production`
+and `urls.staging`. SPF is checked only at that exact domain. DMARC may fall back
+to its organizational domain only when the child record is absent. Resolver
+errors, malformed records, and duplicate records are reported as inconclusive.
+These checks inspect DNS configuration; they do not send a test email or prove
+provider authorization and deliverability. Existing enabled email-auth configs
+must add `domain` before their next scan.
+
+The check performs basic record validation and conventional public-suffix-based
+DMARC fallback. It does not evaluate SPF includes, DKIM, message alignment, or
+the [RFC 9989 DNS tree-walk algorithm](https://www.rfc-editor.org/rfc/rfc9989.html#section-4.10).
 
 ### A note on scanning code you don't trust
 
@@ -480,3 +546,15 @@ Output also respects the [`NO_COLOR`](https://no-color.org) environment variable
 ## License
 
 MIT
+
+## Release validation
+
+CI and tagged releases share `.github/workflows/validate.yml`. Validation runs
+race tests on Linux, macOS, and Windows, verifies modules, runs the configured
+linter and vulnerability checker, checks formatting and the shell installer,
+fuzzes parser trust boundaries, and smoke-tests the container. The release job
+runs only after validation succeeds for the tagged commit and verifies that the
+commit belongs to `main` before publishing. Keep the GitHub `release` environment
+restricted to protected tag refs with required reviewers, and protect `main`.
+These repository settings must be configured in GitHub; workflow code cannot
+establish their current state.

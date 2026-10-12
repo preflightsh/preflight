@@ -17,6 +17,14 @@ func (c ViewportCheck) Title() string {
 }
 
 func (c ViewportCheck) Run(ctx Context) (CheckResult, error) {
+	if r, ok := renderedResult(ctx, c, func(doc renderedDoc) []string {
+		if doc.metaName["viewport"] != "" {
+			return nil
+		}
+		return []string{"viewport"}
+	}); ok {
+		return r, nil
+	}
 	cfg := ctx.Config.Checks.SEOMeta
 
 	// Next.js App Router automatically adds viewport meta tag

@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"bufio"
 	"net/http"
 	"path/filepath"
 	"regexp"
@@ -34,8 +33,8 @@ func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {
 	var issues []string
 	var suggestions []string
 
-	// Check for required env vars in .env.example or .env
-	envFiles := []string{".env.example", ".env", ".env.local"}
+	// Examples document names but do not establish configured credentials.
+	envFiles := []string{".env", ".env.local", ".env.development", ".env.production"}
 	requiredKeys := []string{"STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY"}
 	webhookKey := "STRIPE_WEBHOOK_SECRET"
 
@@ -52,7 +51,7 @@ func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {
 	// so its absence is noted rather than failed.
 	if !foundKeys["STRIPE_SECRET_KEY"] {
 		issues = append(issues, "STRIPE_SECRET_KEY not found in env files")
-		suggestions = append(suggestions, "Add STRIPE_SECRET_KEY to .env.example")
+		suggestions = append(suggestions, "Set STRIPE_SECRET_KEY in your application environment")
 	}
 	publishableNote := ""
 	if !foundKeys["STRIPE_PUBLISHABLE_KEY"] {
@@ -87,7 +86,7 @@ func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {
 
 	// Build result
 	if len(issues) == 0 {
-		message := "Stripe keys configured"
+		message := "Stripe integration found with nonempty local key values (authentication not verified)"
 		if hasWebhookSecret {
 			message += ", webhook secret present"
 		} else {
@@ -114,29 +113,23 @@ func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {
 }
 
 func scanEnvFile(path string, keys []string, foundKeys map[string]bool) {
-	file, err := openRegular(path)
+	content, err := readSourceFile(path)
 	if err != nil {
 		return
 	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	// Default Scanner cap is 64KB per line; an .env file with a longer
-	// inline value would silently abort the scan and report later keys
-	// as missing. Read errors are treated like an unreadable file
-	// (best-effort skip, same as the os.Open path above).
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		name := envVarName(scanner.Text())
+	for _, line := range strings.Split(string(content), "\n") {
+		name, value, ok := envAssignment(line)
+		if !ok || !meaningfulEnvValue(value) {
+			continue
+		}
 		for _, key := range keys {
 			// NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY, VITE_STRIPE_..., and so
 			// on: frameworks expose browser vars under a prefix.
-			if name == key || strings.HasSuffix(name, "_"+key) {
+			if name == key {
 				foundKeys[key] = true
 			}
 		}
 	}
-	_ = scanner.Err()
 }
 
 // stripeCodePatterns match Stripe being set up in code, across the
@@ -191,22 +184,6 @@ func stripeInitFound(rootDir string) bool {
 		}
 		return false
 	})
-}
-
-// envVarName returns the upper-cased variable name assigned on a .env line,
-// or "" for comments and lines without an assignment. The whole name is
-// compared so STRIPE_SECRET_KEY_OLD does not satisfy STRIPE_SECRET_KEY, and
-// a leading `export` is allowed.
-func envVarName(line string) string {
-	line = strings.TrimSpace(line)
-	if strings.HasPrefix(line, "export ") {
-		line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
-	}
-	name, _, ok := strings.Cut(line, "=")
-	if !ok {
-		return ""
-	}
-	return strings.ToUpper(strings.TrimSpace(name))
 }
 
 type webhookProbe int

@@ -59,11 +59,7 @@ func TestReadSourceFileCapsSize(t *testing.T) {
 	if err := os.WriteFile(p, make([]byte, maxSourceFileSize+100), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	b, err := readSourceFile(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(b) != maxSourceFileSize {
-		t.Fatalf("read %d bytes, want cap %d", len(b), maxSourceFileSize)
+	if _, err := readSourceFile(p); err == nil {
+		t.Fatal("oversized source must report incomplete input")
 	}
 }

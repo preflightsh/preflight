@@ -9,6 +9,7 @@ package dashboard
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -61,7 +62,7 @@ func LoadCredentials() (*Credentials, error) {
 	if err != nil {
 		return nil, err
 	}
-	data, err := os.ReadFile(path)
+	data, err := fsutil.ReadFile(path, 64<<10)
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
@@ -118,6 +119,7 @@ func ClearCredentials() error {
 type Client struct {
 	BaseURL string
 	HTTP    *http.Client
+	Ctx     context.Context
 }
 
 // NewClient returns a Client pointed at APIURL(). Use it for flows that
@@ -141,11 +143,11 @@ func NewClientFor(baseURL string) *Client {
 // When the environment names a different origin, the returned warning
 // says so, so a local-testing setup that forgot to log in again fails
 // loudly instead of quietly publishing to production. Credentials saved
-// by versions that did not record an origin fall back to APIURL().
+// by versions that did not record an origin fall back to DefaultAPIURL.
 func ClientForCredentials(creds *Credentials) (client *Client, warning string) {
 	base := strings.TrimSuffix(creds.APIURL, "/")
 	if base == "" {
-		return NewClient(), ""
+		return NewClientFor(DefaultAPIURL), ""
 	}
 	if env := strings.TrimSuffix(os.Getenv("PREFLIGHT_API_URL"), "/"); env != "" && env != base {
 		warning = fmt.Sprintf("PREFLIGHT_API_URL is %s but you are logged in to %s; using %s. Run 'preflight auth login' to switch.", env, base, base)
@@ -163,7 +165,7 @@ type StartResponse struct {
 
 // StartAuth begins the device-authorization flow.
 func (c *Client) StartAuth() (*StartResponse, error) {
-	resp, err := c.HTTP.Post(c.BaseURL+"/api/cli/auth/start", "application/json", nil)
+	resp, err := c.post("/api/cli/auth/start", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +174,7 @@ func (c *Client) StartAuth() (*StartResponse, error) {
 		return nil, fmt.Errorf("auth start failed: %s", resp.Status)
 	}
 	var out StartResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := decodeResponse(resp, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -187,7 +189,7 @@ type PollStatus struct {
 // Poll checks once whether the device code has been approved.
 func (c *Client) Poll(deviceCode string) (*PollStatus, error) {
 	body, _ := json.Marshal(map[string]string{"device_code": deviceCode})
-	resp, err := c.HTTP.Post(c.BaseURL+"/api/cli/auth/poll", "application/json", bytes.NewReader(body))
+	resp, err := c.post("/api/cli/auth/poll", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +204,7 @@ func (c *Client) Poll(deviceCode string) (*PollStatus, error) {
 			Status string `json:"status"`
 			Token  string `json:"token"`
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		if err := decodeResponse(resp, &out); err != nil {
 			return nil, fmt.Errorf("auth poll: parse response: %w", err)
 		}
 		return &PollStatus{Status: out.Status, Token: out.Token}, nil
@@ -246,18 +248,22 @@ type PublishResult struct {
 
 // PublishSummary is the ok/warn/fail tally.
 type PublishSummary struct {
-	OK   int `json:"ok"`
-	Warn int `json:"warn"`
-	Fail int `json:"fail"`
+	OK           int `json:"ok"`
+	Warn         int `json:"warn"`
+	Fail         int `json:"fail"`
+	Skipped      int `json:"skipped,omitempty"`
+	Inconclusive int `json:"inconclusive,omitempty"`
 }
 
 // PublishCheck is a single redacted check result.
 type PublishCheck struct {
-	ID       string `json:"id"`
-	Title    string `json:"title"`
-	Passed   bool   `json:"passed"`
-	Severity string `json:"severity"`
-	Message  string `json:"message"`
+	ID           string `json:"id"`
+	Title        string `json:"title"`
+	Passed       bool   `json:"passed"`
+	Skipped      bool   `json:"skipped,omitempty"`
+	Inconclusive bool   `json:"inconclusive,omitempty"`
+	Severity     string `json:"severity"`
+	Message      string `json:"message"`
 }
 
 // PublishResponse is returned on a successful publish.
@@ -274,11 +280,14 @@ func (c *Client) PublishRun(token string, req *PublishRequest) (*PublishResponse
 	if err != nil {
 		return nil, err
 	}
-	httpReq, _ := http.NewRequest(http.MethodPost, c.BaseURL+"/api/runs", bytes.NewReader(body))
+	httpReq, err := c.request(http.MethodPost, "/api/runs", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
 	httpReq.Header.Set("Authorization", "Bearer "+token)
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.HTTP.Do(httpReq)
+	resp, err := c.do(httpReq)
 	if err != nil {
 		return nil, err
 	}
@@ -287,7 +296,7 @@ func (c *Client) PublishRun(token string, req *PublishRequest) (*PublishResponse
 	switch resp.StatusCode {
 	case http.StatusCreated:
 		var out PublishResponse
-		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		if err := decodeResponse(resp, &out); err != nil {
 			return nil, err
 		}
 		return &out, nil
@@ -298,7 +307,7 @@ func (c *Client) PublishRun(token string, req *PublishRequest) (*PublishResponse
 			Error   string `json:"error"`
 			Message string `json:"message"`
 		}
-		_ = json.NewDecoder(resp.Body).Decode(&e)
+		_ = decodeResponse(resp, &e)
 		if e.Error == "quota_exceeded" {
 			return nil, fmt.Errorf("%w: %s", ErrQuotaExceeded, e.Message)
 		}
@@ -350,9 +359,12 @@ func (c *Client) ListRuns(token, projectKey string, limit int) ([]RunSummary, er
 	}
 	u.RawQuery = q.Encode()
 
-	req, _ := http.NewRequest(http.MethodGet, u.String(), nil)
+	req, err := c.request(http.MethodGet, "/api/runs?"+u.RawQuery, nil)
+	if err != nil {
+		return nil, err
+	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := c.HTTP.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -367,7 +379,7 @@ func (c *Client) ListRuns(token, projectKey string, limit int) ([]RunSummary, er
 	var out struct {
 		Runs []RunSummary `json:"runs"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := decodeResponse(resp, &out); err != nil {
 		return nil, err
 	}
 	return out.Runs, nil
@@ -375,9 +387,12 @@ func (c *Client) ListRuns(token, projectKey string, limit int) ([]RunSummary, er
 
 // GetRun fetches a single run with its check results.
 func (c *Client) GetRun(token, runID string) (*RunDetail, error) {
-	req, _ := http.NewRequest(http.MethodGet, c.BaseURL+"/api/runs/"+url.PathEscape(runID), nil)
+	req, err := c.request(http.MethodGet, "/api/runs/"+url.PathEscape(runID), nil)
+	if err != nil {
+		return nil, err
+	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := c.HTTP.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -385,7 +400,7 @@ func (c *Client) GetRun(token, runID string) (*RunDetail, error) {
 	switch resp.StatusCode {
 	case http.StatusOK:
 		var out RunDetail
-		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		if err := decodeResponse(resp, &out); err != nil {
 			return nil, err
 		}
 		return &out, nil
@@ -401,9 +416,12 @@ func (c *Client) GetRun(token, runID string) (*RunDetail, error) {
 
 // Whoami returns the email for a token, or an error if it is invalid.
 func (c *Client) Whoami(token string) (string, error) {
-	req, _ := http.NewRequest(http.MethodGet, c.BaseURL+"/api/cli/whoami", nil)
+	req, err := c.request(http.MethodGet, "/api/cli/whoami", nil)
+	if err != nil {
+		return "", err
+	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := c.HTTP.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return "", err
 	}
@@ -418,7 +436,7 @@ func (c *Client) Whoami(token string) (string, error) {
 	var out struct {
 		Email string `json:"email"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := decodeResponse(resp, &out); err != nil {
 		return "", err
 	}
 	return out.Email, nil

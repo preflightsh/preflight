@@ -6,14 +6,21 @@ on:
       - 'v*'
 
 permissions:
-  contents: write
-  packages: write
-  # Signed build provenance for the release archives (see the Attest step).
-  id-token: write
-  attestations: write
+  contents: read
 
 jobs:
+  validate:
+    uses: ./.github/workflows/validate.yml
+    with:
+      ref: ${{ github.sha }}
+
   release:
+    needs: validate
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
     runs-on: ubuntu-latest
     # Gate the privileged release path behind a GitHub Environment so
     # tag-creation alone isn't enough to publish — the environment can
@@ -28,6 +35,9 @@ jobs:
           # GoReleaser authenticates with its own tokens; don't leave the
           # job token in .git/config for every later step to read.
           persist-credentials: false
+
+      - name: Require tagged commit on main
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
 
       - name: Set up Go
         # setup-go v6+ exports GOTOOLCHAIN=local, so the version resolved

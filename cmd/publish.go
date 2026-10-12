@@ -1,14 +1,16 @@
 package cmd
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
-	"regexp"
 	"strings"
+	"time"
 
 	"github.com/preflightsh/preflight/internal/checks"
 	"github.com/preflightsh/preflight/internal/config"
@@ -20,7 +22,7 @@ import (
 // publishScanResults sends a scan to the user's dashboard. It is best-effort:
 // when the user is not logged in it prints a hint and returns nil so a normal
 // scan never fails just because publishing wasn't set up.
-func publishScanResults(cfg *config.PreflightConfig, projectDir string, results []checks.CheckResult) error {
+func publishScanResults(ctx context.Context, cfg *config.PreflightConfig, projectDir string, results []checks.CheckResult) error {
 	creds, err := dashboard.LoadCredentials()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "\nCould not read credentials:", err)
@@ -45,6 +47,7 @@ func publishScanResults(cfg *config.PreflightConfig, projectDir string, results 
 	}
 
 	client, warning := dashboard.ClientForCredentials(creds)
+	client.Ctx = ctx
 	if warning != "" {
 		fmt.Fprintln(os.Stderr, "\n"+warning)
 	}
@@ -66,31 +69,34 @@ func publishScanResults(cfg *config.PreflightConfig, projectDir string, results 
 // publishSummary tallies results for the dashboard payload.
 func publishSummary(results []checks.CheckResult) dashboard.PublishSummary {
 	s := output.CalculateSummary(results)
-	return dashboard.PublishSummary{OK: s.OK, Warn: s.Warn, Fail: s.Fail}
+	return dashboard.PublishSummary{OK: s.OK, Warn: s.Warn, Fail: s.Fail, Skipped: s.Skipped, Inconclusive: s.Inconclusive}
 }
 
-// indexNowKeyRe matches an IndexNow key (32 hex characters) inside a message.
-var indexNowKeyRe = regexp.MustCompile(`\b[a-fA-F0-9]{32}\b`)
-
-// redactChecks converts results to the publish shape, stripping sensitive
-// content from the secrets check (file paths, line numbers, secret types) so it
-// never leaves the machine. The index_now messages name the key ("key file
-// found at public/<key>.txt"); it is cleared from the published config, so it
-// is masked here too.
+// redactChecks publishes only controlled summaries. Local evidence may hold
+// secrets in arbitrary tool output or file paths and must never be uploaded.
 func redactChecks(results []checks.CheckResult) []dashboard.PublishCheck {
 	out := make([]dashboard.PublishCheck, 0, len(results))
 	for _, r := range results {
-		msg := r.Message
+		// Messages can contain arbitrary subprocess output, URLs, filenames or
+		// panic text. Publish controlled summaries; full evidence stays local.
+		msg := "Check passed."
+		if !r.Passed {
+			msg = "Check needs attention; see the local scan report for details."
+		}
+		if r.Skipped {
+			msg = "Check skipped (not verified)."
+		}
+		if r.Inconclusive {
+			msg = "Check could not be verified; see the local report for details."
+		}
 		if r.ID == "secrets" && !r.Passed {
 			msg = "Potential secrets detected (details hidden for privacy)."
 		}
-		if r.ID == "index_now" {
-			msg = indexNowKeyRe.ReplaceAllString(msg, "<key>")
-		}
 		out = append(out, dashboard.PublishCheck{
-			ID:       r.ID,
-			Title:    r.Title,
-			Passed:   r.Passed,
+			ID:      r.ID,
+			Title:   r.Title,
+			Passed:  r.Passed,
+			Skipped: r.Skipped, Inconclusive: r.Inconclusive,
 			Severity: string(r.Severity),
 			Message:  msg,
 		})
@@ -104,6 +110,8 @@ func redactChecks(results []checks.CheckResult) []dashboard.PublishCheck {
 // public URLs are kept because they give the dashboard's AI useful context.
 func redactedConfigYAML(cfg *config.PreflightConfig) string {
 	c := *cfg
+	c.URLs.Staging = publicOrigin(c.URLs.Staging)
+	c.URLs.Production = publicOrigin(c.URLs.Production)
 	if c.Checks.IndexNow != nil {
 		tmp := *c.Checks.IndexNow
 		tmp.Key = ""
@@ -119,6 +127,25 @@ func redactedConfigYAML(cfg *config.PreflightConfig) string {
 		tmp.Allowlist = nil
 		c.Checks.Secrets = &tmp
 	}
+	// Paths and optional labels are user-supplied; only the enablement flags
+	// are useful to the dashboard. Never publish an arbitrary config string.
+	if c.Checks.EnvParity != nil {
+		tmp := *c.Checks.EnvParity
+		tmp.EnvFile = ""
+		tmp.ExampleFile = ""
+		c.Checks.EnvParity = &tmp
+	}
+	if c.Checks.HealthEndpoint != nil {
+		tmp := *c.Checks.HealthEndpoint
+		tmp.Path = ""
+		c.Checks.HealthEndpoint = &tmp
+	}
+	if c.Checks.SEOMeta != nil {
+		tmp := *c.Checks.SEOMeta
+		tmp.MainLayout = ""
+		c.Checks.SEOMeta = &tmp
+	}
+	c.Ignore = nil
 	data, err := yaml.Marshal(&c)
 	if err != nil {
 		return ""
@@ -126,11 +153,23 @@ func redactedConfigYAML(cfg *config.PreflightConfig) string {
 	return string(data)
 }
 
+func publicOrigin(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
+}
+
 // projectKey returns a stable identifier for grouping runs: a hash of the git
 // remote origin URL when present (stable across clones and folder renames),
 // otherwise the project name.
 func projectKey(dir, projectName string) string {
-	out, err := exec.Command("git", "-C", dir, "config", "--get", "remote.origin.url").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, "git", "-C", dir, "config", "--get", "remote.origin.url")
+	command.WaitDelay = time.Second
+	out, err := command.Output()
 	if err == nil {
 		remote := normalizeRemote(strings.TrimSpace(string(out)))
 		if remote != "" {

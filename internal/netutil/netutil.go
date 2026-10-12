@@ -273,12 +273,17 @@ func LimitBody(body io.Reader, max int64) io.Reader {
 // hostname portion of addr so SNI and cert verification still work
 // after we substitute a literal IP into the dial target.
 func SafeTLSDial(network, addr string, cfg *tls.Config, timeout time.Duration) (*tls.Conn, error) {
+	return SafeTLSDialContext(context.Background(), network, addr, cfg, timeout)
+}
+
+// SafeTLSDialContext bounds DNS, dialing and the handshake by both timeout and the caller context.
+func SafeTLSDialContext(parent context.Context, network, addr string, cfg *tls.Config, timeout time.Duration) (*tls.Conn, error) {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, err
 	}
 	deadline := time.Now().Add(timeout)
-	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	ctx, cancel := context.WithDeadline(parent, deadline)
 	defer cancel()
 	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
 	if err != nil {
@@ -298,7 +303,7 @@ func SafeTLSDial(network, addr string, cfg *tls.Config, timeout time.Duration) (
 	clonedCfg := &tls.Config{MinVersion: tls.VersionTLS12}
 	if cfg != nil {
 		clonedCfg = cfg.Clone()
-		if clonedCfg.MinVersion == 0 {
+		if clonedCfg.MinVersion < tls.VersionTLS12 {
 			clonedCfg.MinVersion = tls.VersionTLS12
 		}
 	}
@@ -315,9 +320,9 @@ func SafeTLSDial(network, addr string, cfg *tls.Config, timeout time.Duration) (
 			break
 		}
 		dialer := &net.Dialer{Timeout: remaining}
-		conn, dialErr := tls.DialWithDialer(dialer, network, net.JoinHostPort(ip.IP.String(), port), clonedCfg)
+		conn, dialErr := (&tls.Dialer{NetDialer: dialer, Config: clonedCfg}).DialContext(ctx, network, net.JoinHostPort(ip.IP.String(), port))
 		if dialErr == nil {
-			return conn, nil
+			return conn.(*tls.Conn), nil
 		}
 		lastErr = dialErr
 	}

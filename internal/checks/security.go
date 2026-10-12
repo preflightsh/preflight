@@ -2,6 +2,7 @@ package checks
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -145,6 +146,9 @@ func (c SecurityHeadersCheck) checkURL(ctx Context, url string, prefetched PageF
 		// The scan tried this environment and nothing answered.
 		return nil, 0, fmt.Errorf("fetch %s: no response", url)
 	}
+	if (status < 200 || status >= 400) && !blockedStatus(status) {
+		return nil, status, fmt.Errorf("fetch %s: HTTP %d", url, status)
+	}
 
 	// Check if we're using HTTPS (HSTS only makes sense over HTTPS)
 	isHTTPS := strings.HasPrefix(actualURL, "https://")
@@ -165,8 +169,66 @@ func (c SecurityHeadersCheck) checkURL(ctx Context, url string, prefetched PageF
 	for _, header := range requiredHeaders {
 		if headers.Get(header) == "" {
 			missing = append(missing, header)
+		} else if !validSecurityHeader(header, headers.Get(header)) {
+			missing = append(missing, header+" (invalid or ineffective)")
 		}
 	}
 
 	return missing, status, nil
+}
+
+func validSecurityHeader(name, value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	switch name {
+	case "X-Content-Type-Options":
+		return value == "nosniff"
+	case "Strict-Transport-Security":
+		for _, part := range strings.Split(value, ";") {
+			key, val, ok := strings.Cut(strings.TrimSpace(part), "=")
+			if key == "max-age" && ok {
+				n, e := strconv.ParseInt(strings.Trim(val, "\""), 10, 64)
+				return e == nil && n > 0
+			}
+		}
+		return false
+	case "Referrer-Policy":
+		valid := map[string]bool{"no-referrer": true, "same-origin": true, "strict-origin": true, "strict-origin-when-cross-origin": true, "no-referrer-when-downgrade": true, "origin": true, "origin-when-cross-origin": true}
+		parts := strings.Split(value, ",")
+		for i := len(parts) - 1; i >= 0; i-- {
+			if valid[strings.TrimSpace(parts[i])] {
+				return true
+			}
+		}
+		return false
+	case "Content-Security-Policy":
+		directives := map[string][]string{}
+		for _, part := range strings.Split(value, ";") {
+			fields := strings.Fields(part)
+			if len(fields) > 0 {
+				if _, seen := directives[fields[0]]; !seen {
+					directives[fields[0]] = fields[1:]
+				}
+			}
+		}
+		sources, ok := directives["script-src"]
+		if !ok {
+			sources, ok = directives["default-src"]
+		}
+		if !ok || len(sources) == 0 {
+			return false
+		}
+		nonce := false
+		for _, v := range sources {
+			if strings.HasPrefix(v, "'nonce-") || strings.HasPrefix(v, "'sha256-") || strings.HasPrefix(v, "'sha384-") || strings.HasPrefix(v, "'sha512-") {
+				nonce = true
+			}
+		}
+		for _, v := range sources {
+			if v == "*" || v == "http:" || v == "https:" || v == "'unsafe-eval'" || (v == "'unsafe-inline'" && !nonce) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }

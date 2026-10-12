@@ -54,7 +54,7 @@ func TestRedactChecksMasksIndexNowKey(t *testing.T) {
 	if strings.Contains(got[0].Message, key) {
 		t.Errorf("index_now message still carries the key: %q", got[0].Message)
 	}
-	if !strings.Contains(got[1].Message, key) {
-		t.Errorf("other checks should be left alone: %q", got[1].Message)
+	if strings.Contains(got[1].Message, key) {
+		t.Errorf("other checks must also exclude arbitrary input: %q", got[1].Message)
 	}
 }
