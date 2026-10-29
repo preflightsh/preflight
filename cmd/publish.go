@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -42,7 +43,7 @@ func publishScanResults(ctx context.Context, cfg *config.PreflightConfig, projec
 		PreflightYAML: redactedConfigYAML(cfg),
 		Result: dashboard.PublishResult{
 			Summary: publishSummary(results),
-			Checks:  redactChecks(results),
+			Checks:  redactChecks(cfg, results),
 		},
 	}
 
@@ -72,26 +73,41 @@ func publishSummary(results []checks.CheckResult) dashboard.PublishSummary {
 	return dashboard.PublishSummary{OK: s.OK, Warn: s.Warn, Fail: s.Fail, Skipped: s.Skipped, Inconclusive: s.Inconclusive}
 }
 
-// redactChecks publishes only controlled summaries. Local evidence may hold
-// secrets in arbitrary tool output or file paths and must never be uploaded.
-func redactChecks(results []checks.CheckResult) []dashboard.PublishCheck {
+// publishMessageChecks are the checks whose messages are published as
+// written (after scrubbing, see publishedMessage). Each builds its message
+// from fixed text, counts, repo-relative paths, DNS names, or public page
+// content. Everything else gets a generic summary: secrets (the finding is
+// the secret), vulnerability (audit tool output), env_parity (variable
+// names from .env), health_endpoint and stripe_webhook (configured URLs
+// and paths), index_now (the key), and every service check, whose messages
+// are not reviewed for this. The dashboard's AI fixes need the real text,
+// so this list should grow as message shapes are reviewed, not shrink.
+var publishMessageChecks = map[string]bool{
+	"seo_meta": true, "canonical": true, "structured_data": true, "og_twitter": true,
+	"viewport": true, "lang": true, "security_headers": true, "ssl": true,
+	"www_redirect": true, "email_auth": true, "debug_statements": true,
+	"error_pages": true, "image_optimization": true, "legal_pages": true,
+	"favicon": true, "robots_txt": true, "sitemap": true, "llms_txt": true,
+	"ads_txt": true, "humans_txt": true, "license": true,
+}
+
+// publishListChecks put their findings (file:line or file and size, up to
+// five) in Suggestions; the dashboard's prompts expect them in the message.
+var publishListChecks = map[string]bool{"debug_statements": true, "image_optimization": true}
+
+var (
+	urlUserinfoRe = regexp.MustCompile(`(://)[^/@\s]+@`)
+	urlQueryRe    = regexp.MustCompile(`(https?://[^\s?#]*)[?#][^\s,;)]*`)
+)
+
+// redactChecks publishes the message of each allowlisted check, scrubbed of
+// the values redactedConfigYAML withholds, and a controlled summary for the
+// rest. Local evidence may hold secrets in arbitrary tool output or file
+// paths and must never be uploaded.
+func redactChecks(cfg *config.PreflightConfig, results []checks.CheckResult) []dashboard.PublishCheck {
 	out := make([]dashboard.PublishCheck, 0, len(results))
 	for _, r := range results {
-		// Messages can contain arbitrary subprocess output, URLs, filenames or
-		// panic text. Publish controlled summaries; full evidence stays local.
-		msg := "Check passed."
-		if !r.Passed {
-			msg = "Check needs attention; see the local scan report for details."
-		}
-		if r.Skipped {
-			msg = "Check skipped (not verified)."
-		}
-		if r.Inconclusive {
-			msg = "Check could not be verified; see the local report for details."
-		}
-		if r.ID == "secrets" && !r.Passed {
-			msg = "Potential secrets detected (details hidden for privacy)."
-		}
+		msg := publishedMessage(cfg, r)
 		out = append(out, dashboard.PublishCheck{
 			ID:      r.ID,
 			Title:   r.Title,
@@ -102,6 +118,60 @@ func redactChecks(results []checks.CheckResult) []dashboard.PublishCheck {
 		})
 	}
 	return out
+}
+
+// publishedMessage is the message the dashboard receives for r.
+func publishedMessage(cfg *config.PreflightConfig, r checks.CheckResult) string {
+	// runOneCheck turns an error or panic into "Check failed: ...", which
+	// can carry anything, whichever check it came from.
+	if publishMessageChecks[r.ID] && !strings.HasPrefix(r.Message, "Check failed:") {
+		msg := r.Message
+		if publishListChecks[r.ID] && !r.Passed && len(r.Suggestions) > 0 {
+			msg += ": " + strings.Join(r.Suggestions, "; ")
+		}
+		return scrubMessage(cfg, msg)
+	}
+	switch {
+	case r.ID == "secrets" && !r.Passed:
+		return "Potential secrets detected (details hidden for privacy)."
+	case r.Inconclusive:
+		return "Check could not be verified; see the local report for details."
+	case r.Skipped:
+		return "Check skipped (not verified)."
+	case !r.Passed:
+		return "Check needs attention; see the local scan report for details."
+	}
+	return "Check passed."
+}
+
+// scrubMessage removes from msg the config values the published config
+// withholds, and the credentials, query strings, and fragments of URLs.
+func scrubMessage(cfg *config.PreflightConfig, msg string) string {
+	replace := func(old, repl string) {
+		if strings.TrimSpace(old) != "" {
+			msg = strings.ReplaceAll(msg, old, repl)
+		}
+	}
+	if cfg != nil {
+		replace(cfg.URLs.Staging, publicOrigin(cfg.URLs.Staging))
+		replace(cfg.URLs.Production, publicOrigin(cfg.URLs.Production))
+		c := cfg.Checks
+		if c.IndexNow != nil {
+			replace(c.IndexNow.Key, "<key>")
+		}
+		if c.StripeWebhook != nil {
+			replace(c.StripeWebhook.URL, "<webhook url>")
+		}
+		if c.SEOMeta != nil {
+			replace(c.SEOMeta.MainLayout, "<layout>")
+		}
+		if c.EnvParity != nil {
+			replace(c.EnvParity.EnvFile, "<env file>")
+			replace(c.EnvParity.ExampleFile, "<env example file>")
+		}
+	}
+	msg = urlUserinfoRe.ReplaceAllString(msg, "$1")
+	return urlQueryRe.ReplaceAllString(msg, "$1")
 }
 
 // redactedConfigYAML re-marshals the config with secret-bearing fields cleared:

@@ -39,7 +39,7 @@ func TestPublishPrivacyBoundary(t *testing.T) {
 		t.Fatal("redaction mutated source config")
 	}
 	results := []checks.CheckResult{{ID: "health_endpoint", Message: "https://user:password@example.com/?token=query-token"}, {ID: "vulnerability", Message: "tool output secret-value"}, {ID: "secrets", Message: "secret-value"}}
-	encoded, _ := json.Marshal(redactChecks(results))
+	encoded, _ := json.Marshal(redactChecks(cfg, results))
 	for _, secret := range []string{"password", "query-token", "secret-value"} {
 		if strings.Contains(string(encoded), secret) {
 			t.Errorf("published results contain %q", secret)
