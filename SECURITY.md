@@ -28,10 +28,14 @@ within a few days, and a fix or a plan once the report is confirmed.
 
 Most checks only read files and make HTTP requests, but the
 `vulnerability` check runs the project's own package-manager tooling
-(`npm audit`, `yarn audit`, `composer audit`, `bundle audit`,
-`pip-audit`, or `cargo audit`) inside the scanned directory. Those tools
-read project-level configuration, so a hostile repository can influence
-what they do.
+(`npm audit`, `yarn audit`, `composer audit`, `bundle-audit`,
+`pip-audit`, `cargo-audit`, or `govulncheck`) inside the scanned
+directory. Preflight closes the known ways for a repository to run its
+own code through them (Composer runs without plugins or scripts, the
+Cargo and Bundler audit tools are called directly so project aliases do
+not apply, and Yarn 2 and later is not audited when the project has a
+`.yarnrc.yml`), but these tools still read project-level configuration,
+so a hostile repository can influence what they do.
 
 To scan a repository you do not trust, skip that check:
 
