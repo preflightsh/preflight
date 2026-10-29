@@ -18,7 +18,8 @@ func TestValueValidation(t *testing.T) {
 		{"unknown ignore", "ignore: [security_headerz]\n", true},
 		{"legacy ID", "ignore: [seoMeta]\n", false},
 		{"source glob", "ignore: ['web/**/*.js']\n", false},
-		{"missing mail domain", "checks:\n  emailAuth:\n    enabled: true\n", true},
+		{"missing mail domain", "checks:\n  emailAuth:\n    enabled: true\n", false},
+		{"malformed mail domain", "checks:\n  emailAuth:\n    enabled: true\n    domain: -mail.example.com\n", true},
 		{"mail URL", "checks:\n  emailAuth:\n    enabled: true\n    domain: https://example.com\n", true},
 		{"independent mail domain", "checks:\n  emailAuth:\n    enabled: true\n    domain: MAIL.example.com.\n", false},
 	}
@@ -28,7 +29,7 @@ func TestValueValidation(t *testing.T) {
 			if (err != nil) != tc.bad {
 				t.Fatalf("err=%v", err)
 			}
-			if cfg != nil && cfg.Checks.EmailAuth != nil && cfg.Checks.EmailAuth.Enabled && cfg.Checks.EmailAuth.Domain != "mail.example.com" {
+			if cfg != nil && cfg.Checks.EmailAuth != nil && cfg.Checks.EmailAuth.Enabled && cfg.Checks.EmailAuth.Domain != "" && cfg.Checks.EmailAuth.Domain != "mail.example.com" {
 				t.Fatalf("domain=%q", cfg.Checks.EmailAuth.Domain)
 			}
 		})

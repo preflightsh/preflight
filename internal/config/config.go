@@ -166,7 +166,15 @@ func Validate(cfg *PreflightConfig) error {
 	}
 	if c := cfg.Checks.EmailAuth; c != nil && c.Enabled {
 		domain := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(c.Domain)), ".")
-		if domain == "" || strings.ContainsAny(domain, "/:@ ?#") || !strings.Contains(domain, ".") {
+		if domain == "" {
+			c.Domain = ""
+			return nil
+		}
+		if strings.ContainsAny(domain, "/:@ ?#") || !strings.Contains(domain, ".") {
+	// An empty emailAuth.domain is left to the check, which reports it as
+	// an inconclusive warning. Rejecting it here failed every scan of a
+	// pre-0.24 config that had emailAuth enabled, since those had no
+	// domain key.
 			return fmt.Errorf("emailAuth.domain must name the email sending domain, e.g. mail.example.com")
 		}
 		for _, label := range strings.Split(domain, ".") {

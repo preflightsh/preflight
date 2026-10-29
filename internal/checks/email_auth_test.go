@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/preflightsh/preflight/internal/config"
 )
 
 func TestMailDNSHonorsCancellation(t *testing.T) {
@@ -91,4 +94,18 @@ func TestLookupFirst(t *testing.T) {
 			t.Fatalf("lookupFirst = (%v, %v), want not found with an error", found, err)
 		}
 	})
+}
+
+// A config with emailAuth enabled but no domain (every one written before
+// 0.24) gets a warning naming the missing key, not a DNS lookup of a
+// website host.
+func TestEmailAuthWithoutDomainWarns(t *testing.T) {
+	cfg := &config.PreflightConfig{Checks: config.ChecksConfig{EmailAuth: &config.EmailAuthConfig{Enabled: true}}}
+	res, err := EmailAuthCheck{}.Run(Context{Ctx: context.Background(), Config: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Passed || res.Severity != SeverityWarn || !res.Inconclusive || !strings.Contains(res.Message, "emailAuth.domain") {
+		t.Errorf("got %+v, want an inconclusive warning naming emailAuth.domain", res)
+	}
 }
