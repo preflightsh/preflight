@@ -23,7 +23,7 @@ jobs:
       attestations: write
     runs-on: ubuntu-latest
     # Gate the privileged release path behind a GitHub Environment so
-    # tag-creation alone isn't enough to publish — the environment can
+    # tag-creation alone isn't enough to publish: the environment can
     # require reviewer approval and/or restrict to protected tag refs.
     # Configure the "release" environment in repo Settings → Environments.
     environment: release
