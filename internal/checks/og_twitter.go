@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/preflightsh/preflight/internal/netutil"
@@ -123,7 +124,15 @@ func (c OGTwitterCheck) Run(ctx Context) (CheckResult, error) {
 	ogImageURL := extractMetaContent(contentStr, `property=["']og:image["']`)
 	twitterImageURL := extractMetaContent(contentStr, `name=["']twitter:image["']`)
 
-	for name, pattern := range checks {
+	// Sorted so the missing list in the message is the same on every run;
+	// map order is random.
+	names := make([]string, 0, len(checks))
+	for name := range checks {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		pattern := checks[name]
 		matched := pattern.MatchString(contentStr)
 
 		// Try alternate patterns
