@@ -110,7 +110,17 @@ npx --yes skills add preflightsh/preflight --skill preflight
 
 ## Dashboard & AI Suggestions
 
-Preflight is fully usable from the command line with no account. The optional dashboard at [app.preflight.sh](https://app.preflight.sh) adds a hosted history of your scans and AI-generated fix suggestions for each finding. Your code never leaves your machine: scanning runs locally, and only check IDs, statuses, controlled status messages, and a redacted configuration summary are sent when you publish. Website URLs are reduced to their origins; raw findings, subprocess output, paths, query strings, and secret values stay local. Dashboard bearer tokens are restricted to the origin that issued them, and authenticated redirects cannot cross origins or downgrade HTTPS.
+Preflight is fully usable from the command line with no account. The optional dashboard at [app.preflight.sh](https://app.preflight.sh) adds a hosted history of your scans and AI-generated fix suggestions for each finding. Your code never leaves your machine: scanning runs locally, and nothing is sent unless you publish. Dashboard bearer tokens are restricted to the origin that issued them, and authenticated redirects cannot cross origins or downgrade HTTPS.
+
+### What publishing sends
+
+- Each check's ID, title, status (passed, skipped, inconclusive, severity), and the summary counts.
+- The real message for checks whose messages are built from fixed text, counts, repo-relative paths, DNS names, or public page content: the SEO and social checks, `security_headers`, `ssl`, `www_redirect`, `email_auth`, `debug_statements`, `error_pages`, `image_optimization`, `legal_pages`, and the web standard file checks. `debug_statements` and `image_optimization` include up to five findings (file and line, or file and size).
+- Before sending, those messages are scrubbed: the configured staging and production URLs are cut to their origins, and the IndexNow key, the Stripe webhook URL, the `seoMeta` layout path, and the env file names are removed, as are URL credentials, query strings, and fragments.
+- A generic message for everything else: `secrets`, `vulnerability`, `env_parity`, `health_endpoint`, `stripe_webhook`, `index_now`, every service check, and any "Check failed:" error.
+- A redacted `preflight.yml`: project name, stack, URL origins, service declarations, and which checks are enabled. The IndexNow key, Stripe webhook URL, secrets allowlist, env file names, health path, layout path, and ignore list are dropped.
+
+Suggestions, file contents, audit tool output, and secret values are never sent.
 
 Create a free account, then connect the CLI:
 
@@ -137,7 +147,9 @@ preflight history <run-id>              # one run's full check results
 preflight history --here --format json  # machine-readable, for agents
 ```
 
-Requires `preflight auth login`. `--here` matches runs to the current repository by its git remote, the same key used when publishing.
+Requires `preflight auth login`. `--here` matches runs to the current repository by its git remote, the same key used when publishing. An app scanned from a subdirectory of its repository (one app in a monorepo) is keyed by that subdirectory too, so `apps/web` and `apps/api` publish to separate dashboard projects. `history --format json` carries the same `schema_version` and `cli_version` fields as scan JSON.
+
+On CI or another machine without a browser, log in with a token instead: `preflight auth login --token -` reads it from stdin, or set `PREFLIGHT_TOKEN` and run `preflight auth login`. Either way the token is checked and stored like a browser login; later commands read the stored credentials, not the variable.
 
 Open any failed or warning check on a published run to generate a step-by-step fix tailored to your detected stack, with copy-ready commands and code.
 
@@ -150,32 +162,33 @@ Open any failed or warning check on a published run to generate a step-by-step f
 | Check | Description |
 |-------|-------------|
 | **ENV Parity** | Compares `.env` and `.env.example` for missing variables |
-| **Health Endpoint** | Verifies site is reachable; auto-detects `/health`, `/healthz`, `/api/health` or falls back to root |
-| **Vulnerability Scan** | Checks for dependency vulnerabilities (bundle audit, npm audit, etc.) |
+| **Health Endpoint** | Verifies site is reachable; tries `/health`, `/healthz`, `/api/health`, `/_health`, and `/status`, then falls back to root |
+| **Vulnerability Scan** | Checks for dependency vulnerabilities with your package manager's audit tool (bundle-audit, npm audit, etc.) |
 | **SEO Metadata** | Checks for title, description, and Open Graph tags |
 | **OG & Twitter Cards** | Validates og:image, twitter:card and social sharing metadata |
 | **Canonical URL** | Verifies canonical link tag is present |
 | **Viewport** | Checks for proper viewport meta tag for mobile |
 | **Lang Attribute** | Validates html lang attribute for accessibility |
 | **Structured Data** | Checks for JSON-LD Schema.org markup |
-| **Security Headers** | Validates HSTS, CSP, X-Content-Type-Options on both prod and staging |
-| **SSL Certificate** | Checks SSL validity and warns before expiration |
+| **Security Headers** | Validates HSTS, CSP, X-Content-Type-Options, and Referrer-Policy on both prod and staging; a weak CSP (such as `'unsafe-inline'` scripts) is a suggestion, not a failure |
+| **SSL Certificate** | Checks SSL validity and warns before expiration; skipped for local URLs |
 | **WWW Redirect** | Verifies www/non-www redirect to canonical URL |
-| **Email Auth** | Checks SPF/DMARC records for the configured email sending domain (opt-in) |
+| **Email Auth** | Checks SPF/DMARC records for the email sending domain, or the production URL's domain when none is set (opt-in) |
 | **Secret Scanning** | Finds leaked API keys and credentials in code |
-| **Debug Statements** | Detects console.log, var_dump, debugger left in code |
+| **Debug Statements** | Detects console.log, var_dump, debugger left in code; statements behind a development guard (in code, or in Twig, ERB, Blade, Django, and Go templates, including same-line `&&` and ternaries) are not reported |
 | **Error Pages** | Checks for custom 404/500 error pages |
 | **Image Optimization** | Finds large images (>500KB) that hurt load times |
-| **Legal Pages** | Checks for privacy policy and terms of service pages |
-| **Cookie Consent** | Detects cookie consent solution (GDPR/CCPA compliance) |
-| **Favicon & Icons** | Checks for favicon, apple-touch-icon (.png, .webp, .svg), and web manifest |
+| **Legal Pages** | Checks for privacy policy and terms of service pages on the deployed site, falling back to the source when the host is blocked or down |
+| **Favicon & Icons** | Checks for favicon, apple-touch-icon (.png, .webp, .svg), and web manifest, including icons declared in layout `<link>` tags and the Next.js `icons` metadata; a missing favicon is a warning |
 | **robots.txt** | Verifies robots.txt exists and has content |
-| **sitemap.xml** | Checks for sitemap presence or generator |
+| **sitemap.xml** | Checks for a sitemap file or generator, including Next.js Pages Router, Astro, and SvelteKit endpoints |
 | **llms.txt** | Checks for LLM crawler guidance file |
 | **ads.txt** | Validates ads.txt for ad-supported sites (opt-in) |
 | **humans.txt** | Checks for humans.txt to credit the team (opt-in) |
-| **IndexNow** | Verifies IndexNow key file for faster search indexing (opt-in) |
+| **IndexNow** | Verifies the IndexNow key file; when the site is reachable, the deployed `/{key}.txt` decides (opt-in) |
 | **LICENSE** | Checks for license file (opt-in, for open source projects) |
+
+Cookie consent tools (CookieConsent, Cookiebot, OneTrust, and others) are checked as [services](#ignorable-service-ids), not as a check of their own.
 
 ## Supported Services (72)
 
@@ -243,7 +256,7 @@ checks:
 
   healthEndpoint:
     enabled: true
-    path: "/health"  # optional - auto-detects common paths if not set
+    path: "/health"  # optional; with enabled: true only this path is checked
 
   stripeWebhook:
     enabled: true
@@ -263,7 +276,7 @@ checks:
     # disabling the whole check.
     allowlist:
       - path: web/js/golden-hour.js
-        fingerprint: "sha256:<hex>"   # recommended — pins to the exact secret
+        fingerprint: "sha256:<hex>"   # recommended: pins to the exact secret
         reason: "HTTP-referrer-restricted Google Timezone key"
       - path: "web/tools/**/*.php"    # doublestar globs are supported
 
@@ -287,6 +300,38 @@ ignore:
   - llms_txt
   - google_analytics
 ```
+
+A block under `checks:` without an `enabled:` key keeps the check's default.
+`healthEndpoint` runs whenever a URL is set and `seoMeta` runs when a layout
+or URL is found, so a block that only sets `path` or `mainLayout` leaves them
+on; only `enabled: false` turns them off. A `healthEndpoint` path with no
+`enabled` key is probed first, then the common paths. One exception: the exact
+block `healthEndpoint: {enabled: false, path: /health}`, which `preflight init`
+used to write for CMS and static sites, keeps its pre-0.24 meaning (the check
+still runs when a URL is set) and prints a note. `init` no longer writes it.
+
+Without a URL, the network checks do not pass: `ssl`, `www_redirect`, and
+`health_endpoint` are left out of the scan, and `security_headers` is reported
+as skipped.
+
+### Strict config loading
+
+`preflight.yml` is read strictly. An unknown key is a usage error (exit 64)
+that names it by its place in the file, such as
+`unknown key "x" under checks: at line 12`, with a hint to check the spelling
+or upgrade. Strictness cuts both ways: a newer Preflight may write keys an
+older one rejects, so upgrade the CLI when a teammate's `init` adds a key
+yours does not know.
+
+A few legacy shapes still load, each with a note on stderr:
+
+- A `groq` service is read as `grok`.
+- A service ID this version does not know is dropped when it has
+  `declared: false` (a newer `init` lists every service it knows). With
+  `declared: true` it is still an error.
+- A bare word in `ignore:` that is not a check or service ID (like `vendor`)
+  matches only a file of that name at the project root. Use `vendor/**` to
+  skip a directory.
 
 ## Ignoring Checks & Services
 
@@ -315,7 +360,7 @@ project-relative file path.
 
 **Pin the fingerprint.** A path-only allowlist silently accepts *any*
 future secret dropped into that file. Edit the entry and add a
-`fingerprint: "sha256:<hex>"` — the SHA-256 of the detected secret
+`fingerprint: "sha256:<hex>"`, the SHA-256 of the detected secret
 value. Now if the key is rotated or a different secret shows up in the
 same file, preflight re-alerts.
 
@@ -346,10 +391,19 @@ other lines in the same file.
 ### Check IDs renamed in 0.22
 
 Every check ID is now snake_case. 0.22 accepted the old camelCase names
-with a note on stderr; 1.0 rejects them. An old name in an `ignore:`
-list, `--only`, or `--skip` is a usage error (exit 64) that names the new
-ID. `preflight ignore <new-id>` rewrites an old entry in place, and
-`preflight unignore` removes an entry by either name. The keys under
+with a note on stderr; 0.25 rejects them. An old name in an `ignore:`
+list, `--only`, or `--skip` is a usage error (exit 64). One error lists
+every old ID it found, each with its new name and the fix:
+
+```
+Error: pre-1.0 check IDs are not accepted:
+  unknown check ID "seoMeta" in ignore: renamed to "seo_meta" in v0.22.0; run 'preflight ignore seo_meta' to update the ignore list
+  unknown check ID "ogTwitter" in --only: renamed to "og_twitter" in v0.22.0; use --only og_twitter
+```
+
+`preflight ignore <new-id>` rewrites an old entry in place and removes
+duplicate spellings of the same ID. `preflight unignore` removes an entry
+by either name. The keys under
 `checks:` in `preflight.yml` (`healthEndpoint`, `seoMeta`, ...) are a
 separate schema and did not change.
 
@@ -374,10 +428,13 @@ produce warnings and exit code 1 unless another check produces an error.
 A scan containing only skipped checks also exits 1. Disabled checks are outside
 the scan's scope; a partial scan cannot establish overall launch readiness.
 
-JSON schema version **2** adds `skipped` and `inconclusive` to check outcomes
-and their summary counts. A skipped check has `passed: false`; inconclusive
-checks count as warnings. Consumers of schema 1 should update these semantics
-before consuming schema 2. Published payloads use the same version.
+JSON schema version **2** (since 0.24) adds `skipped` and `inconclusive` to
+check outcomes and their summary counts. A skipped check has `passed: false`
+and `severity: "info"`, and counts only toward `summary.skipped`. An
+inconclusive check counts toward `summary.inconclusive` and also toward `warn`
+(or `fail` for an error). Both fields are omitted when false or zero. Consumers
+of schema 1 should update these semantics before consuming schema 2. Published
+payloads and `history --format json` use the same version.
 
 When a website URL is configured, metadata checks verify all requirements
 against fetched HTML. Static templates cannot override missing deployed tags.
@@ -386,18 +443,24 @@ source checks are heuristics; SDK references and local configuration do not
 prove that production credentials or integrations work.
 
 Secret scanning includes `.example` and `.sample` files and source/configuration
-files up to 32 MiB. Oversized or unreadable in-scope files make the scan
-inconclusive. Public telemetry identifiers such as Sentry DSNs and PostHog
+files up to 2 MB. Larger files are skipped; only a git-tracked source or config
+file over the cap (not a data dump or a minified bundle) makes the scan
+inconclusive, as does an unreadable file. In example files, a private key header
+followed by placeholder text instead of key material is not reported. Public
+telemetry identifiers such as Sentry DSNs and PostHog
 project tokens are not classified as private credentials. Use explicit,
 fingerprint-pinned allowlists for intentional secret-shaped test fixtures.
 
 ### Dependency audit scope
 
 The vulnerability check discovers supported manifests and lockfiles recursively,
-excluding dependency trees, build outputs, and agent worktrees. It audits every
-discovered project/ecosystem target, including mixed-language projects and
-nested applications. Each directory/tool outcome appears in the report.
-Yarn takes precedence when both Yarn and npm lockfiles exist in one directory.
+excluding dependency trees, build outputs, agent worktrees, and paths matched by
+`ignore:` globs. It audits every discovered project/ecosystem target, including
+mixed-language projects and nested applications. A workspace member whose
+dependencies are covered by an ancestor's lockfile is not audited separately.
+Each directory/tool outcome appears in the report. Yarn takes precedence when
+both Yarn and npm lockfiles exist in one directory. Yarn 2+ is not run when a
+`.yarnrc.yml` applies (it can load project code); that target is inconclusive.
 
 Supported audit inputs are `Gemfile.lock`, `yarn.lock`, `package-lock.json`,
 `composer.lock`, `requirements.txt`, `go.mod`/`go.sum`, and `Cargo.lock`.
@@ -418,14 +481,19 @@ Run package-manager audits on the host or in the relevant language image.
 
 ### Email authentication domain
 
-Set `checks.emailAuth.domain` to the actual email sending domain. It is required
-when email authentication is enabled and is independent of `urls.production`
-and `urls.staging`. SPF is checked only at that exact domain. DMARC may fall back
-to its organizational domain only when the child record is absent. Resolver
-errors, malformed records, and duplicate records are reported as inconclusive.
-These checks inspect DNS configuration; they do not send a test email or prove
-provider authorization and deliverability. Existing enabled email-auth configs
-must add `domain` before their next scan.
+Set `checks.emailAuth.domain` to the actual email sending domain. SPF is checked
+only at that exact domain. DMARC may fall back to its organizational domain only
+when the child record is absent. Resolver errors, malformed records, and
+duplicate records are reported as inconclusive. These checks inspect DNS
+configuration; they do not send a test email or prove provider authorization
+and deliverability.
+
+Without a `domain`, the check uses the production URL's host, then its
+organizational domain (`www.example.com`, then `example.com`), and its message
+says the domain came from the production URL. Configs from before 0.24, which
+had no `domain` key, keep working this way. With neither a `domain` nor a
+production URL, the check is skipped. Set `domain` when you send mail from a
+domain other than the one you serve.
 
 The check performs basic record validation and conventional public-suffix-based
 DMARC fallback. It does not evaluate SPF includes, DKIM, message alignment, or
@@ -434,19 +502,23 @@ the [RFC 9989 DNS tree-walk algorithm](https://www.rfc-editor.org/rfc/rfc9989.ht
 ### A note on scanning code you don't trust
 
 Every check reads files; one runs a program. The `vulnerability` check
-executes your project's own package manager (`npm audit`, `yarn audit`,
-`composer audit`, `bundle audit`, `pip-audit`, `govulncheck`, `cargo audit`)
+runs your package manager's audit tool (`npm audit`, `yarn audit`,
+`composer audit`, `bundle-audit`, `pip-audit`, `govulncheck`, `cargo-audit`)
 inside the project directory, with a scrubbed environment and a temporary
-home so it cannot read your tokens. Package managers still honor
-project-local configuration, and some of that configuration can run code
-from the repository (a Yarn `yarnPath`, a Cargo alias, a Composer plugin).
-Scanning your own projects is what Preflight is for. When scanning a
-repository you don't trust, such as a fork's pull request in CI, add
-`--skip vulnerability`.
+home so it cannot read your tokens. It avoids the known ways a repository
+can hand that run to its own code: `cargo-audit` and `bundle-audit` run
+directly rather than through `cargo` and `bundle`, Composer runs with
+`--no-plugins --no-scripts`, Yarn classic ignores a `yarn-path`, and Yarn
+2+ is not run under a `.yarnrc.yml`. Audit tools still read project-local
+configuration, though, so this is a mitigation, not a sandbox. Scanning
+your own projects is what Preflight is for. When scanning a repository
+you don't trust, such as a fork's pull request in CI, add
+`--skip vulnerability`. See [SECURITY.md](SECURITY.md) for how to report a
+vulnerability in Preflight itself.
 
 ### Ignorable Service IDs
 
-All services have validation checks that verify proper integration (env vars, SDK patterns, config files):
+All services have validation checks that verify proper integration (env vars, SDK patterns, config files). Env keys are read from every `.env*` file at the project root: a value in `.env`, `.env.local`, `.env.test`, and the like sets a key, and a name in `.env.example`, `.env.sample`, or `.env.dist` documents it, which passes as configured but unverified (in CI, the example file is often all there is).
 
 **Payments:** `stripe`, `paypal`, `braintree`, `paddle`, `lemonsqueezy`
 
@@ -470,7 +542,7 @@ All services have validation checks that verify proper integration (env vars, SD
 
 **AI:** `openai`, `anthropic`, `google_ai`, `mistral`, `cohere`, `replicate`, `huggingface`, `grok`, `perplexity`, `together_ai`
 
-**SEO:** `index_now`
+**SEO:** `indexnow` (the IndexNow service; its check ID is `index_now`, and either name works with `ignore`, `--only`, and `--skip`)
 
 **Cookie Consent:** `cookieconsent`, `cookiebot`, `onetrust`, `termly`, `cookieyes`, `iubenda`
 
@@ -481,7 +553,7 @@ All services have validation checks that verify proper integration (env vars, SD
 | 0 | All checks passed |
 | 1 | Warnings only |
 | 2 | Errors found |
-| 64 | Preflight could not run (bad path, unreadable config, unknown check ID) |
+| 64 | Preflight could not run (bad path, unreadable or invalid config, unknown or pre-0.22 check ID, bad flag) |
 | 130 | Scan cancelled (Ctrl-C / SIGTERM) |
 
 Codes 1 and 2 mean the scan ran and reported something. Code 64 means it
@@ -505,7 +577,18 @@ source <(preflight completion zsh)
 preflight completion fish | source
 ```
 
-Output also respects the [`NO_COLOR`](https://no-color.org) environment variable.
+`preflight help <command>` (or `preflight <command> --help`) shows any command's help.
+
+## Environment Variables
+
+| Variable | Effect |
+|---|---|
+| `NO_COLOR` | Turns off colored output ([no-color.org](https://no-color.org)) |
+| `PREFLIGHT_TOKEN` | Token for `preflight auth login` to store instead of opening a browser |
+| `PREFLIGHT_NO_UPDATE_CHECK` | Any non-empty value turns off the daily update check (it is already skipped with `--ci` and `--format json`) |
+| `PREFLIGHT_INSTALL_DIR` | Where `install.sh` puts the binary (default `/usr/local/bin`) |
+| `PREFLIGHT_VERSION` | Release tag for `install.sh` to install, such as `v0.25.0` (default: latest) |
+| `PREFLIGHT_API_URL` | Dashboard base URL. Internal, for testing against a local dashboard only |
 
 ## Supported Stacks
 
@@ -513,7 +596,7 @@ Output also respects the [`NO_COLOR`](https://no-color.org) environment variable
 - Ruby on Rails, Laravel, PHP, Go, Python/Django, Rust, Node.js
 
 **Frontend Frameworks**
-- Next.js, Nuxt, Remix, React, Vue.js, Vite, Svelte, Angular
+- Next.js, Nuxt, Remix, React, Vue.js, Vite, Svelte/SvelteKit, Angular
 
 **Traditional CMS**
 - WordPress, Craft CMS, Drupal, Ghost
