@@ -348,9 +348,21 @@ func getErrorPagePaths(stack string) (paths404 []string, paths500 []string) {
 			"src/pages/404.vue", "src/views/404.vue", "src/pages/NotFound.vue",
 			"src/pages/404.tsx", "src/pages/404.jsx", "src/pages/NotFound.tsx",
 			"src/routes/404.svelte", "src/pages/404.svelte",
+			"src/routes/+error.svelte",
 			"public/404.html",
 		}
+		paths500 = []string{"src/routes/+error.svelte"}
+
+	case "remix":
+		// A splat route catches unknown URLs; the root ErrorBoundary renders
+		// server errors but lives in app/root.tsx, which every app has.
+		paths404 = []string{"app/routes/$.tsx", "app/routes/$.jsx", "app/routes/$.ts", "app/routes/$.js"}
 		paths500 = []string{}
+
+	case "nuxt":
+		// error.vue renders both 404s and server errors.
+		paths404 = []string{"error.vue", "app/error.vue"}
+		paths500 = []string{"error.vue", "app/error.vue"}
 
 	case "php":
 		// Basic PHP sites often put error pages in public/errors/ or just public/
@@ -430,6 +442,18 @@ func getErrorPageSuggestions(stack string) []string {
 			"Create src/pages/404.vue or handle in router",
 			"Add public/404.html for server-side fallback",
 		}
+
+	case "remix":
+		return []string{
+			"Create app/routes/$.tsx to catch unknown URLs",
+			"Export an ErrorBoundary from app/root.tsx for server errors",
+		}
+
+	case "nuxt":
+		return []string{"Create error.vue in the project root (it handles 404 and 500)"}
+
+	case "svelte":
+		return []string{"Create src/routes/+error.svelte"}
 
 	case "react":
 		return []string{
