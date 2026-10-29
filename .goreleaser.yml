@@ -32,7 +32,9 @@ checksum:
 
 brews:
   - name: preflight
-    skip_upload: "{{ if .IsSnapshot }}true{{ end }}"
+    # auto skips prereleases, so an rc tag never reaches brew upgrade.
+    # Snapshots never reach the publish step at all.
+    skip_upload: auto
     repository:
       owner: preflightsh
       name: homebrew-preflight
@@ -44,6 +46,8 @@ brews:
       email: "actions@github.com"
     install: |
       bin.install "preflight"
+    test: |
+      assert_match version.to_s, shell_output("#{bin}/preflight version")
 
 dockers:
   - id: preflight-amd64
@@ -51,7 +55,7 @@ dockers:
     goarch: amd64
     image_templates:
       - "ghcr.io/preflightsh/preflight:{{ .Version }}-amd64"
-      - "ghcr.io/preflightsh/preflight:latest-amd64"
+      - "{{ if not .Prerelease }}ghcr.io/preflightsh/preflight:latest-amd64{{ end }}"
     dockerfile: Dockerfile
     use: buildx
     build_flag_templates:
@@ -62,7 +66,7 @@ dockers:
     goarch: arm64
     image_templates:
       - "ghcr.io/preflightsh/preflight:{{ .Version }}-arm64"
-      - "ghcr.io/preflightsh/preflight:latest-arm64"
+      - "{{ if not .Prerelease }}ghcr.io/preflightsh/preflight:latest-arm64{{ end }}"
     dockerfile: Dockerfile
     use: buildx
     build_flag_templates:
@@ -74,13 +78,31 @@ docker_manifests:
       - "ghcr.io/preflightsh/preflight:{{ .Version }}-amd64"
       - "ghcr.io/preflightsh/preflight:{{ .Version }}-arm64"
 
-  - name_template: "ghcr.io/preflightsh/preflight:latest"
+  # The moving tags below are for stable releases only. An empty name
+  # skips the manifest, so a prerelease publishes just its own version
+  # tag and never moves latest, the major, or the minor. They point at
+  # the version images because latest-<arch> is not pushed for a
+  # prerelease either.
+  - name_template: "{{ if not .Prerelease }}ghcr.io/preflightsh/preflight:latest{{ end }}"
     image_templates:
-      - "ghcr.io/preflightsh/preflight:latest-amd64"
-      - "ghcr.io/preflightsh/preflight:latest-arm64"
+      - "ghcr.io/preflightsh/preflight:{{ .Version }}-amd64"
+      - "ghcr.io/preflightsh/preflight:{{ .Version }}-arm64"
+
+  - name_template: "{{ if not .Prerelease }}ghcr.io/preflightsh/preflight:{{ .Major }}{{ end }}"
+    image_templates:
+      - "ghcr.io/preflightsh/preflight:{{ .Version }}-amd64"
+      - "ghcr.io/preflightsh/preflight:{{ .Version }}-arm64"
+
+  - name_template: "{{ if not .Prerelease }}ghcr.io/preflightsh/preflight:{{ .Major }}.{{ .Minor }}{{ end }}"
+    image_templates:
+      - "ghcr.io/preflightsh/preflight:{{ .Version }}-amd64"
+      - "ghcr.io/preflightsh/preflight:{{ .Version }}-arm64"
 
 release:
-  prerelease: false
+  # A tag with a semver prerelease part (v1.0.0-rc.1) is marked as a
+  # prerelease, so GitHub's latest release, which the update notifier
+  # and install.sh both read, stays on the last stable version.
+  prerelease: auto
 
 changelog:
   disable: true
