@@ -43,6 +43,39 @@ func TestLoadRejectsUnknownKeys(t *testing.T) {
 	}
 }
 
+// yaml.v3 names Go types ("field sentry not found in type
+// config.ChecksConfig"). The error names the key, where it sits, and the
+// line, in the file's own terms.
+func TestUnknownKeyErrorUsesConfigTerms(t *testing.T) {
+	cases := []struct{ body, want string }{
+		{"projectName: demo\nchecks:\n  secrets:\n    enabled: true\n  sentry:\n    enabled: true\n", `unknown key "sentry" under checks: at line 5`},
+		{"projectName: demo\nprojctName: x\n", `unknown top-level key "projctName" at line 2`},
+		{"checks:\n  healthEndpoint:\n    enabeld: true\n", `unknown key "enabeld" under checks.healthEndpoint: at line 3`},
+		{"services:\n  stripe:\n    declard: true\n", `unknown key "declard" under services.stripe: at line 3`},
+	}
+	for _, tc := range cases {
+		_, err := Load(writeConfig(t, tc.body))
+		if err == nil {
+			t.Fatalf("%q loaded", tc.body)
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, tc.want) {
+			t.Errorf("got %q, want it to contain %q", msg, tc.want)
+		}
+		if strings.Contains(msg, "config.") || strings.Contains(msg, "not found in type") {
+			t.Errorf("error still names Go types: %q", msg)
+		}
+		if !strings.Contains(msg, "newer Preflight") {
+			t.Errorf("error should hint at a newer Preflight: %q", msg)
+		}
+	}
+	// A service listed under checks: is the likely mistake behind "sentry".
+	_, err := Load(writeConfig(t, "checks:\n  sentry:\n    enabled: true\n"))
+	if err == nil || !strings.Contains(err.Error(), "services:") {
+		t.Errorf("want a pointer to services:, got %v", err)
+	}
+}
+
 func TestLoadEmptyFile(t *testing.T) {
 	dir := writeConfig(t, "")
 	cfg, err := Load(dir)

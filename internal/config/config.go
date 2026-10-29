@@ -7,7 +7,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
@@ -156,11 +158,16 @@ func Load(rootDir string) (*PreflightConfig, error) {
 	var cfg PreflightConfig
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
-	if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("failed to parse preflight.yml: %w", err)
-	}
+	decodeErr := dec.Decode(&cfg)
 	var doc yaml.Node
-	if err := yaml.Unmarshal(data, &doc); err == nil {
+	docErr := yaml.Unmarshal(data, &doc)
+	if decodeErr != nil && !errors.Is(decodeErr, io.EOF) {
+		if docErr == nil {
+			decodeErr = describeUnknownKeys(decodeErr, &doc)
+		}
+		return nil, fmt.Errorf("failed to parse preflight.yml: %w", decodeErr)
+	}
+	if docErr == nil {
 		markExplicitEnabled(&cfg, &doc)
 	}
 
@@ -250,6 +257,75 @@ func validateMailDomain(c *EmailAuthConfig) error {
 		}
 	}
 	return nil
+}
+
+var unknownFieldRe = regexp.MustCompile(`^line (\d+): field (.+) not found in type \S+$`)
+
+// describeUnknownKeys rewrites yaml.v3's unknown-field errors, which name
+// Go types ("field sentry not found in type config.ChecksConfig"), into
+// the file's own terms: the key, the block it sits under, and its line.
+// Other decode errors pass through unchanged.
+func describeUnknownKeys(err error, doc *yaml.Node) error {
+	var typeErr *yaml.TypeError
+	if !errors.As(err, &typeErr) {
+		return err
+	}
+	lines := make([]string, 0, len(typeErr.Errors))
+	unknown := false
+	for _, e := range typeErr.Errors {
+		m := unknownFieldRe.FindStringSubmatch(e)
+		if m == nil {
+			lines = append(lines, e)
+			continue
+		}
+		unknown = true
+		line, _ := strconv.Atoi(m[1])
+		key := m[2]
+		path, found := keyPath(doc, key, line, nil)
+		switch {
+		case !found:
+			lines = append(lines, fmt.Sprintf("unknown key %q at line %d", key, line))
+		case len(path) == 0:
+			lines = append(lines, fmt.Sprintf("unknown top-level key %q at line %d", key, line))
+		default:
+			msg := fmt.Sprintf("unknown key %q under %s: at line %d", key, strings.Join(path, "."), line)
+			if len(path) == 1 && path[0] == "checks" && catalog.IsService(key) {
+				msg += fmt.Sprintf(" (%s is a service; declare it under services:)", key)
+			}
+			lines = append(lines, msg)
+		}
+	}
+	msg := strings.Join(lines, "; ")
+	if unknown {
+		// Strict keys cut both ways: a config written by a newer init can
+		// hold keys this version has never seen.
+		msg += ". Check the spelling; if this file was written by a newer Preflight, upgrade the CLI"
+	}
+	return errors.New(msg)
+}
+
+// keyPath finds the mapping key named key on line and returns the keys of
+// the mappings above it.
+func keyPath(n *yaml.Node, key string, line int, parents []string) ([]string, bool) {
+	switch n.Kind {
+	case yaml.DocumentNode, yaml.SequenceNode:
+		for _, c := range n.Content {
+			if p, ok := keyPath(c, key, line, parents); ok {
+				return p, true
+			}
+		}
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			k := n.Content[i]
+			if k.Value == key && k.Line == line {
+				return parents, true
+			}
+			if p, ok := keyPath(n.Content[i+1], key, line, append(append([]string(nil), parents...), k.Value)); ok {
+				return p, true
+			}
+		}
+	}
+	return nil, false
 }
 
 // serviceRenames maps service IDs that preflight init once wrote to their
