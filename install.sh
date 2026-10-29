@@ -116,7 +116,7 @@ install() {
 
     # Verify checksum (hard fail if anything is missing).
     cd "${TMP_DIR}"
-    expected=$(grep -F "${FILENAME}" checksums.txt | awk '{print $1}' | head -n 1)
+    expected=$(awk -v f="${FILENAME}" '$2 == f { print $1; exit }' checksums.txt)
     if [ -z "$expected" ]; then
         error "No checksum entry for ${FILENAME} in checksums.txt"
     fi
