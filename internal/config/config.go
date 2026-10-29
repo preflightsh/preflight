@@ -214,32 +214,40 @@ func Validate(cfg *PreflightConfig) error {
 			}
 		}
 	}
-	// An empty emailAuth.domain is left to the check, which reports it as
-	// an inconclusive warning. Rejecting it here failed every scan of a
-	// pre-0.24 config that had emailAuth enabled, since those had no
-	// domain key.
+	// An empty emailAuth.domain is left to the check, which falls back to
+	// the production URL's domain as v0.23 did. Rejecting it here failed
+	// every scan of a pre-0.24 config that had emailAuth enabled, since
+	// those had no domain key.
 	if c := cfg.Checks.EmailAuth; c != nil && c.Enabled {
-		domain := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(c.Domain)), ".")
-		if domain == "" {
-			c.Domain = ""
-			return nil
+		if err := validateMailDomain(c); err != nil {
+			return err
 		}
-		if strings.ContainsAny(domain, "/:@ ?#") || !strings.Contains(domain, ".") {
-			return fmt.Errorf("emailAuth.domain must name the email sending domain, e.g. mail.example.com")
+	}
+	return nil
+}
+
+// validateMailDomain normalizes checks.emailAuth.domain and rejects one
+// that is not a plain ASCII DNS name. An empty domain is valid.
+func validateMailDomain(c *EmailAuthConfig) error {
+	domain := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(c.Domain)), ".")
+	c.Domain = domain
+	if domain == "" {
+		return nil
+	}
+	if strings.ContainsAny(domain, "/:@ ?#") || !strings.Contains(domain, ".") {
+		return fmt.Errorf("emailAuth.domain must name the email sending domain, e.g. mail.example.com")
+	}
+	for _, label := range strings.Split(domain, ".") {
+		if len(label) == 0 || len(label) > 63 || strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
+			return fmt.Errorf("invalid emailAuth.domain")
 		}
-		for _, label := range strings.Split(domain, ".") {
-			if len(label) == 0 || len(label) > 63 || strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
-				return fmt.Errorf("invalid emailAuth.domain")
+		for _, r := range label {
+			letter := r >= 'a' && r <= 'z'
+			digit := r >= '0' && r <= '9'
+			if !letter && !digit && r != '-' {
+				return fmt.Errorf("emailAuth.domain must be an ASCII DNS name")
 			}
-			for _, r := range label {
-				letter := r >= 'a' && r <= 'z'
-				digit := r >= '0' && r <= '9'
-				if !letter && !digit && r != '-' {
-					return fmt.Errorf("emailAuth.domain must be an ASCII DNS name")
-				}
-			}
 		}
-		c.Domain = domain
 	}
 	return nil
 }

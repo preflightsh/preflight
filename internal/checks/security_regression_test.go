@@ -281,7 +281,7 @@ func TestMailRecordsValidation(t *testing.T) {
 	}
 	ctx := regressionContext(t.TempDir())
 	ctx.Config.Checks.EmailAuth = &config.EmailAuthConfig{Enabled: true}
-	if r, _ := (EmailAuthCheck{}).Run(ctx); r.Passed || !r.Inconclusive {
+	if r, _ := (EmailAuthCheck{}).Run(ctx); r.Passed || !r.Skipped {
 		t.Fatal("missing mail domain passed")
 	}
 }

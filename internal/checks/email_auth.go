@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"strings"
 	"time"
 
@@ -27,12 +28,28 @@ func (c EmailAuthCheck) Run(ctx Context) (CheckResult, error) {
 		return CheckResult{ID: c.ID(), Title: c.Title(), Skipped: true, Severity: SeverityInfo, Message: "Email authentication not enabled"}, nil
 	}
 	domain := cfg.Domain
+	spfDomains := []string{domain}
+	dmarcDomains := mailDomainCandidates(domain)
+	note := ""
 	if domain == "" {
-		return CheckResult{ID: c.ID(), Title: c.Title(), Severity: SeverityWarn, Inconclusive: true, Message: "Set emailAuth.domain to the email sending domain; website URLs are not mail identities"}, nil
+		// Configs written before 0.24 have no domain key. v0.23 checked the
+		// production URL's host and its organizational domain, and that is
+		// still the best guess: most sites send mail from the domain they
+		// serve. Say where the domain came from so a site that sends from
+		// elsewhere knows how to point the check at it.
+		host := productionHost(ctx.Config.URLs.Production)
+		if host == "" {
+			return CheckResult{ID: c.ID(), Title: c.Title(), Skipped: true, Severity: SeverityInfo, Message: "Skipped: set checks.emailAuth.domain to the email sending domain (there is no production URL to take it from)"}, nil
+		}
+		spfDomains = mailDomainCandidates(host)
+		dmarcDomains = spfDomains
+		// The domain to name in advice is the organizational one, since
+		// that's where a missing record belongs.
+		domain = spfDomains[len(spfDomains)-1]
+		note = " (domain from production URL; set checks.emailAuth.domain to choose it)"
 	}
-	hasSPF, spfRecord, spfErr := checkSPFContext(ctx.reqContext(), domain)
-	spfDomain := domain
-	hasDMARC, dmarcRecord, dmarcDomain, dmarcErr := lookupFirst(mailDomainCandidates(domain), func(d string) (bool, string, error) { return checkDMARCContext(ctx.reqContext(), d) })
+	hasSPF, spfRecord, spfDomain, spfErr := lookupFirst(spfDomains, func(d string) (bool, string, error) { return checkSPFContext(ctx.reqContext(), d) })
+	hasDMARC, dmarcRecord, dmarcDomain, dmarcErr := lookupFirst(dmarcDomains, func(d string) (bool, string, error) { return checkDMARCContext(ctx.reqContext(), d) })
 
 	// If DNS lookups failed, report the error instead of claiming records are missing
 	if spfErr != nil || dmarcErr != nil {
@@ -49,7 +66,7 @@ func (c EmailAuthCheck) Run(ctx Context) (CheckResult, error) {
 			Title:        c.Title(),
 			Severity:     SeverityWarn,
 			Passed:       false,
-			Message:      fmt.Sprintf("DNS lookup error for %s: %s", domain, strings.Join(errParts, "; ")),
+			Message:      fmt.Sprintf("DNS lookup error for %s: %s", domain, strings.Join(errParts, "; ")) + note,
 			Suggestions: []string{
 				"Check your network connection and DNS resolver",
 				"Verify checks.emailAuth.domain is the email sending domain",
@@ -72,7 +89,7 @@ func (c EmailAuthCheck) Run(ctx Context) (CheckResult, error) {
 				Title:    c.Title(),
 				Severity: SeverityInfo,
 				Passed:   true,
-				Message:  fmt.Sprintf("SPF configured for %s, DMARC for %s", spfDomain, dmarcDomain),
+				Message:  fmt.Sprintf("SPF configured for %s, DMARC for %s", spfDomain, dmarcDomain) + note,
 			}, nil
 		}
 		return CheckResult{
@@ -80,7 +97,7 @@ func (c EmailAuthCheck) Run(ctx Context) (CheckResult, error) {
 			Title:    c.Title(),
 			Severity: SeverityInfo,
 			Passed:   true,
-			Message:  fmt.Sprintf("SPF and DMARC configured for %s", spfDomain),
+			Message:  fmt.Sprintf("SPF and DMARC configured for %s", spfDomain) + note,
 		}, nil
 	}
 
@@ -101,9 +118,24 @@ func (c EmailAuthCheck) Run(ctx Context) (CheckResult, error) {
 		Title:       c.Title(),
 		Severity:    SeverityWarn,
 		Passed:      false,
-		Message:     fmt.Sprintf("Missing: %s", strings.Join(missing, ", ")),
+		Message:     fmt.Sprintf("Missing: %s for %s", strings.Join(missing, ", "), domain) + note,
 		Suggestions: suggestions,
 	}, nil
+}
+
+// productionHost returns the host of a production URL for the mail-domain
+// fallback, or "" when there is none worth looking up (no URL, an IP
+// literal, or a single-label host such as localhost).
+func productionHost(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return ""
+	}
+	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	if host == "" || net.ParseIP(host) != nil || !strings.Contains(host, ".") {
+		return ""
+	}
+	return host
 }
 
 // mailDomainCandidates lists the domains to try for a host, most specific
@@ -142,6 +174,9 @@ func lookupFirst(domains []string, lookup func(string) (bool, string, error)) (f
 
 const fallbackDNSServer = "1.1.1.1:53"
 
+// txtLookup is the TXT resolver the SPF and DMARC checks use; tests swap it.
+var txtLookup = lookupTXT
+
 func lookupTXT(parent context.Context, name string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
@@ -172,7 +207,7 @@ func lookupTXT(parent context.Context, name string) ([]string, error) {
 }
 
 func checkSPFContext(ctx context.Context, domain string) (bool, string, error) {
-	records, err := lookupTXT(ctx, domain)
+	records, err := txtLookup(ctx, domain)
 	return evaluateSPF(records, err)
 }
 func evaluateSPF(records []string, err error) (bool, string, error) {
@@ -230,7 +265,7 @@ func evaluateSPF(records []string, err error) (bool, string, error) {
 	return true, found, nil
 }
 func checkDMARCContext(ctx context.Context, domain string) (bool, string, error) {
-	records, err := lookupTXT(ctx, "_dmarc."+domain)
+	records, err := txtLookup(ctx, "_dmarc."+domain)
 	return evaluateDMARC(records, err)
 }
 func evaluateDMARC(records []string, err error) (bool, string, error) {
