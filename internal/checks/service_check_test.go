@@ -30,7 +30,6 @@ func newServiceCheck() ServiceCheck {
 		EnvPrefixes:    []string{"ACME_"},
 		LivePatterns:   []*regexp.Regexp{regexp.MustCompile(`acme\.js`)},
 		CodePatterns:   []*regexp.Regexp{regexp.MustCompile(`acme-sdk`)},
-		EnvFoundMsg:    "env-found",
 		LiveFoundMsg:   "live-found",
 		CodeFoundMsg:   "code-found",
 		LiveMissingMsg: "live-missing",
@@ -80,8 +79,8 @@ func TestServiceCheckPriority(t *testing.T) {
 
 	t.Run("env var wins over everything", func(t *testing.T) {
 		res := runServiceCheck(t, svcOpts{declared: true, envFile: "ACME_KEY=x\n"})
-		if !res.Passed || res.Message != "env-found" {
-			t.Errorf("got passed=%v msg=%q, want env-found", res.Passed, res.Message)
+		if !res.Passed || res.Message != "Acme key found in .env" {
+			t.Errorf("got passed=%v msg=%q, want the key found in .env", res.Passed, res.Message)
 		}
 	})
 

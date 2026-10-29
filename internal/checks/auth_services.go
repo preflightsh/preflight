@@ -15,7 +15,6 @@ var Auth0Check = ServiceCheck{
 		regexp.MustCompile(`Auth0Provider`),
 		regexp.MustCompile(`createAuth0Client`),
 	},
-	EnvFoundMsg:  "Auth0 configuration found in environment",
 	CodeFoundMsg: "Auth0 SDK initialization found",
 	NotFoundMsg:  "Auth0 is declared but SDK not found",
 	NotFoundSuggestions: []string{
@@ -34,7 +33,6 @@ var ClerkCheck = ServiceCheck{
 		regexp.MustCompile(`ClerkProvider`),
 		regexp.MustCompile(`clerk\.com`),
 	},
-	EnvFoundMsg:  "Clerk configuration found in environment",
 	CodeFoundMsg: "Clerk SDK initialization found",
 	NotFoundMsg:  "Clerk is declared but SDK not found",
 	NotFoundSuggestions: []string{
@@ -53,7 +51,6 @@ var WorkOSCheck = ServiceCheck{
 		regexp.MustCompile(`workos\.com`),
 		regexp.MustCompile(`WorkOS`),
 	},
-	EnvFoundMsg:  "WorkOS configuration found in environment",
 	CodeFoundMsg: "WorkOS SDK initialization found",
 	NotFoundMsg:  "WorkOS is declared but SDK not found",
 	NotFoundSuggestions: []string{
@@ -74,7 +71,6 @@ var FirebaseCheck = ServiceCheck{
 		regexp.MustCompile(`firebase\.google\.com`),
 		regexp.MustCompile(`firebase\.initializeApp`),
 	},
-	EnvFoundMsg:  "Firebase configuration found in environment",
 	CodeFoundMsg: "Firebase initialization found",
 	NotFoundMsg:  "Firebase is declared but initialization not found",
 	NotFoundSuggestions: []string{
@@ -95,7 +91,6 @@ var SupabaseCheck = ServiceCheck{
 		regexp.MustCompile(`createClient\s*\([^)]*supabase`),
 		regexp.MustCompile(`from\s+["']@supabase`),
 	},
-	EnvFoundMsg:  "Supabase configuration found in environment",
 	CodeFoundMsg: "Supabase initialization found",
 	NotFoundMsg:  "Supabase is declared but initialization not found",
 	NotFoundSuggestions: []string{

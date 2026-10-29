@@ -15,7 +15,6 @@ var AlgoliaCheck = ServiceCheck{
 		regexp.MustCompile(`algolia\.com`),
 		regexp.MustCompile(`InstantSearch`),
 	},
-	EnvFoundMsg:  "Algolia configuration found in environment",
 	CodeFoundMsg: "Algolia SDK initialization found",
 	NotFoundMsg:  "Algolia is declared but SDK not found",
 	NotFoundSuggestions: []string{

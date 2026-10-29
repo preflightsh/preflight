@@ -17,7 +17,6 @@ var TwilioCheck = ServiceCheck{
 		regexp.MustCompile(`from\s+["']twilio["']`),
 		regexp.MustCompile(`require\s*\(\s*["']twilio["']\)`),
 	},
-	EnvFoundMsg:  "Twilio configuration found in environment",
 	CodeFoundMsg: "Twilio SDK initialization found",
 	NotFoundMsg:  "Twilio is declared but SDK not found",
 	NotFoundSuggestions: []string{
@@ -36,7 +35,6 @@ var SlackCheck = ServiceCheck{
 		regexp.MustCompile(`hooks\.slack\.com`),
 		regexp.MustCompile(`api\.slack\.com`),
 	},
-	EnvFoundMsg:  "Slack configuration found in environment",
 	CodeFoundMsg: "Slack integration found",
 	NotFoundMsg:  "Slack is declared but integration not found",
 	NotFoundSuggestions: []string{
@@ -55,7 +53,6 @@ var DiscordCheck = ServiceCheck{
 		regexp.MustCompile(`discordrb`),
 		regexp.MustCompile(`discord\.com/api`),
 	},
-	EnvFoundMsg:  "Discord configuration found in environment",
 	CodeFoundMsg: "Discord SDK initialization found",
 	NotFoundMsg:  "Discord is declared but SDK not found",
 	NotFoundSuggestions: []string{
@@ -74,7 +71,6 @@ var IntercomCheck = ServiceCheck{
 		regexp.MustCompile(`intercomSettings`),
 		regexp.MustCompile(`@intercom/`),
 	},
-	EnvFoundMsg:  "Intercom configuration found in environment",
 	CodeFoundMsg: "Intercom widget found",
 	NotFoundMsg:  "Intercom is declared but widget not found",
 	NotFoundSuggestions: []string{
@@ -93,7 +89,6 @@ var CrispCheck = ServiceCheck{
 		regexp.MustCompile(`CRISP_WEBSITE_ID`),
 		regexp.MustCompile(`\$crisp`),
 	},
-	EnvFoundMsg:  "Crisp configuration found in environment",
 	CodeFoundMsg: "Crisp widget found",
 	NotFoundMsg:  "Crisp is declared but widget not found",
 	NotFoundSuggestions: []string{

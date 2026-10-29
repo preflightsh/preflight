@@ -76,7 +76,7 @@ func (c CookiebotCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	if hasEnvVar(ctx.RootDir, "COOKIEBOT_") {
+	if r, ok := envKeyPass(c.ID(), c.Title(), ctx.RootDir, "COOKIEBOT_"); ok {
 		if liveURL != "" {
 			return CheckResult{
 				ID:       c.ID(),
@@ -90,13 +90,7 @@ func (c CookiebotCheck) Run(ctx Context) (CheckResult, error) {
 				},
 			}, nil
 		}
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  "Cookiebot configuration found in environment",
-		}, nil
+		return r, nil
 	}
 
 	patterns := []*regexp.Regexp{
@@ -185,7 +179,7 @@ func (c OneTrustCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	if hasEnvVar(ctx.RootDir, "ONETRUST_") {
+	if r, ok := envKeyPass(c.ID(), c.Title(), ctx.RootDir, "ONETRUST_"); ok {
 		if liveURL != "" {
 			return CheckResult{
 				ID:       c.ID(),
@@ -198,13 +192,7 @@ func (c OneTrustCheck) Run(ctx Context) (CheckResult, error) {
 				},
 			}, nil
 		}
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  "OneTrust configuration found in environment",
-		}, nil
+		return r, nil
 	}
 
 	patterns := []*regexp.Regexp{
@@ -292,7 +280,7 @@ func (c TermlyCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	if hasEnvVar(ctx.RootDir, "TERMLY_") {
+	if r, ok := envKeyPass(c.ID(), c.Title(), ctx.RootDir, "TERMLY_"); ok {
 		if liveURL != "" {
 			return CheckResult{
 				ID:       c.ID(),
@@ -305,13 +293,7 @@ func (c TermlyCheck) Run(ctx Context) (CheckResult, error) {
 				},
 			}, nil
 		}
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  "Termly configuration found in environment",
-		}, nil
+		return r, nil
 	}
 
 	patterns := []*regexp.Regexp{
@@ -397,7 +379,7 @@ func (c CookieYesCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	if hasEnvVar(ctx.RootDir, "COOKIEYES_") {
+	if r, ok := envKeyPass(c.ID(), c.Title(), ctx.RootDir, "COOKIEYES_"); ok {
 		if liveURL != "" {
 			return CheckResult{
 				ID:       c.ID(),
@@ -410,13 +392,7 @@ func (c CookieYesCheck) Run(ctx Context) (CheckResult, error) {
 				},
 			}, nil
 		}
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  "CookieYes configuration found in environment",
-		}, nil
+		return r, nil
 	}
 
 	patterns := []*regexp.Regexp{
@@ -503,7 +479,7 @@ func (c IubendaCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	if hasEnvVar(ctx.RootDir, "IUBENDA_") {
+	if r, ok := envKeyPass(c.ID(), c.Title(), ctx.RootDir, "IUBENDA_"); ok {
 		if liveURL != "" {
 			return CheckResult{
 				ID:       c.ID(),
@@ -516,13 +492,7 @@ func (c IubendaCheck) Run(ctx Context) (CheckResult, error) {
 				},
 			}, nil
 		}
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  "Iubenda configuration found in environment",
-		}, nil
+		return r, nil
 	}
 
 	patterns := []*regexp.Regexp{

@@ -16,7 +16,6 @@ var MailchimpCheck = ServiceCheck{
 		regexp.MustCompile(`mc4wp`),
 		regexp.MustCompile(`mailchimp-for-wp`),
 	},
-	EnvFoundMsg:  "Mailchimp API key found in environment",
 	CodeFoundMsg: "Mailchimp integration found",
 	NotFoundMsg:  "Mailchimp is declared but integration not found",
 	NotFoundSuggestions: []string{
@@ -35,7 +34,6 @@ var ConvertKitCheck = ServiceCheck{
 		regexp.MustCompile(`app\.kit\.com`),
 		regexp.MustCompile(`@convertkit/`),
 	},
-	EnvFoundMsg:  "Kit API key found in environment",
 	CodeFoundMsg: "Kit integration found",
 	NotFoundMsg:  "Kit is declared but integration not found",
 	NotFoundSuggestions: []string{
@@ -53,7 +51,6 @@ var BeehiivCheck = ServiceCheck{
 		regexp.MustCompile(`beehiiv\.com`),
 		regexp.MustCompile(`embeds\.beehiiv\.com`),
 	},
-	EnvFoundMsg:  "Beehiiv API key found in environment",
 	CodeFoundMsg: "Beehiiv integration found",
 	NotFoundMsg:  "Beehiiv is declared but integration not found",
 	NotFoundSuggestions: []string{
@@ -71,7 +68,6 @@ var AWeberCheck = ServiceCheck{
 		regexp.MustCompile(`aweber\.com`),
 		regexp.MustCompile(`forms\.aweber\.com`),
 	},
-	EnvFoundMsg:  "AWeber configuration found in environment",
 	CodeFoundMsg: "AWeber integration found",
 	NotFoundMsg:  "AWeber is declared but integration not found",
 	NotFoundSuggestions: []string{
@@ -88,7 +84,6 @@ var ActiveCampaignCheck = ServiceCheck{
 		regexp.MustCompile(`activecampaign\.com`),
 		regexp.MustCompile(`trackcmp\.net`),
 	},
-	EnvFoundMsg:  "ActiveCampaign configuration found in environment",
 	CodeFoundMsg: "ActiveCampaign integration found",
 	NotFoundMsg:  "ActiveCampaign is declared but integration not found",
 	NotFoundSuggestions: []string{
@@ -105,7 +100,6 @@ var CampaignMonitorCheck = ServiceCheck{
 		regexp.MustCompile(`campaignmonitor\.com`),
 		regexp.MustCompile(`createsend\.com`),
 	},
-	EnvFoundMsg:  "Campaign Monitor configuration found in environment",
 	CodeFoundMsg: "Campaign Monitor integration found",
 	NotFoundMsg:  "Campaign Monitor is declared but integration not found",
 	NotFoundSuggestions: []string{
@@ -122,7 +116,6 @@ var DripCheck = ServiceCheck{
 		regexp.MustCompile(`getdrip\.com`),
 		regexp.MustCompile(`tag\.getdrip\.com`),
 	},
-	EnvFoundMsg:  "Drip configuration found in environment",
 	CodeFoundMsg: "Drip integration found",
 	NotFoundMsg:  "Drip is declared but integration not found",
 	NotFoundSuggestions: []string{
@@ -140,7 +133,6 @@ var KlaviyoCheck = ServiceCheck{
 		regexp.MustCompile(`klaviyo\.com`),
 		regexp.MustCompile(`static\.klaviyo\.com`),
 	},
-	EnvFoundMsg:  "Klaviyo configuration found in environment",
 	CodeFoundMsg: "Klaviyo integration found",
 	NotFoundMsg:  "Klaviyo is declared but integration not found",
 	NotFoundSuggestions: []string{
@@ -158,7 +150,6 @@ var ButtondownCheck = ServiceCheck{
 		regexp.MustCompile(`buttondown\.email`),
 		regexp.MustCompile(`buttondown\.com`),
 	},
-	EnvFoundMsg:  "Buttondown configuration found in environment",
 	CodeFoundMsg: "Buttondown integration found",
 	NotFoundMsg:  "Buttondown is declared but integration not found",
 	NotFoundSuggestions: []string{

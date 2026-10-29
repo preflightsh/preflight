@@ -10,8 +10,8 @@ import (
 // below run in order and the first hit wins:
 //
 //  1. skip when the service is not declared in preflight.yml
-//  2. pass when an env var with one of EnvPrefixes exists in the project's
-//     env files
+//  2. pass when a root env file sets or documents a name one of EnvPrefixes
+//     covers (envKeyPass, which says when .env.example is the only source)
 //  3. pass when any LivePatterns matches the live homepage (production
 //     first, then staging)
 //  4. CodePatterns found in the codebase: warn when a live page was actually
@@ -34,7 +34,6 @@ type ServiceCheck struct {
 
 	// Result messages, kept per-service so output matches what each check
 	// reported before being table-ified.
-	EnvFoundMsg  string
 	LiveFoundMsg string
 	CodeFoundMsg string
 	// LiveMissingMsg is reported when the code matched but the live page was
@@ -71,10 +70,8 @@ func (c ServiceCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	for _, prefix := range c.EnvPrefixes {
-		if hasEnvVar(ctx.RootDir, prefix) {
-			return pass(c.EnvFoundMsg)
-		}
+	if r, ok := envKeyPass(c.CheckID, c.CheckTitle, ctx.RootDir, c.EnvPrefixes...); ok {
+		return r, nil
 	}
 
 	liveURL := ""

@@ -16,7 +16,6 @@ var PayPalCheck = ServiceCheck{
 		regexp.MustCompile(`PayPalButtons`),
 		regexp.MustCompile(`paypalobjects\.com`),
 	},
-	EnvFoundMsg:  "PayPal configuration found in environment",
 	CodeFoundMsg: "PayPal SDK initialization found",
 	NotFoundMsg:  "PayPal is declared but SDK not found",
 	NotFoundSuggestions: []string{
@@ -37,7 +36,6 @@ var BraintreeCheck = ServiceCheck{
 		regexp.MustCompile(`braintreepayments`),
 		regexp.MustCompile(`braintree-web`),
 	},
-	EnvFoundMsg:  "Braintree configuration found in environment",
 	CodeFoundMsg: "Braintree SDK initialization found",
 	NotFoundMsg:  "Braintree is declared but SDK not found",
 	NotFoundSuggestions: []string{
@@ -58,7 +56,6 @@ var PaddleCheck = ServiceCheck{
 		regexp.MustCompile(`@paddle/paddle-js`),
 		regexp.MustCompile(`paddle-node`),
 	},
-	EnvFoundMsg:  "Paddle configuration found in environment",
 	CodeFoundMsg: "Paddle SDK initialization found",
 	NotFoundMsg:  "Paddle is declared but SDK not found",
 	NotFoundSuggestions: []string{
@@ -77,7 +74,6 @@ var LemonSqueezyCheck = ServiceCheck{
 		regexp.MustCompile(`lemonsqueezy\.com`),
 		regexp.MustCompile(`LemonSqueezy`),
 	},
-	EnvFoundMsg:  "LemonSqueezy configuration found in environment",
 	CodeFoundMsg: "LemonSqueezy SDK initialization found",
 	NotFoundMsg:  "LemonSqueezy is declared but SDK not found",
 	NotFoundSuggestions: []string{

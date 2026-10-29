@@ -16,7 +16,6 @@ var AWSS3Check = ServiceCheck{
 		regexp.MustCompile(`boto3.*s3`),
 		regexp.MustCompile(`s3\.amazonaws\.com`),
 	},
-	EnvFoundMsg:  "AWS S3 configuration found in environment",
 	CodeFoundMsg: "AWS S3 SDK initialization found",
 	NotFoundMsg:  "AWS S3 is declared but SDK not found",
 	NotFoundSuggestions: []string{
@@ -38,7 +37,6 @@ var CloudinaryCheck = ServiceCheck{
 		regexp.MustCompile(`cloudinary\.uploader`),
 		regexp.MustCompile(`from\s+["']cloudinary["']`),
 	},
-	EnvFoundMsg:  "Cloudinary configuration found in environment",
 	CodeFoundMsg: "Cloudinary SDK initialization found",
 	NotFoundMsg:  "Cloudinary is declared but SDK not found",
 	NotFoundSuggestions: []string{
@@ -60,7 +58,6 @@ var CloudflareCheck = ServiceCheck{
 		regexp.MustCompile(`wrangler\.toml`),
 		regexp.MustCompile(`wrangler deploy`),
 	},
-	EnvFoundMsg:  "Cloudflare configuration found in environment",
 	CodeFoundMsg: "Cloudflare integration found",
 	NotFoundMsg:  "Cloudflare is declared but integration not found",
 	NotFoundSuggestions: []string{

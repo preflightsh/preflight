@@ -20,7 +20,6 @@ var OpenAICheck = ServiceCheck{
 		regexp.MustCompile(`require\s*\(\s*["']openai["']\)`),
 		regexp.MustCompile(`import\s+openai`),
 	},
-	EnvFoundMsg:  "OpenAI API key found in environment",
 	CodeFoundMsg: "OpenAI SDK initialization found",
 	NotFoundMsg:  "OpenAI is declared but SDK not found",
 	NotFoundSuggestions: []string{
@@ -42,7 +41,6 @@ var AnthropicCheck = ServiceCheck{
 		regexp.MustCompile(`from\s+["']@anthropic-ai`),
 		regexp.MustCompile(`import\s+anthropic`),
 	},
-	EnvFoundMsg:  "Anthropic API key found in environment",
 	CodeFoundMsg: "Anthropic SDK initialization found",
 	NotFoundMsg:  "Anthropic is declared but SDK not found",
 	NotFoundSuggestions: []string{
@@ -64,7 +62,6 @@ var GoogleAICheck = ServiceCheck{
 		regexp.MustCompile(`gemini-1\.5`),
 		regexp.MustCompile(`models/gemini`),
 	},
-	EnvFoundMsg:  "Google AI API key found in environment",
 	CodeFoundMsg: "Google AI SDK initialization found",
 	NotFoundMsg:  "Google AI is declared but SDK not found",
 	NotFoundSuggestions: []string{
@@ -83,7 +80,6 @@ var MistralCheck = ServiceCheck{
 		regexp.MustCompile(`mistralai`),
 		regexp.MustCompile(`api\.mistral\.ai`),
 	},
-	EnvFoundMsg:  "Mistral AI API key found in environment",
 	CodeFoundMsg: "Mistral AI SDK initialization found",
 	NotFoundMsg:  "Mistral AI is declared but SDK not found",
 	NotFoundSuggestions: []string{
@@ -105,7 +101,6 @@ var CohereCheck = ServiceCheck{
 		regexp.MustCompile(`from\s+["']cohere["']`),
 		regexp.MustCompile(`import\s+cohere`),
 	},
-	EnvFoundMsg:  "Cohere API key found in environment",
 	CodeFoundMsg: "Cohere SDK initialization found",
 	NotFoundMsg:  "Cohere is declared but SDK not found",
 	NotFoundSuggestions: []string{
@@ -127,7 +122,6 @@ var ReplicateCheck = ServiceCheck{
 		regexp.MustCompile(`import\s+replicate`),
 		regexp.MustCompile(`new Replicate\(`),
 	},
-	EnvFoundMsg:  "Replicate API token found in environment",
 	CodeFoundMsg: "Replicate SDK initialization found",
 	NotFoundMsg:  "Replicate is declared but SDK not found",
 	NotFoundSuggestions: []string{
@@ -149,7 +143,6 @@ var HuggingFaceCheck = ServiceCheck{
 		regexp.MustCompile(`from\s+transformers\s+import`),
 		regexp.MustCompile(`import\s+transformers`),
 	},
-	EnvFoundMsg:  "Hugging Face API token found in environment",
 	CodeFoundMsg: "Hugging Face SDK initialization found",
 	NotFoundMsg:  "Hugging Face is declared but SDK not found",
 	NotFoundSuggestions: []string{
@@ -168,7 +161,6 @@ var GrokCheck = ServiceCheck{
 		regexp.MustCompile(`xai-sdk`),
 		regexp.MustCompile(`grok-`),
 	},
-	EnvFoundMsg:  "Grok API key found in environment",
 	CodeFoundMsg: "Grok SDK initialization found",
 	NotFoundMsg:  "Grok is declared but SDK not found",
 	NotFoundSuggestions: []string{
@@ -188,7 +180,6 @@ var PerplexityCheck = ServiceCheck{
 		regexp.MustCompile(`PerplexityClient`),
 		regexp.MustCompile(`from\s+["']perplexity["']`),
 	},
-	EnvFoundMsg:  "Perplexity API key found in environment",
 	CodeFoundMsg: "Perplexity SDK initialization found",
 	NotFoundMsg:  "Perplexity is declared but SDK not found",
 	NotFoundSuggestions: []string{
@@ -207,7 +198,6 @@ var TogetherAICheck = ServiceCheck{
 		regexp.MustCompile(`api\.together\.xyz`),
 		regexp.MustCompile(`together\.ai`),
 	},
-	EnvFoundMsg:  "Together AI API key found in environment",
 	CodeFoundMsg: "Together AI SDK initialization found",
 	NotFoundMsg:  "Together AI is declared but SDK not found",
 	NotFoundSuggestions: []string{

@@ -16,7 +16,6 @@ var RabbitMQCheck = ServiceCheck{
 		regexp.MustCompile(`bunny`),
 		regexp.MustCompile(`pika`),
 	},
-	EnvFoundMsg:  "RabbitMQ configuration found in environment",
 	CodeFoundMsg: "RabbitMQ connection found",
 	NotFoundMsg:  "RabbitMQ is declared but connection not found",
 	NotFoundSuggestions: []string{
@@ -35,7 +34,6 @@ var ElasticsearchCheck = ServiceCheck{
 		regexp.MustCompile(`Elasticsearch::Client`),
 		regexp.MustCompile(`elastic\.co`),
 	},
-	EnvFoundMsg:  "Elasticsearch configuration found in environment",
 	CodeFoundMsg: "Elasticsearch client found",
 	NotFoundMsg:  "Elasticsearch is declared but client not found",
 	NotFoundSuggestions: []string{
@@ -55,7 +53,6 @@ var ConvexCheck = ServiceCheck{
 		regexp.MustCompile(`convex\.dev`),
 		regexp.MustCompile(`@convex/`),
 	},
-	EnvFoundMsg:  "Convex configuration found in environment",
 	CodeFoundMsg: "Convex initialization found",
 	NotFoundMsg:  "Convex is declared but initialization not found",
 	NotFoundSuggestions: []string{
