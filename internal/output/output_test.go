@@ -35,12 +35,31 @@ func sampleResults() []checks.CheckResult {
 			// Details is deliberately not part of the JSON contract.
 			Details: []string{"should not be serialized"},
 		},
+		{
+			ID:       "ssl",
+			Title:    "SSL certificate",
+			Severity: checks.SeverityInfo,
+			Skipped:  true,
+			Message:  "Skipped for local URL",
+		},
+		{
+			ID:           "vulnerability",
+			Title:        "Dependency vulnerabilities",
+			Severity:     checks.SeverityWarn,
+			Inconclusive: true,
+			Message:      "govulncheck not installed; dependency audit incomplete",
+		},
 	}
 }
 
 // JSONOutput is the run-data contract app.preflight.sh ingests. A field
 // rename or a dropped key breaks the dashboard from another repo, with
-// nothing in this repo's CI failing, so pin the exact bytes.
+// nothing in this repo's CI failing, so pin the exact bytes. A failure here
+// means the dashboard (preflightsh-app) must change too: update its
+// ingestion and the CLI together, and bump SchemaVersion if an existing
+// field changes meaning. The sample covers a pass, a warning, a failure, a
+// skipped check, and an inconclusive one, so both outcome flags and their
+// summary counts are pinned.
 //
 // Note the &: encoding/json HTML-escapes &, < and > unless
 // SetEscapeHTML(false) is set. Consumers already depend on that (check
@@ -57,8 +76,10 @@ func TestJSONOutputterGolden(t *testing.T) {
   "project": "demo",
   "summary": {
     "ok": 1,
-    "warn": 1,
-    "fail": 1
+    "warn": 2,
+    "fail": 1,
+    "skipped": 1,
+    "inconclusive": 1
   },
   "checks": [
     {
@@ -84,6 +105,22 @@ func TestJSONOutputterGolden(t *testing.T) {
       "passed": false,
       "severity": "error",
       "message": "Potential secrets detected"
+    },
+    {
+      "id": "ssl",
+      "title": "SSL certificate",
+      "passed": false,
+      "skipped": true,
+      "severity": "info",
+      "message": "Skipped for local URL"
+    },
+    {
+      "id": "vulnerability",
+      "title": "Dependency vulnerabilities",
+      "passed": false,
+      "inconclusive": true,
+      "severity": "warn",
+      "message": "govulncheck not installed; dependency audit incomplete"
     }
   ]
 }
