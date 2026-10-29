@@ -317,15 +317,11 @@ func hasNextJSMetadata(content, name string) bool {
 	}
 
 	switch name {
-	case "title":
-		// title: "...", title: siteConfig.name or title: { default, template }
-		titlePattern := regexp.MustCompile(`(?m)^\s*title\s*:\s*[^\s,}]`)
-		return titlePattern.MatchString(metadataContent)
-
-	case "description":
-		// description at the top level of metadata, as a literal or an identifier
-		descPattern := regexp.MustCompile(`(?m)^\s*description\s*:\s*[^\s,}]`)
-		return descPattern.MatchString(metadataContent)
+	case "title", "description":
+		// A top-level key, as a literal, an identifier or (title) a
+		// { default, template } object, whether the object spans lines or
+		// sits on one: { title: "Acme", description: "..." }.
+		return topLevelKeyRe(name).MatchString(topLevelOnly(metadataContent))
 
 	case "og:title":
 		// openGraph: { ... title: ... }
@@ -377,6 +373,54 @@ func extractBraceBlockSEO(content string, pos int) string {
 		}
 	}
 	return ""
+}
+
+// topLevelKeyRe matches key: <value> where key starts an entry of the
+// flattened object topLevelOnly returns.
+func topLevelKeyRe(key string) *regexp.Regexp {
+	return regexp.MustCompile(`(?:^|[{,\n])\s*["']?` + regexp.QuoteMeta(key) + `["']?\s*:\s*[^\s,}]`)
+}
+
+// topLevelOnly returns block (an object literal, braces included) with
+// everything nested inside it blanked, so only the outer object's own keys
+// remain: openGraph: { description: ... } keeps openGraph but not its
+// description. String contents are kept, and braces inside strings do not
+// count.
+func topLevelOnly(block string) string {
+	out := []byte(block)
+	depth := 0
+	inString := false
+	var quote byte
+	for i := 0; i < len(block); i++ {
+		c := block[i]
+		switch {
+		case inString:
+			if c == quote && block[i-1] != '\\' {
+				inString = false
+			}
+		case c == '"' || c == '\'' || c == '`':
+			inString = true
+			quote = c
+		case c == '{' || c == '[' || c == '(':
+			// The bracket that opens a nested value stays, so
+			// title: { default: ... } still has a value after the colon.
+			depth++
+			if depth > 2 {
+				out[i] = ' '
+			}
+			continue
+		case c == '}' || c == ']' || c == ')':
+			if depth > 2 {
+				out[i] = ' '
+			}
+			depth--
+			continue
+		}
+		if depth > 1 && c != '\n' {
+			out[i] = ' '
+		}
+	}
+	return string(out)
 }
 
 // extractNestedBlockSEO extracts a nested object block like openGraph: { ... }
