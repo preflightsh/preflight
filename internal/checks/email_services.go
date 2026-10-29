@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"bufio"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -31,15 +30,8 @@ func (c PostmarkCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	// Check for env var
-	if hasEnvVar(ctx.RootDir, "POSTMARK_") {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  "Postmark API key found in environment",
-		}, nil
+	if r, ok := envKeyPass(c.ID(), c.Title(), ctx.RootDir, "POSTMARK_"); ok {
+		return r, nil
 	}
 
 	patterns := []*regexp.Regexp{
@@ -107,14 +99,8 @@ func (c SendGridCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	if hasEnvVar(ctx.RootDir, "SENDGRID_") {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  "SendGrid API key found in environment",
-		}, nil
+	if r, ok := envKeyPass(c.ID(), c.Title(), ctx.RootDir, "SENDGRID_"); ok {
+		return r, nil
 	}
 
 	patterns := []*regexp.Regexp{
@@ -181,14 +167,8 @@ func (c MailgunCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	if hasEnvVar(ctx.RootDir, "MAILGUN_") {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  "Mailgun API key found in environment",
-		}, nil
+	if r, ok := envKeyPass(c.ID(), c.Title(), ctx.RootDir, "MAILGUN_"); ok {
+		return r, nil
 	}
 
 	patterns := []*regexp.Regexp{
@@ -255,14 +235,8 @@ func (c ResendCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	if hasEnvVar(ctx.RootDir, "RESEND_") {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  "Resend API key found in environment",
-		}, nil
+	if r, ok := envKeyPass(c.ID(), c.Title(), ctx.RootDir, "RESEND_"); ok {
+		return r, nil
 	}
 
 	patterns := []*regexp.Regexp{
@@ -329,14 +303,8 @@ func (c AWSSESCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	if hasEnvVar(ctx.RootDir, "AWS_SES_") || hasEnvVar(ctx.RootDir, "SES_REGION") {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  "AWS SES configuration found in environment",
-		}, nil
+	if r, ok := envKeyPass(c.ID(), c.Title(), ctx.RootDir, "AWS_SES_", "SES_REGION"); ok {
+		return r, nil
 	}
 
 	patterns := []*regexp.Regexp{
@@ -382,51 +350,31 @@ func (c AWSSESCheck) Run(ctx Context) (CheckResult, error) {
 	}, nil
 }
 
-// hasEnvVar checks if an environment variable with the given prefix exists
+// hasEnvVar reports whether a root env file sets or documents a name the
+// prefix covers (envKeyLookup).
 func hasEnvVar(rootDir, prefix string) bool {
-	envFiles := []string{".env", ".env.local", ".env.development", ".env.production"}
-
-	for _, envFile := range envFiles {
-		path := filepath.Join(rootDir, envFile)
-		if envFileHasPrefix(path, prefix) {
-			return true
-		}
-	}
-
-	return false
+	status, _ := envKeyLookup(rootDir, envNameMatcher(prefix))
+	return status != envKeyMissing
 }
 
-// envFileHasPrefix reports whether path contains any line beginning with
-// prefix (uppercased). Lives in its own function so defer can close the
-// file even if scanning panics on a pathological line.
-func envFileHasPrefix(path, prefix string) bool {
-	file, err := openRegular(path)
-	if err != nil {
-		return false
-	}
-	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	// Default Scanner cap is 64KB per line; a longer inline value would
-	// silently abort the scan before reaching a real match. Read errors
-	// degrade to "not found", same as the os.Open path above.
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		name, value, ok := envAssignment(scanner.Text())
-		if !ok || !meaningfulEnvValue(value) {
-			continue
-		}
-		names := serviceEnvNames[prefix]
-		if len(names) == 0 {
-			names = []string{prefix + "KEY", prefix + "API_KEY", prefix + "TOKEN"}
-		}
-		for _, candidate := range names {
-			if name == candidate {
-				return true
-			}
+// envKeyPass is the passing result for a service whose key a root env file
+// sets or documents; ok is false when none does. A documented key passes as
+// configured but unverified: in CI, .env.example is all there is.
+func envKeyPass(id, title, rootDir string, prefixes ...string) (CheckResult, bool) {
+	best, where := envKeyMissing, ""
+	for _, prefix := range prefixes {
+		if status, file := envKeyLookup(rootDir, envNameMatcher(prefix)); status > best {
+			best, where = status, file
 		}
 	}
-	_ = scanner.Err()
-	return false
+	msg := title + " key found in " + where
+	switch best {
+	case envKeyMissing:
+		return CheckResult{}, false
+	case envKeyDocumented:
+		msg = title + " key documented in " + where + " (no value set locally, so it is not verified)"
+	}
+	return CheckResult{ID: id, Title: title, Severity: SeverityInfo, Passed: true, Message: msg}, true
 }
 
 // envRefConfigFiles are non-.env config and deploy manifests that commonly

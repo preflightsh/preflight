@@ -226,7 +226,7 @@ func TestStripeInitSurvivesVendorNamedFile(t *testing.T) {
 	}
 }
 
-func TestScanEnvFileMatchesWholeNames(t *testing.T) {
+func TestEnvFileStatusMatchesWholeNames(t *testing.T) {
 	cases := []struct {
 		name string
 		env  string
@@ -245,10 +245,9 @@ func TestScanEnvFileMatchesWholeNames(t *testing.T) {
 			if err := os.WriteFile(path, []byte(tc.env), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			found := map[string]bool{}
-			scanEnvFile(path, []string{"STRIPE_SECRET_KEY"}, found)
-			if found["STRIPE_SECRET_KEY"] != tc.want {
-				t.Errorf("found = %v, want %v", found["STRIPE_SECRET_KEY"], tc.want)
+			got := envFileStatus(path, false, func(n string) bool { return n == "STRIPE_SECRET_KEY" }) == envKeySet
+			if got != tc.want {
+				t.Errorf("found = %v, want %v", got, tc.want)
 			}
 		})
 	}

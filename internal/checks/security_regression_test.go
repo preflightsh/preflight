@@ -151,7 +151,7 @@ func TestEnvConfigurationRequiresMeaningfulAssignments(t *testing.T) {
 		name, file, body string
 		pass             bool
 	}{
-		{"wrong field", ".env", "OPENAI_NOT_A_KEY=anything", false}, {"empty", ".env", "OPENAI_API_KEY=", false}, {"placeholder", ".env", "OPENAI_API_KEY=your_key_here", false}, {"sample", ".env.example", "OPENAI_API_KEY=value", false}, {"comment", ".env", "# OPENAI_API_KEY=value", false}, {"actual", ".env", "export OPENAI_API_KEY=value", true},
+		{"unrelated name", ".env", "NOT_OPENAI_API_KEY=anything", false}, {"empty documents", ".env", "OPENAI_API_KEY=", true}, {"placeholder documents", ".env", "OPENAI_API_KEY=your_key_here", true}, {"sample documents", ".env.example", "OPENAI_API_KEY=value", true}, {"comment", ".env", "# OPENAI_API_KEY=value", false}, {"actual", ".env", "export OPENAI_API_KEY=value", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -233,19 +233,27 @@ func TestDependencyDiscoveryAndUnavailableTools(t *testing.T) {
 	}
 }
 
-func TestStripeRequiresActualNonemptyEnvValues(t *testing.T) {
-	for _, tc := range []struct{ file, content string }{
-		{".env.example", "STRIPE_SECRET_KEY=sk_test_fixture\n"},
-		{".env", "STRIPE_SECRET_KEY=\n"},
-		{".env", "STRIPE_SECRET_KEY=\"\"\n"},
-		{".env", "STRIPE_SECRET_KEY=your_key\n"},
-		{".env", "UNRELATED_STRIPE_SECRET_KEY=sk_test_fixture\n"},
+// TestStripeDocumentedKeysAreNotClaimedAsSet: a key in .env.example, or an
+// empty or placeholder value, documents the key: it passes (CI has no real
+// .env) but says it is documented, never that a value is set. A different
+// variable name does not count.
+func TestStripeDocumentedKeysAreNotClaimedAsSet(t *testing.T) {
+	for _, tc := range []struct {
+		file, content string
+		pass          bool
+	}{
+		{".env.example", "STRIPE_SECRET_KEY=sk_test_fixture\n", true},
+		{".env", "STRIPE_SECRET_KEY=\n", true},
+		{".env", "STRIPE_SECRET_KEY=\"\"\n", true},
+		{".env", "STRIPE_SECRET_KEY=your_key\n", true},
+		{".env", "UNRELATED_STRIPE_SECRET_KEY=sk_test_fixture\n", false},
 	} {
 		root := t.TempDir()
 		writeFixture(t, root, "src/payments.go", "package payments\nfunc charge(){ stripe.Key = k }\n")
 		writeFixture(t, root, tc.file, tc.content)
-		if r, _ := (StripeWebhookCheck{}).Run(stripeCtx(root)); r.Passed {
-			t.Fatalf("accepted %s %q", tc.file, tc.content)
+		r, _ := (StripeWebhookCheck{}).Run(stripeCtx(root))
+		if r.Passed != tc.pass || (r.Passed && !strings.Contains(r.Message, "documented in "+tc.file)) {
+			t.Fatalf("%s %q: %+v", tc.file, tc.content, r)
 		}
 	}
 }

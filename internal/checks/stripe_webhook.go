@@ -33,33 +33,31 @@ func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {
 	var issues []string
 	var suggestions []string
 
-	// Examples document names but do not establish configured credentials.
-	envFiles := []string{".env", ".env.local", ".env.development", ".env.production"}
-	requiredKeys := []string{"STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY"}
+	// A value in a real env file (.env, .env.local, .env.development.local)
+	// sets a key; a name in .env.example only documents it. Documented is
+	// enough to pass (CI has no real .env), and the message says which.
 	webhookKey := "STRIPE_WEBHOOK_SECRET"
-
-	keysToScan := append(append([]string{}, requiredKeys...), webhookKey)
-
-	foundKeys := make(map[string]bool)
-	for _, envFile := range envFiles {
-		path := filepath.Join(ctx.RootDir, envFile)
-		scanEnvFile(path, keysToScan, foundKeys)
+	keyStatus := func(key string) (envKeyStatus, string) {
+		return envKeyLookup(ctx.RootDir, func(name string) bool { return name == key })
 	}
+	secretStatus, secretWhere := keyStatus("STRIPE_SECRET_KEY")
+	publishableStatus, _ := keyStatus("STRIPE_PUBLISHABLE_KEY")
+	webhookStatus, _ := keyStatus(webhookKey)
 
 	// The secret key is required. The publishable key only matters for
 	// Stripe.js in the browser (a Checkout-only server app never needs it),
 	// so its absence is noted rather than failed.
-	if !foundKeys["STRIPE_SECRET_KEY"] {
+	if secretStatus == envKeyMissing {
 		issues = append(issues, "STRIPE_SECRET_KEY not found in env files")
-		suggestions = append(suggestions, "Set STRIPE_SECRET_KEY in your application environment")
+		suggestions = append(suggestions, "Set STRIPE_SECRET_KEY in your application environment, or document it in .env.example")
 	}
 	publishableNote := ""
-	if !foundKeys["STRIPE_PUBLISHABLE_KEY"] {
+	if publishableStatus == envKeyMissing {
 		publishableNote = ", no publishable key (only needed for Stripe.js)"
 	}
 
 	// Check webhook secret (warn but don't fail)
-	hasWebhookSecret := foundKeys[webhookKey]
+	hasWebhookSecret := webhookStatus != envKeyMissing
 
 	initFound := stripeInitFound(ctx.RootDir)
 
@@ -87,6 +85,9 @@ func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {
 	// Build result
 	if len(issues) == 0 {
 		message := "Stripe integration found with nonempty local key values (authentication not verified)"
+		if secretStatus == envKeyDocumented {
+			message = "Stripe integration found, STRIPE_SECRET_KEY documented in " + secretWhere + " (no value set locally, so it is not verified)"
+		}
 		if hasWebhookSecret {
 			message += ", webhook secret present"
 		} else {
@@ -110,26 +111,6 @@ func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {
 		Message:     strings.Join(issues, "; "),
 		Suggestions: suggestions,
 	}, nil
-}
-
-func scanEnvFile(path string, keys []string, foundKeys map[string]bool) {
-	content, err := readSourceFile(path)
-	if err != nil {
-		return
-	}
-	for _, line := range strings.Split(string(content), "\n") {
-		name, value, ok := envAssignment(line)
-		if !ok || !meaningfulEnvValue(value) {
-			continue
-		}
-		for _, key := range keys {
-			// NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY, VITE_STRIPE_..., and so
-			// on: frameworks expose browser vars under a prefix.
-			if name == key {
-				foundKeys[key] = true
-			}
-		}
-	}
 }
 
 // stripeCodePatterns match Stripe being set up in code, across the

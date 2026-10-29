@@ -1,9 +1,15 @@
 package checks
 
-import "strings"
+import (
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+)
 
-// serviceEnvNames lists meaningful configuration fields rather than accepting
-// every string with a service prefix. Values must come from real env files.
+// serviceEnvNames lists each service's usual configuration fields. They are
+// matched alongside the service's prefix (envNameMatcher), so a field missing
+// from the list (DISCORD_BOT_TOKEN, MAILGUN_DOMAIN) still counts.
 var serviceEnvNames = map[string][]string{
 	"OPENAI_": {"OPENAI_API_KEY"}, "ANTHROPIC_": {"ANTHROPIC_API_KEY"},
 	"GOOGLE_AI_": {"GOOGLE_AI_API_KEY"}, "GEMINI_": {"GEMINI_API_KEY"},
@@ -69,4 +75,99 @@ func meaningfulEnvValue(value string) bool {
 		}
 	}
 	return true
+}
+
+// envKeyStatus is how far a project's env files establish a key.
+type envKeyStatus int
+
+const (
+	envKeyMissing envKeyStatus = iota
+	// envKeyDocumented: the name is documented (in .env.example and the
+	// like, or with an empty or placeholder value) but no value is set. In CI
+	// there is no real .env, so this is the normal state of a configured
+	// service: it passes, worded as documented rather than set.
+	envKeyDocumented
+	// envKeySet: a real env file assigns a nonempty value. Still not
+	// verified against the service.
+	envKeySet
+)
+
+// exampleEnvMarkers name the env files that document keys rather than hold
+// them: .env.example, .env.sample, .env.development.example, .env.dist.
+var exampleEnvMarkers = []string{"example", "sample", "template", "dist", "defaults"}
+
+// projectEnvFiles lists the env files at the project root, split into real
+// ones (.env, .env.local, .env.development.local, .env.test) and examples.
+// os.ReadDir sorts by name, so .env comes first.
+func projectEnvFiles(rootDir string) (real, examples []string) {
+	entries, err := os.ReadDir(rootDir)
+	if err != nil {
+		return nil, nil
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if (name != ".env" && !strings.HasPrefix(name, ".env.")) || !e.Type().IsRegular() {
+			continue
+		}
+		parts := strings.Split(strings.ToLower(name), ".")
+		if slices.ContainsFunc(exampleEnvMarkers, func(m string) bool { return slices.Contains(parts, m) }) {
+			examples = append(examples, name)
+		} else {
+			real = append(real, name)
+		}
+	}
+	return real, examples
+}
+
+// envNameMatcher matches the env names that configure a service: its listed
+// fields, or any name with its prefix.
+func envNameMatcher(prefix string) func(string) bool {
+	names := serviceEnvNames[prefix]
+	return func(name string) bool {
+		return strings.HasPrefix(name, prefix) || slices.Contains(names, name)
+	}
+}
+
+// envKeyLookup reports the strongest status any root env file gives a name
+// that match accepts, and the file that gave it.
+func envKeyLookup(rootDir string, match func(string) bool) (envKeyStatus, string) {
+	real, examples := projectEnvFiles(rootDir)
+	status, where := envKeyMissing, ""
+	for _, name := range real {
+		switch envFileStatus(filepath.Join(rootDir, name), false, match) {
+		case envKeySet:
+			return envKeySet, name
+		case envKeyDocumented:
+			if status == envKeyMissing {
+				status, where = envKeyDocumented, name
+			}
+		}
+	}
+	for _, name := range examples {
+		if status == envKeyMissing && envFileStatus(filepath.Join(rootDir, name), true, match) != envKeyMissing {
+			status, where = envKeyDocumented, name
+		}
+	}
+	return status, where
+}
+
+// envFileStatus reads one env file. In an example file every value is a
+// sample, so a matching name only documents the key.
+func envFileStatus(path string, example bool, match func(string) bool) envKeyStatus {
+	content, err := readSourceFile(path)
+	if err != nil {
+		return envKeyMissing
+	}
+	status := envKeyMissing
+	for _, line := range strings.Split(string(content), "\n") {
+		name, value, ok := envAssignment(line)
+		if !ok || !match(name) {
+			continue
+		}
+		if !example && meaningfulEnvValue(value) {
+			return envKeySet
+		}
+		status = envKeyDocumented
+	}
+	return status
 }
