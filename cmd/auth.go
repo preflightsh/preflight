@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -87,42 +88,77 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 	deadline := time.Now().Add(10 * time.Minute)
 
 	fmt.Print("  Waiting for you to authorize in the browser...")
+	token, err = pollLogin(cmd.Context(), func() (*dashboard.PollStatus, error) { return client.Poll(start.DeviceCode) }, interval, deadline, os.Stdout)
+	if err != nil {
+		return err
+	}
+	email, err := client.Whoami(token)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  Could not look up the account email (%v); the login is saved.\n", err)
+		email = ""
+	}
+	return saveLogin(client.BaseURL, token, email)
+}
+
+// maxPollFailures is how many polls in a row may fail before login gives
+// up (about 30 seconds at the default 2-second interval). A dashboard that
+// stays unreachable that long will not come back within the code's
+// lifetime often enough to justify a silent ten-minute wait.
+const maxPollFailures = 15
+
+// pollLogin polls until the login is approved and returns the token. Each
+// failed poll is shown (repeats of the same error collapse into dots) so
+// an outage does not look like a pending approval.
+func pollLogin(ctx context.Context, poll func() (*dashboard.PollStatus, error), interval time.Duration, deadline time.Time, out io.Writer) (string, error) {
+	failures := 0
+	lastErr := ""
 	for time.Now().Before(deadline) {
 		select {
 		case <-time.After(interval):
-		case <-cmd.Context().Done():
-			return &ExitError{Code: ExitCanceled, Err: cmd.Context().Err()}
+		case <-ctx.Done():
+			return "", &ExitError{Code: ExitCanceled, Err: ctx.Err()}
 		}
-		status, err := client.Poll(start.DeviceCode)
+		status, err := poll()
 		if err != nil {
 			var permanent *dashboard.PermanentError
 			if errors.As(err, &permanent) {
-				fmt.Println()
-				return &ExitError{Code: ExitFail, Err: fmt.Errorf("login failed: %w", err)}
+				fmt.Fprintln(out)
+				return "", &ExitError{Code: ExitFail, Err: fmt.Errorf("login failed: %w", err)}
 			}
-			continue // transient; keep polling
+			failures++
+			if failures >= maxPollFailures {
+				fmt.Fprintln(out)
+				return "", &ExitError{Code: ExitFail, Err: fmt.Errorf("login failed: could not reach the dashboard (%d attempts in a row): %w", failures, err)}
+			}
+			if err.Error() != lastErr {
+				lastErr = err.Error()
+				fmt.Fprintf(out, "\n  Could not reach the dashboard (%v); retrying", err)
+			} else {
+				fmt.Fprint(out, ".")
+			}
+			continue
 		}
+		if failures > 0 {
+			fmt.Fprint(out, "\n  Reconnected; waiting for authorization...")
+		}
+		failures, lastErr = 0, ""
 		switch status.Status {
 		case "approved":
 			if status.Token == "" {
-				fmt.Println()
-				return &ExitError{Code: ExitFail, Err: fmt.Errorf("the dashboard approved the login but sent no token; run 'preflight auth login' again")}
+				fmt.Fprintln(out)
+				return "", &ExitError{Code: ExitFail, Err: fmt.Errorf("the dashboard approved the login but sent no token; run 'preflight auth login' again")}
 			}
-			fmt.Println(" done.")
-			email, err := client.Whoami(status.Token)
-			if err != nil {
-				email = ""
-			}
-			return saveLogin(client.BaseURL, status.Token, email)
+			fmt.Fprintln(out, " done.")
+			return status.Token, nil
 		case "expired":
-			fmt.Println()
-			return &ExitError{Code: ExitFail, Err: fmt.Errorf("the authorization code expired; run 'preflight auth login' again")}
+			fmt.Fprintln(out)
+			return "", &ExitError{Code: ExitFail, Err: fmt.Errorf("the authorization code expired; run 'preflight auth login' again")}
 		default:
-			fmt.Print(".")
+			fmt.Fprint(out, ".")
 		}
 	}
-	fmt.Println()
-	return &ExitError{Code: ExitFail, Err: fmt.Errorf("timed out waiting for authorization")}
+	fmt.Fprintln(out)
+	return "", &ExitError{Code: ExitFail, Err: fmt.Errorf("timed out waiting for authorization")}
 }
 
 // resolveLoginToken picks the token from --token ("-" means stdin) or, when
@@ -176,9 +212,18 @@ func runAuthStatus(cmd *cobra.Command, args []string) error {
 		fmt.Println("Not logged in. Run 'preflight auth login' to connect your account.")
 		return nil
 	}
-	fmt.Printf("Logged in as %s\n", creds.Email)
-	fmt.Printf("Dashboard:  %s\n", creds.APIURL)
+	fmt.Print(authStatusText(creds))
 	return nil
+}
+
+// authStatusText describes stored credentials. The email is empty when the
+// account lookup after login failed; the token still works.
+func authStatusText(creds *dashboard.Credentials) string {
+	who := "Logged in (account email unknown; run 'preflight auth login' again to look it up)"
+	if creds.Email != "" {
+		who = "Logged in as " + creds.Email
+	}
+	return fmt.Sprintf("%s\nDashboard:  %s\n", who, creds.APIURL)
 }
 
 // openBrowser best-effort opens a URL in the user's default browser. Failure is
