@@ -564,11 +564,14 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 		}
 	}
 
-	// Flexible search: walk app/ and src/app/ for sitemap files in any location
-	// This catches route groups like app/(marketing)/sitemap.ts
+	// Flexible search: walk the route roots for sitemap files in any location.
+	// This catches route groups like app/(marketing)/sitemap.ts, Next Pages
+	// Router and Astro endpoints (pages/sitemap.xml.js,
+	// src/pages/sitemap.xml.ts) and SvelteKit's
+	// src/routes/(group)/sitemap.xml/+server.ts.
 	sitemapFound := false
 	var sitemapFoundPath string
-	flexSitemapDirs := []string{"app", "src/app", "pages/api", "src/routes", "server/routes"}
+	flexSitemapDirs := []string{"app", "src/app", "pages", "src/pages", "src/routes", "server/routes"}
 	for _, dir := range flexSitemapDirs {
 		if sitemapFound {
 			break
@@ -595,9 +598,17 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 				sitemapFoundPath = relPath(ctx.RootDir, path)
 				return nil
 			}
-			// Match route.ts/js in sitemap.xml/ or sitemap/ directory
+			// Match an endpoint file named for the URL it serves:
+			// sitemap.xml.js, sitemap-index.xml.ts, Remix's sitemap[.]xml.tsx.
+			if sitemapEndpointRe.MatchString(nameLower) {
+				sitemapFound = true
+				sitemapFoundPath = relPath(ctx.RootDir, path)
+				return nil
+			}
+			// Match route.ts/js (Next) or +server.ts/js (SvelteKit) in a
+			// sitemap.xml/ or sitemap/ directory
 			parentDir := strings.ToLower(filepath.Base(filepath.Dir(path)))
-			if (parentDir == "sitemap.xml" || parentDir == "sitemap") && strings.HasPrefix(nameLower, "route.") {
+			if (parentDir == "sitemap.xml" || parentDir == "sitemap") && (strings.HasPrefix(nameLower, "route.") || strings.HasPrefix(nameLower, "+server.")) {
 				sitemapFound = true
 				sitemapFoundPath = relPath(ctx.RootDir, path)
 				return nil
@@ -1745,6 +1756,10 @@ func dependencyNames(path string) []string {
 }
 
 // gemLineRe matches the gem name in a Gemfile line: gem "sitemap_generator".
+// sitemapEndpointRe matches a route file that serves a sitemap URL by its
+// own name: sitemap.xml.js, sitemap-index.xml.ts, sitemap[.]xml.tsx.
+var sitemapEndpointRe = regexp.MustCompile(`^sitemap[\w-]*(?:\.|\[\.\])xml\.(?:[cm]?[jt]sx?|astro)$`)
+
 var gemLineRe = regexp.MustCompile(`(?m)^\s*gem\s+['"]([^'"]+)['"]`)
 
 func mapKeys(maps ...map[string]any) []string {
