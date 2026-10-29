@@ -12,7 +12,88 @@ var (
 	appleTouchIconRe = regexp.MustCompile(`(?i)apple-touch-icon`)
 	// Next.js metadata icons API with an apple entry.
 	nextAppleIconRe = regexp.MustCompile(`(?i)icons\s*[:=]\s*\{[^}]*apple\s*:`)
+	// <link rel="icon">, rel="shortcut icon" or rel="icon shortcut", in
+	// any attribute order. apple-touch-icon is its own token and does not
+	// count as a favicon.
+	faviconLinkRe = regexp.MustCompile(`(?i)<link\b[^>]*\brel\s*=\s*["'](?:shortcut\s+)?icon(?:\s+shortcut)?["']`)
+	// Next.js metadata icons API: icons: '/x.png', icons: ['/x.png'],
+	// icons: { icon: ... } or icons: { shortcut: ... }.
+	nextFaviconRe = regexp.MustCompile("(?i)\\bicons\\s*:\\s*(?:[\"'`\\[]|\\{[^}]*\\b(?:icon|shortcut)\\s*:)")
+	// Rails' favicon_link_tag helper emits <link rel="icon">.
+	railsFaviconTagRe = regexp.MustCompile(`\bfavicon_link_tag\b`)
 )
+
+// iconLayoutTemplates are layouts and head partials that commonly declare
+// <link rel="icon"> and <link rel="apple-touch-icon">.
+var iconLayoutTemplates = []string{
+	"templates/_layout.twig", // Craft CMS
+	"templates/_layout.html", // Craft CMS
+	"templates/_head.twig",   // Craft CMS partials
+	"templates/_head.html",
+	"templates/_partials/head.twig",          // Craft CMS partials
+	"templates/_partials/header.twig",        // Craft CMS partials
+	"app/views/layouts/application.html.erb", // Rails
+	"resources/views/layouts/app.blade.php",  // Laravel
+	"_includes/head.html",                    // Jekyll
+	"layouts/_default/baseof.html",           // Hugo
+	"src/layouts/Layout.astro",               // Astro
+	"index.html",                             // Vite, static
+	"public/index.html",                      // Create React App, Vue CLI
+	"src/index.html",                         // Angular
+	"src/app.html",                           // SvelteKit
+	"app/root.tsx",                           // Remix
+	"app/root.jsx",
+	"app.vue", // Nuxt
+	"nuxt.config.ts",
+	"nuxt.config.js",
+	"pages/_document.tsx", // Next.js Pages Router
+	"pages/_document.js",
+	"src/pages/_document.tsx",
+	"src/pages/_document.js",
+}
+
+// iconLayoutSources lists the layout files, relative to the root, that the
+// favicon check reads for icon declarations: the configured layout, the
+// common templates above, and Next.js App Router root layouts (including
+// monorepo apps).
+func iconLayoutSources(ctx Context) []string {
+	var paths []string
+	if cfg := ctx.Config.Checks.SEOMeta; cfg != nil && cfg.MainLayout != "" {
+		paths = append(paths, cfg.MainLayout)
+	}
+	paths = append(paths, iconLayoutTemplates...)
+	paths = append(paths,
+		"app/layout.tsx",
+		"app/layout.js",
+		"app/layout.jsx",
+		"src/app/layout.tsx",
+		"src/app/layout.js",
+		"src/app/layout.jsx",
+	)
+	monorepoLayoutPaths := findMonorepoAppRouterPaths(ctx.RootDir, "layout.tsx")
+	monorepoLayoutPaths = append(monorepoLayoutPaths, findMonorepoAppRouterPaths(ctx.RootDir, "layout.js")...)
+	for _, path := range monorepoLayoutPaths {
+		paths = append(paths, relPath(ctx.RootDir, path))
+	}
+	return paths
+}
+
+// sourceDeclaresFavicon returns the first layout that declares a favicon
+// through a <link rel="icon"> tag, the Next.js metadata icons API, or
+// Rails' favicon_link_tag. Commented-out declarations do not count.
+func sourceDeclaresFavicon(ctx Context) (string, bool) {
+	for _, rel := range iconLayoutSources(ctx) {
+		content, err := readSourceFile(filepath.Join(ctx.RootDir, rel))
+		if err != nil {
+			continue
+		}
+		text := stripCodeComments(string(content))
+		if faviconLinkRe.MatchString(text) || nextFaviconRe.MatchString(text) || railsFaviconTagRe.MatchString(text) {
+			return rel, true
+		}
+	}
+	return "", false
+}
 
 type FaviconCheck struct{}
 
@@ -40,6 +121,7 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 		"out",     // Next.js static export
 		"app",     // Next.js App Router (pages)
 		"src/app", // Next.js App Router (standard)
+		"src",     // Angular (src/favicon.ico)
 		"",        // Root directory
 	}
 
@@ -136,6 +218,16 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 		}
 	}
 
+	// A layout that links its icon from a non-standard path
+	// (<link rel="icon" href="/brand/mark.svg">, Next.js
+	// icons: { icon: ... }) still has one.
+	if !hasFavicon {
+		if rel, ok := sourceDeclaresFavicon(ctx); ok {
+			hasFavicon = true
+			found = append(found, "favicon (declared in "+rel+")")
+		}
+	}
+
 	if !hasFavicon {
 		missing = append(missing, "favicon")
 	}
@@ -189,20 +281,7 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 
 		// Check common template locations
 		if !hasAppleIcon {
-			templatePaths := []string{
-				"templates/_layout.twig", // Craft CMS
-				"templates/_layout.html", // Craft CMS
-				"templates/_head.twig",   // Craft CMS partials
-				"templates/_head.html",
-				"templates/_partials/head.twig",          // Craft CMS partials
-				"templates/_partials/header.twig",        // Craft CMS partials
-				"app/views/layouts/application.html.erb", // Rails
-				"resources/views/layouts/app.blade.php",  // Laravel
-				"_includes/head.html",                    // Jekyll
-				"layouts/_default/baseof.html",           // Hugo
-				"src/layouts/Layout.astro",               // Astro
-			}
-			for _, tplPath := range templatePaths {
+			for _, tplPath := range iconLayoutTemplates {
 				fullPath := filepath.Join(ctx.RootDir, tplPath)
 				if content, err := readSourceFile(fullPath); err == nil {
 					if appleTouchIconRe.Match(content) {
@@ -444,12 +523,13 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
+	// A missing favicon is a polish issue, not a launch blocker.
 	return CheckResult{
 		ID:       c.ID(),
 		Title:    c.Title(),
-		Severity: SeverityError,
+		Severity: SeverityWarn,
 		Passed:   false,
-		Message:  "Missing favicon",
+		Message:  "Missing: " + strings.Join(missing, ", "),
 		Suggestions: []string{
 			"Add favicon.ico or favicon.png to public/",
 			"Use https://realfavicongenerator.net for complete icon set",
