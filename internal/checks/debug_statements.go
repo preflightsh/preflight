@@ -477,44 +477,513 @@ func scanForDebugStatements(rootDir string, ignore []string) []string {
 	return findings
 }
 
+// isDevGuarded reports whether the debug statement at lines[lineNum][position:]
+// only runs in development. It replays the file up to that point and tracks
+// the blocks that are open: braces, template blocks ({% if %}, <% if %>,
+// @if, {{ if }}, {#if}), and keyword blocks closed by indentation (Python,
+// Ruby, a braceless if). A block guards when the condition that opened it
+// selects development (devPolarity); its else branch does not. On the
+// statement's own line an inline if, `cond && stmt`, `cond ? stmt :`, and a
+// trailing `stmt if cond` guard too.
 func isDevGuarded(lines []string, lineNum, position int) bool {
-	var frames []bool
-	for i := 0; i <= lineNum; i++ {
-		raw := stripCodeComments(lines[i])
-		code := maskCodeStrings(raw)
-		limit := len(code)
-		if i == lineNum {
-			limit = min(position, limit)
-		}
-		dev := isDevelopmentCondition(raw)
-		// A simple inline if has no block; nothing after a completed statement
-		// or an else inherits its condition.
-		if i == lineNum && dev && !strings.Contains(code[:limit], "{") && !strings.Contains(code[:limit], ";") {
-			return true
-		}
-		for j := 0; j < limit; j++ {
-			switch code[j] {
-			case '{':
-				frames = append(frames, dev)
-				dev = false
-			case '}':
-				if len(frames) > 0 {
-					frames = frames[:len(frames)-1]
-				}
+	var g devGuardScanner
+	for i := 0; i < lineNum; i++ {
+		g.line(lines[i], -1)
+	}
+	return g.line(lines[lineNum], position)
+}
+
+type guardFrame struct {
+	kind string // "{" for a brace, "<family>:<block>" for a template block
+	dev  bool
+}
+
+type indentFrame struct {
+	indent int
+	dev    bool
+}
+
+type devGuardScanner struct {
+	frames  []guardFrame
+	indents []indentFrame
+	// pending: the last line was a development condition still waiting for
+	// its body (a braceless if, an Allman brace), or a
+	// #[cfg(debug_assertions)] attribute, which is sticky: it holds until
+	// the item's brace or semicolon.
+	pending, sticky bool
+}
+
+var (
+	reGuardKeyword = regexp.MustCompile(`^(else\s*if|elseif|elif|elsif|if|unless|else)\b`)
+	// Python's `if x:` (but not Elixir's `== :dev` or Rust's `a::b`).
+	rePythonColon = regexp.MustCompile(`^(.*?[^\s:]):(?:\s|$)`)
+	reCfgAttr     = regexp.MustCompile(`^#\[cfg\(`)
+	// `stmt if cond` / `stmt unless cond` (Ruby, Python's conditional expression).
+	reTrailingGuard = regexp.MustCompile(`\s(if|unless)\s+(.+)$`)
+
+	// Twig, Django, Jinja, Liquid, Nunjucks.
+	reTwigTag = regexp.MustCompile(`^\{%-?\s*(if|elseif|elif|else|endif|unless|endunless)\b(.*?)-?%\}`)
+	// ERB. A brace in the tag means EJS, whose JavaScript blocks the brace
+	// tracking handles.
+	reERBTag = regexp.MustCompile(`^<%[-=]?\s*(if|unless|elsif|else|end)\b([^{}%]*?)-?%>`)
+	reERBDo  = regexp.MustCompile(`^<%[-=]?[^{}%]*\bdo\b\s*(?:\|[^|%]*\|)?\s*-?%>`)
+	// Go templates and Hugo ({{ if }}...{{ end }}), Handlebars ({{#if}}...{{/if}}).
+	reMustacheTag = regexp.MustCompile(`^\{\{[-~]?\s*(#if|#unless|/if|/unless|if|else\s+if|else|end|range|with|define|block)\b(.*?)[-~]?\}\}`)
+	reSvelteTag   = regexp.MustCompile(`^\{(#if|:else\s+if|:else|/if)\b(.*?)\}`)
+	reBladeTag    = regexp.MustCompile(`^@(if|elseif|unless|env|production|else|endif|endunless|endenv|endproduction)\b`)
+)
+
+// line replays one line. With position >= 0 it is the statement's own line,
+// and line reports whether the statement at position is guarded.
+func (g *devGuardScanner) line(rawLine string, position int) bool {
+	raw := stripCodeComments(rawLine)
+	code := maskCodeStrings(raw)
+	target := position >= 0
+	if strings.TrimSpace(code) == "" && !target {
+		return false
+	}
+	indent := len(code) - len(strings.TrimLeft(code, " \t"))
+	for len(g.indents) > 0 && g.indents[len(g.indents)-1].indent >= indent {
+		g.indents = g.indents[:len(g.indents)-1]
+	}
+	limit := len(code)
+	if target {
+		limit = min(position, limit)
+	}
+
+	var (
+		condFound, condDev, condAtStart bool
+		braceCond                       bool // a condition not yet given to a brace
+		inline                          bool // an inline condition still applies
+		setPending                      bool
+		condEnd                         = -1
+	)
+	for j := 0; j < limit; {
+		c := code[j]
+		if c == '{' || c == '<' || c == '@' {
+			if n := g.templateTag(raw, code, j, limit); n > 0 {
+				j += n
+				continue
 			}
 		}
+		if c == '#' && reCfgAttr.MatchString(code[j:]) {
+			open := j + len("#[cfg")
+			end := matchingParen(code, open)
+			if end < 0 {
+				end = len(code) - 1
+			}
+			if devPolarity(raw[open+1:end]) > 0 {
+				g.pending, g.sticky, setPending = true, true, true
+			}
+			j = end + 1
+			continue
+		}
+		if isWordStart(code, j) {
+			if m := reGuardKeyword.FindStringSubmatch(code[j:]); m != nil {
+				kw := m[1]
+				if kw == "else" {
+					braceCond, inline, g.pending = false, false, false
+					j += len(kw)
+					continue
+				}
+				cond, end := guardCondition(raw, code, j+len(kw))
+				p := devPolarity(cond)
+				if kw == "unless" {
+					p = -p
+				}
+				condFound, condDev, braceCond, inline, condEnd = true, p > 0, true, true, end
+				condAtStart = j == indent
+				j = max(end, j+len(kw))
+				continue
+			}
+		}
+		switch c {
+		case '{':
+			dev := false
+			if braceCond {
+				dev, braceCond = condDev, false
+			} else if g.pending {
+				dev, g.pending, g.sticky = true, false, false
+			}
+			g.frames = append(g.frames, guardFrame{kind: "{", dev: dev})
+			inline = false
+		case '}':
+			g.pop(func(k string) bool { return k == "{" })
+			inline = false
+		case ';':
+			braceCond, inline, g.pending = false, false, false
+		}
+		j++
 	}
-	for _, dev := range frames {
-		if dev {
+
+	if target {
+		if g.pending || (inline && condDev) || guardedOperand(raw, code, limit) || trailingGuard(raw, code, limit) {
 			return true
 		}
+		for _, f := range g.frames {
+			if f.dev {
+				return true
+			}
+		}
+		for _, f := range g.indents {
+			if f.dev {
+				return true
+			}
+		}
+		return false
+	}
+
+	if braceCond && condDev && condEnd >= 0 && condEnd <= len(code) && strings.TrimSpace(code[condEnd:]) == "" {
+		g.pending, g.sticky, setPending = true, false, true
+	}
+	if !setPending && !g.sticky {
+		g.pending = false
+	}
+	if condFound && condAtStart && !strings.Contains(code, "{") {
+		g.indents = append(g.indents, indentFrame{indent: indent, dev: condDev})
 	}
 	return false
 }
 
-var developmentCondition = regexp.MustCompile(`^\s*if\s*\(\s*(?:import\.meta\.env\.DEV|!\s*import\.meta\.env\.PROD|__DEV__|isDev|isDevelopment|process\.env\.NODE_ENV\s*(?:!==|!=)\s*['"]production['"]|process\.env\.NODE_ENV\s*(?:===|==)\s*['"]development['"])\s*\)`)
+// pop removes the innermost frame whose kind matches.
+func (g *devGuardScanner) pop(match func(string) bool) {
+	for i := len(g.frames) - 1; i >= 0; i-- {
+		if match(g.frames[i].kind) {
+			g.frames = append(g.frames[:i], g.frames[i+1:]...)
+			return
+		}
+	}
+}
 
-func isDevelopmentCondition(line string) bool { return developmentCondition.MatchString(line) }
+// innermost returns the innermost frame of a template family, or nil.
+func (g *devGuardScanner) innermost(family string) *guardFrame {
+	for i := len(g.frames) - 1; i >= 0; i-- {
+		if strings.HasPrefix(g.frames[i].kind, family+":") {
+			return &g.frames[i]
+		}
+	}
+	return nil
+}
+
+// templateTag consumes a template control tag at code[j:] and returns its
+// length, or 0 when there is none.
+func (g *devGuardScanner) templateTag(raw, code string, j, limit int) int {
+	s := code[j:limit]
+	family, kw, cond, n := "", "", "", 0
+	submatch := func(re *regexp.Regexp) bool {
+		m := re.FindStringSubmatchIndex(s)
+		if m == nil {
+			return false
+		}
+		n = m[1]
+		if len(m) > 2 && m[2] >= 0 {
+			kw = s[m[2]:m[3]]
+		}
+		if len(m) > 4 && m[4] >= 0 {
+			cond = raw[j+m[4] : j+m[5]]
+		}
+		return true
+	}
+	switch {
+	case submatch(reTwigTag):
+		family = "twig"
+	case submatch(reERBTag):
+		family = "erb"
+	case submatch(reERBDo):
+		family, kw = "erb", "do"
+	case submatch(reMustacheTag):
+		family = "mustache"
+	case submatch(reSvelteTag):
+		family = "svelte"
+	case (j == 0 || !isIdentByte(code[j-1])) && submatch(reBladeTag):
+		family = "blade"
+		if kw == "if" || kw == "elseif" || kw == "unless" || kw == "env" {
+			open := j + n
+			for open < len(code) && code[open] == ' ' {
+				open++
+			}
+			if open < limit && code[open] == '(' {
+				if end := matchingParen(code, open); end >= 0 && end < limit {
+					cond, n = raw[open+1:end], end+1-j
+				}
+			}
+		}
+	default:
+		return 0
+	}
+
+	closing := strings.HasPrefix(kw, "/")
+	kw = strings.Join(strings.Fields(strings.TrimLeft(kw, "#/:")), " ")
+	switch {
+	case closing:
+		g.pop(func(k string) bool { return k == family+":"+kw })
+	case kw == "if" || kw == "env":
+		if kw == "env" {
+			cond = "environment(" + cond + ")"
+		}
+		g.frames = append(g.frames, guardFrame{kind: family + ":" + kw, dev: devPolarity(cond) > 0})
+	case kw == "unless":
+		g.frames = append(g.frames, guardFrame{kind: family + ":unless", dev: devPolarity(cond) < 0})
+	case kw == "production" || kw == "do" || kw == "range" || kw == "with" || kw == "define" || kw == "block":
+		g.frames = append(g.frames, guardFrame{kind: family + ":" + kw})
+	case kw == "elseif" || kw == "elif" || kw == "elsif" || kw == "else if":
+		if f := g.innermost(family); f != nil {
+			f.dev = devPolarity(cond) > 0
+		}
+	case kw == "else":
+		if f := g.innermost(family); f != nil {
+			f.dev = false
+		}
+	case kw == "end":
+		g.pop(func(k string) bool { return strings.HasPrefix(k, family+":") })
+	case strings.HasPrefix(kw, "end"):
+		g.pop(func(k string) bool { return k == family+":"+strings.TrimPrefix(kw, "end") })
+	}
+	return n
+}
+
+// guardCondition returns the condition that follows a keyword ending at k,
+// and where it ends: a parenthesized one (JavaScript, PHP), or one running
+// to the block's brace or the line's end (Go, Rust, Python, Ruby).
+func guardCondition(raw, code string, k int) (string, int) {
+	for k < len(code) && (code[k] == ' ' || code[k] == '\t') {
+		k++
+	}
+	if k < len(code) && code[k] == '(' {
+		if end := matchingParen(code, k); end >= 0 {
+			return raw[k+1 : end], end + 1
+		}
+		return raw[k:], len(code)
+	}
+	end := len(code)
+	if i := strings.IndexAny(code[k:], "{;"); i >= 0 {
+		end = k + i
+	}
+	if m := rePythonColon.FindStringSubmatchIndex(code[k:end]); m != nil {
+		return raw[k : k+m[3]], k + m[1]
+	}
+	return raw[k:end], end
+}
+
+// guardedOperand reports whether the code before limit ends in `cond &&`,
+// `cond and`, or `cond ?` with a development cond.
+func guardedOperand(raw, code string, limit int) bool {
+	head := strings.TrimRight(code[:limit], " \t")
+	var op int
+	switch {
+	case strings.HasSuffix(head, "&&"):
+		op = len(head) - 2
+	case strings.HasSuffix(head, "?") && !strings.HasSuffix(head, "??"):
+		op = len(head) - 1
+	case strings.HasSuffix(head, " and"):
+		op = len(head) - 4
+	default:
+		return false
+	}
+	return devPolarity(raw[operandStart(code, op):op]) > 0
+}
+
+// operandStart walks back from end to the start of the expression ending
+// there: the nearest unmatched paren, or a statement, argument, assignment,
+// ternary, or || boundary.
+func operandStart(code string, end int) int {
+	depth := 0
+	for i := end - 1; i >= 0; i-- {
+		switch code[i] {
+		case ')', ']':
+			depth++
+		case '(', '[':
+			if depth == 0 {
+				return i + 1
+			}
+			depth--
+		case ';', '{', '}', ',', '?':
+			if depth == 0 {
+				return i + 1
+			}
+		case ':':
+			if depth == 0 && i+1 < len(code) && code[i+1] == ' ' {
+				return i + 1
+			}
+		case '|':
+			if depth == 0 && i > 0 && code[i-1] == '|' {
+				return i + 1
+			}
+		case '=':
+			var prev, next byte
+			if i > 0 {
+				prev = code[i-1]
+			}
+			if i+1 < len(code) {
+				next = code[i+1]
+			}
+			if depth == 0 && next != '=' && prev != '=' && prev != '!' && prev != '<' && prev != '>' {
+				return i + 1
+			}
+		}
+	}
+	return 0
+}
+
+// trailingGuard reports a Ruby-style `stmt if cond` after the statement.
+func trailingGuard(raw, code string, position int) bool {
+	if position >= len(code) {
+		return false
+	}
+	rest := code[position:]
+	m := reTrailingGuard.FindStringSubmatchIndex(rest)
+	if m == nil || strings.ContainsAny(rest[:m[0]], ";{") {
+		return false
+	}
+	p := devPolarity(raw[position+m[4] : position+m[5]])
+	if rest[m[2]:m[3]] == "unless" {
+		p = -p
+	}
+	return p > 0
+}
+
+// matchingParen returns the index of the paren closing the one at open, or -1.
+func matchingParen(code string, open int) int {
+	depth := 0
+	for i := open; i < len(code); i++ {
+		switch code[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+func isWordStart(code string, j int) bool {
+	if c := code[j]; c < 'a' || c > 'z' {
+		return false
+	}
+	return j == 0 || !isIdentByte(code[j-1]) && code[j-1] != '.' && code[j-1] != '$' && code[j-1] != '@'
+}
+
+func isIdentByte(b byte) bool {
+	return b == '_' || b >= 'a' && b <= 'z' || b >= '0' && b <= '9' || b >= 'A' && b <= 'Z'
+}
+
+var (
+	reEnvComparison = regexp.MustCompile(`(?i)(===?|!==?|<>|\beq\b|\bne\b)\s*(?:['"]|:)(development|dev|local|debug|testing|test|production|prod|staging|live)\b`)
+	reEnvCall       = regexp.MustCompile(`(?i)\b(?:environment|env)\s*\(\s*\[?\s*['"](development|dev|local|testing|test|production|prod|staging|live)\b`)
+	reRailsEnv      = regexp.MustCompile(`(?i)\brails\.env\.(development|local|test|production|staging)\?`)
+	reHugoServer    = regexp.MustCompile(`(?:\.Site|\bhugo)\.IsServer\b`)
+	// Development flags: isDev, __DEV__, import.meta.env.DEV, devMode,
+	// settings.DEBUG, app.debug, APP_DEBUG, debug_assertions, isLocal.
+	reDevIdent = regexp.MustCompile(`(?i)\b(?:is_?dev(?:elopment)?(?:_?mode)?|is_?debug(?:_?mode)?|is_?local|in_?development|dev_?mode|debug_?mode|dev|debug|__dev__|\w+_debug|debug_\w+)\b`)
+	// Production flags: isProduction, import.meta.env.PROD, production.
+	reProdIdent    = regexp.MustCompile(`(?i)\b(?:is_?prod(?:uction)?|in_?production|prod|production|__prod__)\b`)
+	reDisjunction  = regexp.MustCompile(`(?i)\|\||\bor\b`)
+	reDevEnvValues = regexp.MustCompile(`(?i)^(?:development|dev|local|debug|testing|test)$`)
+)
+
+// devPolarity classifies a condition: 1 when it selects development, -1
+// when it selects production, 0 when it is neither or mixed. A disjunction
+// is development only when every alternative is (`isDev || isAdmin` runs
+// for admins in production); in a conjunction one development term is
+// enough.
+func devPolarity(cond string) int {
+	masked := maskCodeStrings(cond)
+	result, prev := 0, 0
+	bounds := append(reDisjunction.FindAllStringIndex(masked, -1), []int{len(cond), len(cond)})
+	for k, loc := range bounds {
+		p := conjunctPolarity(cond[prev:loc[0]])
+		prev = loc[1]
+		if k == 0 {
+			result = p
+		} else if p != result {
+			return 0
+		}
+	}
+	return result
+}
+
+func conjunctPolarity(cond string) int {
+	work := []byte(cond)
+	dev, prod := false, false
+	scan := func(re *regexp.Regexp, polarity func(m []int) int, negatable bool) {
+		for _, m := range re.FindAllSubmatchIndex(work, -1) {
+			p := polarity(m)
+			if negatable && negatedAt(cond, m[0]) {
+				p = -p
+			}
+			dev, prod = dev || p > 0, prod || p < 0
+			for i := m[0]; i < m[1]; i++ {
+				work[i] = ' '
+			}
+		}
+	}
+	value := func(m []int, group int) int {
+		if reDevEnvValues.MatchString(cond[m[2*group]:m[2*group+1]]) {
+			return 1
+		}
+		return -1
+	}
+	scan(reEnvComparison, func(m []int) int {
+		p := value(m, 2)
+		if op := strings.ToLower(cond[m[2]:m[3]]); op[0] == '!' || op == "<>" || op == "ne" {
+			p = -p
+		}
+		return p
+	}, false)
+	scan(reEnvCall, func(m []int) int { return value(m, 1) }, true)
+	scan(reRailsEnv, func(m []int) int { return value(m, 1) }, true)
+	scan(reHugoServer, func([]int) int { return 1 }, true)
+	scan(reDevIdent, func([]int) int { return 1 }, true)
+	scan(reProdIdent, func([]int) int { return -1 }, true)
+	switch {
+	case dev:
+		return 1
+	case prod:
+		return -1
+	}
+	return 0
+}
+
+// negatedAt reports whether the term starting at i is negated: `!isDev`,
+// `!import.meta.env.PROD`, `!app()->isLocal()`, `not settings.DEBUG`,
+// `not(debug_assertions)`. A macro bang (`cfg!(...)`) is not a negation.
+func negatedAt(s string, i int) bool {
+	// Back over the receiver chain to the start of the expression.
+	for {
+		if i > 0 && s[i-1] == '.' {
+			i--
+		} else if i > 1 && (s[i-2:i] == "->" || s[i-2:i] == "::") {
+			i -= 2
+		} else {
+			break
+		}
+		if i > 1 && s[i-2:i] == "()" {
+			i -= 2
+		}
+		for i > 0 && (isIdentByte(s[i-1]) || s[i-1] == '$') {
+			i--
+		}
+	}
+	for i > 0 && (s[i-1] == ' ' || s[i-1] == '\t' || s[i-1] == '(') {
+		i--
+	}
+	bangs := 0
+	for i > 0 && s[i-1] == '!' {
+		bangs++
+		i--
+	}
+	if bangs > 0 {
+		return bangs%2 == 1 && (i == 0 || !isIdentByte(s[i-1]))
+	}
+	w := i
+	for w > 0 && isIdentByte(s[w-1]) {
+		w--
+	}
+	return strings.EqualFold(s[w:i], "not")
+}
 
 // heredocStart matches Ruby heredocs: <<~WORD, <<-WORD, <<WORD. Package
 // level because isInCodeExample runs once per debug-statement match.
