@@ -67,24 +67,51 @@ func runIgnore(cmd *cobra.Command, args []string) error {
 		return &ExitError{Code: ExitUsage, Err: fmt.Errorf("unknown check ID %q (run 'preflight checks' to list IDs)", checkID)}
 	}
 
+	// Entries are compared by the check they select, so indexnow, indexNow
+	// and index_now are one entry. A pre-1.0 spelling is rewritten in
+	// place, so `preflight ignore seo_meta` is also how an old seoMeta
+	// line, which scan now rejects, gets fixed; further spellings of the
+	// same check are dropped.
+	checkID = catalog.Canonical(checkID)
 	ignoreList := ensureSequence(root, "ignore")
+	var kept []*yaml.Node
+	var first *yaml.Node
+	var renamedFrom string
+	dropped := 0
 	for _, item := range ignoreList.Content {
-		// A pre-1.0 spelling of the same check is rewritten in place, so
-		// `preflight ignore seo_meta` is also how an old seoMeta line,
-		// which scan now rejects, gets fixed.
-		if current, renamed := catalog.Renamed(item.Value); renamed && current == checkID {
-			old := item.Value
-			item.Value = checkID
-			if err := doc.write(); err != nil {
-				return err
+		if ignoreEntryCheck(item.Value) != checkID {
+			kept = append(kept, item)
+			continue
+		}
+		if first != nil {
+			dropped++
+			continue
+		}
+		first = item
+		if item.Value != checkID {
+			if _, renamed := catalog.Renamed(item.Value); renamed {
+				renamedFrom = item.Value
+				item.Value = checkID
 			}
-			fmt.Printf("Renamed '%s' to '%s' in the ignore list\n", old, checkID)
+		}
+		kept = append(kept, item)
+	}
+	if first != nil {
+		if renamedFrom == "" && dropped == 0 {
+			fmt.Printf("'%s' is already in the ignore list\n", first.Value)
 			return nil
 		}
-		if catalog.Canonical(item.Value) == checkID {
-			fmt.Printf("'%s' is already in the ignore list\n", item.Value)
-			return nil
+		ignoreList.Content = kept
+		if err := doc.write(); err != nil {
+			return err
 		}
+		if renamedFrom != "" {
+			fmt.Printf("Renamed '%s' to '%s' in the ignore list\n", renamedFrom, checkID)
+		}
+		if dropped > 0 {
+			fmt.Printf("Removed %d duplicate spelling(s) of '%s' from the ignore list\n", dropped, checkID)
+		}
+		return nil
 	}
 	ignoreList.Content = append(ignoreList.Content, scalarNode(checkID))
 
@@ -93,6 +120,15 @@ func runIgnore(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("Added '%s' to ignore list\n", checkID)
 	return nil
+}
+
+// ignoreEntryCheck returns the check an ignore entry selects, following a
+// pre-1.0 rename and a service ID that a core check verifies.
+func ignoreEntryCheck(entry string) string {
+	if current, renamed := catalog.Renamed(entry); renamed {
+		entry = current
+	}
+	return catalog.Canonical(entry)
 }
 
 // looksLikeGlob reports whether an ignore entry is a file pattern rather
@@ -148,11 +184,7 @@ func init() {
 }
 
 func runUnignore(cmd *cobra.Command, args []string) error {
-	checkID := args[0]
-	if current, renamed := catalog.Renamed(checkID); renamed {
-		checkID = current
-	}
-	checkID = catalog.Canonical(checkID)
+	checkID := ignoreEntryCheck(args[0])
 
 	doc, err := loadConfigDocument()
 	if err != nil {
@@ -167,11 +199,7 @@ func runUnignore(cmd *cobra.Command, args []string) error {
 		for _, item := range ignoreList.Content {
 			// Match the entry however it was spelled, so `unignore llms_txt`
 			// also removes a pre-1.0 `llmsTxt` line, which scan rejects.
-			value := item.Value
-			if current, renamed := catalog.Renamed(value); renamed {
-				value = current
-			}
-			if catalog.Canonical(value) == checkID {
+			if ignoreEntryCheck(item.Value) == checkID {
 				found = true
 				continue
 			}

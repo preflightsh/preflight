@@ -179,10 +179,10 @@ func Validate(cfg *PreflightConfig) error {
 	if err := validateServices(cfg); err != nil {
 		return err
 	}
+	if renamed := catalog.FindRenamed("ignore", cfg.Ignore); len(renamed) > 0 {
+		return &catalog.RenamedIDsError{IDs: renamed}
+	}
 	for _, id := range cfg.Ignore {
-		if err := catalog.RenamedError(id); err != nil {
-			return err
-		}
 		current := catalog.Canonical(id)
 		_, check := catalog.LookupCheck(current)
 		_, service := catalog.LookupService(current)

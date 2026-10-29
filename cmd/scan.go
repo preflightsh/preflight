@@ -85,10 +85,10 @@ func filterChecksByFlags(enabled []checks.Check, only, skip []string) ([]checks.
 		return enabled, nil
 	}
 
+	if renamed := renamedFlagIDs(only, skip); len(renamed) > 0 {
+		return nil, &catalog.RenamedIDsError{IDs: renamed}
+	}
 	for _, id := range append(append([]string(nil), only...), skip...) {
-		if err := catalog.RenamedError(id); err != nil {
-			return nil, err
-		}
 		if !checks.KnownID(id) {
 			return nil, fmt.Errorf("unknown check ID %q (run 'preflight checks' to list IDs)", id)
 		}
@@ -117,6 +117,11 @@ func filterChecksByFlags(enabled []checks.Check, only, skip []string) ([]checks.
 		return nil, fmt.Errorf("no enabled checks match --only (the checks may not apply to this project's config)")
 	}
 	return filtered, nil
+}
+
+// renamedFlagIDs returns the pre-1.0 IDs passed to --only and --skip.
+func renamedFlagIDs(only, skip []string) []catalog.RenamedID {
+	return append(catalog.FindRenamed("--only", only), catalog.FindRenamed("--skip", skip)...)
 }
 
 // scanOptions is everything runScan gathers from flags and arguments before
@@ -219,17 +224,24 @@ func resolveProjectDir(args []string) (string, error) {
 // is reserved for "preflight could not run" (a usage error) and for
 // cancellation; a project that fails its checks is not an error here.
 func executeScan(ctx context.Context, opts scanOptions, stdout, stderr io.Writer) (int, error) {
+	// Old IDs in the flags are gathered before the config loads so one
+	// error can name them together with any in the ignore list.
+	flagRenamed := renamedFlagIDs(opts.Only, opts.Skip)
 	cfg, err := config.Load(opts.ProjectDir)
 	if err != nil {
+		var renamed *catalog.RenamedIDsError
+		if errors.As(err, &renamed) {
+			all := &catalog.RenamedIDsError{IDs: append(append([]catalog.RenamedID(nil), renamed.IDs...), flagRenamed...)}
+			return ExitUsage, &ExitError{Code: ExitUsage, Err: fmt.Errorf("Error: %v", all)}
+		}
 		msg := fmt.Sprintf("Error: %v", err)
-		var renamed *catalog.RenamedIDError
-		switch {
-		case errors.As(err, &renamed):
-			msg += fmt.Sprintf("\nRun 'preflight ignore %s' to update the ignore list.", renamed.Current)
-		case !opts.CI:
+		if !opts.CI {
 			msg += "\nRun 'preflight init' to create a configuration file."
 		}
 		return ExitUsage, &ExitError{Code: ExitUsage, Err: fmt.Errorf("%s", msg)}
+	}
+	if len(flagRenamed) > 0 {
+		return ExitUsage, &ExitError{Code: ExitUsage, Err: fmt.Errorf("Error: %v", &catalog.RenamedIDsError{IDs: flagRenamed})}
 	}
 	for _, note := range cfg.Notes {
 		fmt.Fprintf(stderr, "Note: %s\n", note)

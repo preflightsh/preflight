@@ -176,3 +176,24 @@ func TestIgnoreRejectsRenamedIDs(t *testing.T) {
 		t.Errorf("unignore by the new name should remove the old spelling:\n%s", got)
 	}
 }
+
+// `ignore indexnow` used to compare the raw argument with the rewritten
+// entry, so it appended indexnow beside an old indexNow that scan still
+// rejected. Both spellings now resolve to index_now, and duplicates go.
+func TestIgnoreRewritesAndDedupesAcrossSpellings(t *testing.T) {
+	path := inTempProject(t, "projectName: demo\nignore:\n  - indexNow\n")
+	if err := runIgnore(nil, []string{"indexnow"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, path); !strings.HasSuffix(got, "ignore:\n  - index_now\n") {
+		t.Errorf("want indexNow rewritten to index_now, got:\n%s", got)
+	}
+
+	path = inTempProject(t, "projectName: demo\nignore:\n  - indexNow\n  - sitemap\n  - indexnow\n  - index_now\n")
+	if err := runIgnore(nil, []string{"index_now"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, path); !strings.HasSuffix(got, "ignore:\n  - index_now\n  - sitemap\n") {
+		t.Errorf("want one index_now entry, got:\n%s", got)
+	}
+}

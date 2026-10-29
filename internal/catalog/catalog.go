@@ -140,6 +140,46 @@ func RenamedError(id string) error {
 	return &RenamedIDError{Old: id, Current: current}
 }
 
+// RenamedID is one pre-1.0 check ID found in a config or on the command
+// line. Where is "ignore", "--only" or "--skip" and picks the fix to offer.
+type RenamedID struct {
+	Old, Current, Where string
+}
+
+// RenamedIDsError reports every pre-1.0 check ID found in one run, so a
+// config with several is fixed in one pass rather than one scan per ID.
+type RenamedIDsError struct {
+	IDs []RenamedID
+}
+
+func (e *RenamedIDsError) Error() string {
+	lines := make([]string, 0, len(e.IDs))
+	for _, r := range e.IDs {
+		fix := fmt.Sprintf("run 'preflight ignore %s' to update the ignore list", r.Current)
+		if r.Where != "ignore" {
+			fix = fmt.Sprintf("use %s %s", r.Where, r.Current)
+		}
+		lines = append(lines, fmt.Sprintf("unknown check ID %q in %s: renamed to %q in v0.22.0; %s", r.Old, r.Where, r.Current, fix))
+	}
+	if len(lines) == 1 {
+		return lines[0]
+	}
+	return "pre-1.0 check IDs are not accepted:\n  " + strings.Join(lines, "\n  ")
+}
+
+// FindRenamed returns the pre-1.0 IDs in ids, once each, tagged with where.
+func FindRenamed(where string, ids []string) []RenamedID {
+	var found []RenamedID
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if current, ok := Renames[id]; ok && !seen[id] {
+			seen[id] = true
+			found = append(found, RenamedID{Old: id, Current: current, Where: where})
+		}
+	}
+	return found
+}
+
 // Services lists every service in detection and report order. "stripe" is
 // verified by a check gated on its own config block and "indexnow" by the
 // indexNow core check, so neither has an entry in checks.ServiceChecks; the

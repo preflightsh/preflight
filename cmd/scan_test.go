@@ -289,3 +289,23 @@ func TestRenamedIDsAreRejected(t *testing.T) {
 		t.Errorf("a renamed ID should not suggest re-running init:\n%v", err)
 	}
 }
+
+// Every pre-1.0 ID in the ignore list and the flags is reported in one
+// error, so fixing them does not take one scan per ID.
+func TestRenamedIDsAreReportedTogether(t *testing.T) {
+	dir := scanProject(t, "projectName: demo\nstack: unknown\nignore:\n  - robotsTxt\n  - seoMeta\n")
+	var stdout, stderr bytes.Buffer
+	code, err := executeScan(context.Background(), scanOptions{ProjectDir: dir, Format: "json", Quiet: true, Only: []string{"llmsTxt"}, Skip: []string{"adsTxt"}}, &stdout, &stderr)
+	if code != ExitUsage || err == nil {
+		t.Fatalf("want exit %d and an error, got %d, %v", ExitUsage, code, err)
+	}
+	for _, want := range []string{"preflight ignore robots_txt", "preflight ignore seo_meta", `renamed to "llms_txt"`, "--only llms_txt", "--skip ads_txt"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should contain %q, got:\n%v", want, err)
+		}
+	}
+
+	if _, err := filterChecksByFlags(nil, []string{"llmsTxt", "robotsTxt"}, nil); err == nil || !strings.Contains(err.Error(), "llms_txt") || !strings.Contains(err.Error(), "robots_txt") {
+		t.Errorf("--only with two old IDs: want both named, got %v", err)
+	}
+}
