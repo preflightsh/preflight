@@ -150,46 +150,6 @@ func (c OGTwitterCheck) Run(ctx Context) (CheckResult, error) {
 		}
 	}
 
-	// Per-env rendered HTML fallback for items that weren't in the static
-	// template. Catches CMS-driven sites (Craft+SEOmatic, WordPress+Yoast,
-	// etc.) where meta tags are emitted at runtime. We do this before the
-	// image-dimension checks so a fully-passing rendered HTML doesn't get
-	// downgraded by image-size warnings on a non-authoritative env.
-	staticMissing := append([]string(nil), missing...)
-	var perEnvSummary string
-	var perEnvProdPassed bool
-	if len(staticMissing) > 0 && (ctx.Config.URLs.Production != "" || ctx.Config.URLs.Staging != "") {
-		perEnvSummary, perEnvProdPassed = RunPerEnv(ctx, func(html string) []string {
-			doc := parseRenderedHTML(html)
-			var stillMissing []string
-			for _, name := range staticMissing {
-				if !doc.hasMeta(name) {
-					stillMissing = append(stillMissing, name)
-				}
-			}
-			return stillMissing
-		})
-		if perEnvProdPassed {
-			// Production has all the OG/Twitter tags. Treat the static
-			// template as "good enough" and clear missing so dimension
-			// checks below run against the rendered values.
-			missing = nil
-			found = append(found, staticMissing...)
-			// A CMS-rendered og:image never appears in the template, so take
-			// the rendered production values for the dimension checks.
-			rendered := parseRenderedHTML(ctx.PageHTMLProduction)
-			if ogImageURL == "" {
-				ogImageURL = rendered.metaProperty["og:image"]
-			}
-			if twitterImageURL == "" {
-				twitterImageURL = rendered.metaName["twitter:image"]
-				if twitterImageURL == "" {
-					twitterImageURL = rendered.metaProperty["twitter:image"]
-				}
-			}
-		}
-	}
-
 	// Also check for opengraph-image and twitter-image files in app directory
 	ogImageFiles := []string{
 		"app/opengraph-image.png",
@@ -358,24 +318,18 @@ func (c OGTwitterCheck) Run(ctx Context) (CheckResult, error) {
 
 	// Build result
 	if len(missing) == 0 && len(dimensionWarnings) == 0 {
-		msg := "OG and Twitter card metadata configured"
-		if perEnvSummary != "" {
-			msg = perEnvSummary
-		}
 		return CheckResult{
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
 			Passed:   true,
-			Message:  msg,
+			Message:  "OG and Twitter card metadata configured",
 			Details:  details,
 		}, nil
 	}
 
 	var messages []string
-	if perEnvSummary != "" {
-		messages = append(messages, perEnvSummary)
-	} else if len(missing) > 0 {
+	if len(missing) > 0 {
 		messages = append(messages, "Missing: "+strings.Join(missing, ", "))
 	}
 	if len(dimensionWarnings) > 0 {

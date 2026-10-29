@@ -79,32 +79,6 @@ func (c CanonicalURLCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	// Per-env rendered HTML fallback for CMS-generated canonical tags.
-	if summary, prodPassed := RunPerEnv(ctx, func(html string) []string {
-		if parseRenderedHTML(html).hasLinkRel("canonical") {
-			return nil
-		}
-		return []string{"canonical"}
-	}); summary != "" {
-		if prodPassed {
-			return CheckResult{
-				ID:       c.ID(),
-				Title:    c.Title(),
-				Severity: SeverityInfo,
-				Passed:   true,
-				Message:  summary,
-			}, nil
-		}
-		return CheckResult{
-			ID:          c.ID(),
-			Title:       c.Title(),
-			Severity:    SeverityWarn,
-			Passed:      false,
-			Message:     summary,
-			Suggestions: getCanonicalSuggestions(ctx.Config.Stack),
-		}, nil
-	}
-
 	return CheckResult{
 		ID:          c.ID(),
 		Title:       c.Title(),

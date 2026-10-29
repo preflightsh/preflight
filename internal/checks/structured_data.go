@@ -27,30 +27,6 @@ func (c StructuredDataCheck) Run(ctx Context) (CheckResult, error) {
 	cfg := ctx.Config.Checks.SEOMeta
 	var details []string
 
-	// Rendered HTML is authoritative when a URL is configured: prefer it and
-	// report per-env, consistent with the other page-content checks (SEO,
-	// canonical, OG, viewport, lang). A static reference (e.g. a SEOmatic call
-	// in a template) would otherwise short-circuit before the per-env check and
-	// hide the prod/staging breakdown. Static analysis below remains the
-	// fallback for offline scans or when the homepage isn't where the JSON-LD
-	// lives.
-	summary, prodPassed := RunPerEnv(ctx, func(html string) []string {
-		if parseRenderedHTML(html).hasJSONLD || reSchemaContext.MatchString(html) {
-			return nil
-		}
-		return []string{"structured data"}
-	})
-	if prodPassed {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  summary,
-			Details:  details,
-		}, nil
-	}
-
 	// Check main layout if configured
 	if cfg != nil && cfg.MainLayout != "" {
 		layoutPath := filepath.Join(ctx.RootDir, cfg.MainLayout)
@@ -108,21 +84,6 @@ func (c StructuredDataCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	// Nothing static matched. If a URL was configured, the rendered HTML was
-	// already checked above and lacked JSON-LD — warn per-env. Otherwise warn
-	// generically (offline scan).
-	if summary != "" {
-		return CheckResult{
-			ID:          c.ID(),
-			Title:       c.Title(),
-			Severity:    SeverityWarn,
-			Passed:      false,
-			Message:     summary,
-			Suggestions: getStructuredDataSuggestions(ctx.Config.Stack),
-			Details:     details,
-		}, nil
-	}
-
 	return CheckResult{
 		ID:          c.ID(),
 		Title:       c.Title(),
@@ -132,10 +93,6 @@ func (c StructuredDataCheck) Run(ctx Context) (CheckResult, error) {
 		Suggestions: getStructuredDataSuggestions(ctx.Config.Stack),
 	}, nil
 }
-
-// reSchemaContext detects schema.org JSON-LD payloads in rendered HTML by
-// their @context, catching documents the tag-level scan can't attribute.
-var reSchemaContext = regexp.MustCompile(`(?i)["']@context["']\s*:\s*["']https?://schema\.org`)
 
 func hasStructuredData(content, stack string) bool {
 	// Strip comments to avoid false positives on commented-out code

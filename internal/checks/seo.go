@@ -103,43 +103,6 @@ func (c SEOMetadataCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	// Static template missing items: per-env rendered HTML fallback.
-	// SEOmatic and similar plugins generate these tags at runtime, and
-	// dev/prod can legitimately differ (robots="none" on dev, etc.) so
-	// we report each env separately.
-	staticMissing := missing
-	if summary, prodPassed := RunPerEnv(ctx, func(html string) []string {
-		doc := parseRenderedHTML(html)
-		var stillMissing []string
-		for _, name := range staticMissing {
-			if !renderedHasSEOTag(doc, name) {
-				stillMissing = append(stillMissing, name)
-			}
-		}
-		return stillMissing
-	}); summary != "" {
-		if prodPassed {
-			return CheckResult{
-				ID:       c.ID(),
-				Title:    c.Title(),
-				Severity: SeverityInfo,
-				Passed:   true,
-				Message:  summary,
-			}, nil
-		}
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityWarn,
-			Passed:   false,
-			Message:  summary,
-			Suggestions: []string{
-				"Add missing meta tags to your layout",
-				"Consider using a SEO component or helper",
-			},
-		}, nil
-	}
-
 	return CheckResult{
 		ID:       c.ID(),
 		Title:    c.Title(),

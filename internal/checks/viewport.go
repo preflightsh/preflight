@@ -108,39 +108,6 @@ func (c ViewportCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	// Per-env rendered HTML fallback: authoritative for any CMS/stack that
-	// emits the viewport tag at render time from a template the static scan
-	// can't locate (Craft/Twig partials, WordPress, Ghost, server-rendered
-	// frameworks, etc.). Checks the actual served bytes, so it is
-	// stack-agnostic by construction.
-	if summary, prodPassed := RunPerEnv(ctx, func(html string) []string {
-		if _, ok := parseRenderedHTML(html).metaName["viewport"]; ok {
-			return nil
-		}
-		return []string{"viewport"}
-	}); summary != "" {
-		if prodPassed {
-			return CheckResult{
-				ID:       c.ID(),
-				Title:    c.Title(),
-				Severity: SeverityInfo,
-				Passed:   true,
-				Message:  summary,
-			}, nil
-		}
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityWarn,
-			Passed:   false,
-			Message:  summary,
-			Suggestions: []string{
-				"Add to <head>: <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
-				"This ensures proper mobile responsiveness",
-			},
-		}, nil
-	}
-
 	return CheckResult{
 		ID:       c.ID(),
 		Title:    c.Title(),
