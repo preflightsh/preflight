@@ -182,7 +182,7 @@ func FindRenamed(where string, ids []string) []RenamedID {
 
 // Services lists every service in detection and report order. "stripe" is
 // verified by a check gated on its own config block and "indexnow" by the
-// indexNow core check, so neither has an entry in checks.ServiceChecks; the
+// index_now core check, so neither has an entry in checks.ServiceChecks; the
 // rest do.
 var Services = []Service{
 	// Payments
@@ -274,7 +274,7 @@ var Services = []Service{
 	{ID: "together_ai", Name: "Together AI", Category: "AI", Group: "AI", Description: "Verifies Together AI API configuration"},
 
 	// SEO
-	{ID: "indexnow", Name: "IndexNow", Category: "INDEXNOW", Group: "SEO", Description: "Verifies the IndexNow key file (see the indexNow check)"},
+	{ID: "indexnow", Name: "IndexNow", Category: "INDEXNOW", Group: "SEO", Description: "Verifies the IndexNow key file (through the index_now check)"},
 
 	// Cookie consent
 	{ID: "cookieconsent", Name: "CookieConsent", Category: "LEGAL", Group: "Cookie Consent", Description: "Verifies CookieConsent.js initialization"},

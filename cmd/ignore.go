@@ -384,9 +384,6 @@ func printCatalog(w io.Writer) {
 	fmt.Fprintln(w)
 	group = ""
 	for _, s := range catalog.Services {
-		if s.ID == "indexnow" {
-			continue // listed above as the indexNow check
-		}
 		if s.Group != group {
 			if group != "" {
 				fmt.Fprintln(w)
