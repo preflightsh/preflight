@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -508,6 +509,11 @@ func scanFileForSecrets(path string, patterns []secretPattern) ([]secretFinding,
 	scanner.Buffer(make([]byte, 0, 64*1024), maxLine)
 	lineNum := 0
 	bytesScanned := 0
+	// In an example file, key-block headers wait for the lines after them.
+	example := isExampleFile(filepath.Base(path))
+	var lines []string
+	type keyHeader struct{ finding, line, col int }
+	var headers []keyHeader
 
 	for scanner.Scan() {
 		lineNum++
@@ -516,6 +522,9 @@ func scanFileForSecrets(path string, patterns []secretPattern) ([]secretFinding,
 			return findings, fmt.Errorf("incomplete scan: file exceeds read budget")
 		}
 		line := scanner.Text()
+		if example {
+			lines = append(lines, line)
+		}
 
 		// Collect every match on the line, not just the first one. If a
 		// line contains an allowlisted token AND a real secret,
@@ -531,6 +540,9 @@ func scanFileForSecrets(path string, patterns []secretPattern) ([]secretFinding,
 					continue
 				}
 				seen[fp] = struct{}{}
+				if example && strings.HasPrefix(m, "-----BEGIN") {
+					headers = append(headers, keyHeader{len(findings), lineNum - 1, strings.Index(line, m) + len(m)})
+				}
 				findings = append(findings, secretFinding{
 					file:        path,
 					line:        lineNum,
@@ -546,5 +558,68 @@ func scanFileForSecrets(path string, patterns []secretPattern) ([]secretFinding,
 		return findings, fmt.Errorf("incomplete scan of %s: %w", path, err)
 	}
 
+	// An example file showing the shape of a key setting
+	// (KEY="-----BEGIN RSA PRIVATE KEY-----\nYour private key here...")
+	// documents it. Only a header followed by key material is a key.
+	if len(headers) > 0 {
+		drop := map[int]bool{}
+		for _, h := range headers {
+			if !keyMaterialFollows(lines, h.line, h.col) {
+				drop[h.finding] = true
+			}
+		}
+		kept := findings[:0]
+		for i, f := range findings {
+			if !drop[i] {
+				kept = append(kept, f)
+			}
+		}
+		findings = kept
+	}
+
 	return findings, nil
+}
+
+// isExampleFile reports a file committed to document settings rather than
+// hold them: .env.example, settings.sample.py, config.template.yml,
+// phpunit.xml.dist.
+func isExampleFile(baseName string) bool {
+	parts := strings.Split(strings.ToLower(baseName), ".")
+	for _, marker := range []string{"example", "sample", "template", "dist"} {
+		if slices.Contains(parts[1:], marker) {
+			return true
+		}
+	}
+	return false
+}
+
+var reBase64Run = regexp.MustCompile(`^[A-Za-z0-9+/=]{40,}$`)
+
+// keyMaterialFollows reports whether the text after a key-block header (at
+// lines[line][col:]) holds base64 key material before the END line: on the
+// next lines, or after a literal \n in a quoted one-line value. A run of
+// one repeated filler character is not material.
+func keyMaterialFollows(lines []string, line, col int) bool {
+	text := lines[line][col:]
+	for i := line + 1; i < len(lines) && i <= line+5; i++ {
+		text += "\n" + lines[i]
+	}
+	text = strings.NewReplacer(`\r`, "\n", `\n`, "\n").Replace(text)
+	for _, seg := range strings.Split(text, "\n") {
+		seg = strings.Trim(strings.TrimSpace(seg), `"',\`)
+		if strings.HasPrefix(seg, "-----END") {
+			return false
+		}
+		if !reBase64Run.MatchString(seg) {
+			continue
+		}
+		distinct := map[rune]bool{}
+		for _, r := range seg {
+			distinct[r] = true
+		}
+		if len(distinct) >= 16 {
+			return true
+		}
+	}
+	return false
 }
