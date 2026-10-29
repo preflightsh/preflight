@@ -72,7 +72,7 @@ jobs:
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           distribution: goreleaser
-          version: v2.15.4
+          version: v2.19.0
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -91,6 +91,17 @@ jobs:
           DISPATCH_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
+          # npm-preflight's publish.yml takes only a version and runs a plain
+          # npm publish, which would move the npm latest dist-tag to an rc.
+          # Until it accepts a dist-tag, prereleases skip npm entirely. Same
+          # test GoReleaser uses for prerelease: auto (build metadata after
+          # a + does not count).
+          case "${VERSION%%+*}" in
+            *-*)
+              echo "Prerelease v$VERSION: not dispatching the npm publish."
+              exit 0
+              ;;
+          esac
           curl -fsSL -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer $DISPATCH_TOKEN" \
