@@ -33,8 +33,10 @@ Most checks only read files and make HTTP requests, but the
 directory. Preflight closes the known ways for a repository to run its
 own code through them (Composer runs without plugins or scripts, the
 Cargo and Bundler audit tools are called directly so project aliases do
-not apply, and Yarn 2 and later is not audited when the project has a
-`.yarnrc.yml`), but these tools still read project-level configuration,
+not apply, Yarn 2 and later is not audited when the project has a
+`.yarnrc.yml`, govulncheck runs without cgo and cannot rewrite `go.mod`,
+and `pip-audit` only runs on a fully pinned `requirements.txt`, without
+installing anything), but these tools still read project-level configuration,
 so a hostile repository can influence what they do.
 
 To scan a repository you do not trust, skip that check:
