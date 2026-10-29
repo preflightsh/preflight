@@ -232,7 +232,7 @@ func executeScan(ctx context.Context, opts scanOptions, stdout, stderr io.Writer
 		var renamed *catalog.RenamedIDsError
 		if errors.As(err, &renamed) {
 			all := &catalog.RenamedIDsError{IDs: append(append([]catalog.RenamedID(nil), renamed.IDs...), flagRenamed...)}
-			return ExitUsage, &ExitError{Code: ExitUsage, Err: fmt.Errorf("Error: %v", all)}
+			return ExitUsage, &ExitError{Code: ExitUsage, Err: fmt.Errorf("Error: %w", all)}
 		}
 		msg := fmt.Sprintf("Error: %v", err)
 		if !opts.CI {
@@ -241,7 +241,7 @@ func executeScan(ctx context.Context, opts scanOptions, stdout, stderr io.Writer
 		return ExitUsage, &ExitError{Code: ExitUsage, Err: fmt.Errorf("%s", msg)}
 	}
 	if len(flagRenamed) > 0 {
-		return ExitUsage, &ExitError{Code: ExitUsage, Err: fmt.Errorf("Error: %v", &catalog.RenamedIDsError{IDs: flagRenamed})}
+		return ExitUsage, &ExitError{Code: ExitUsage, Err: fmt.Errorf("Error: %w", &catalog.RenamedIDsError{IDs: flagRenamed})}
 	}
 	for _, note := range cfg.Notes {
 		fmt.Fprintf(stderr, "Note: %s\n", note)
