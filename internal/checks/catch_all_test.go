@@ -76,3 +76,31 @@ func TestHealthConfiguredPathMissingWarns(t *testing.T) {
 		t.Fatalf("passed=%v sev=%s msg=%q", res.Passed, res.Severity, res.Message)
 	}
 }
+
+// A path with no enabled key is probed first, and a missing one falls
+// back to the defaults rather than warning.
+func TestHealthUnsetEnabledTriesConfiguredPathFirst(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/internal/up", "/":
+			fmt.Fprint(w, "ok")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	run := func(path string) CheckResult {
+		ctx := Context{RootDir: t.TempDir(), Client: srv.Client(), Config: &config.PreflightConfig{
+			URLs:   config.URLConfig{Production: srv.URL},
+			Checks: config.ChecksConfig{HealthEndpoint: &config.HealthEndpointConfig{Path: path}},
+		}}
+		res, _ := HealthCheck{}.Run(ctx)
+		return res
+	}
+	if res := run("/internal/up"); !res.Passed || !strings.Contains(res.Message, "/internal/up") {
+		t.Errorf("configured path: passed=%v msg=%q", res.Passed, res.Message)
+	}
+	if res := run("/missing"); !res.Passed {
+		t.Errorf("missing unset path should fall back, got passed=%v msg=%q", res.Passed, res.Message)
+	}
+}

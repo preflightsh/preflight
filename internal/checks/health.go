@@ -47,15 +47,24 @@ func (c HealthCheck) Run(ctx Context) (CheckResult, error) {
 	baseURL := baseURLs[0]
 
 	// Determine which health paths to probe. If the user explicitly enabled
-	// the check with a specific path, only try that one. Otherwise try the
-	// common defaults.
+	// the check with a specific path, only try that one. A path with no
+	// enabled key is tried first, ahead of the common defaults.
 	var pathsToTry []string
 	strict := false
-	if cfg != nil && cfg.Enabled && cfg.Path != "" {
+	defaults := []string{"/health", "/healthz", "/api/health", "/_health", "/status"}
+	switch {
+	case cfg != nil && cfg.Enabled && cfg.Path != "":
 		pathsToTry = []string{cfg.Path}
 		strict = true
-	} else {
-		pathsToTry = []string{"/health", "/healthz", "/api/health", "/_health", "/status"}
+	case cfg != nil && cfg.Path != "":
+		pathsToTry = []string{cfg.Path}
+		for _, p := range defaults {
+			if p != cfg.Path {
+				pathsToTry = append(pathsToTry, p)
+			}
+		}
+	default:
+		pathsToTry = defaults
 	}
 
 	// A catch-all host (SPA rewrite) answers 200 with its shell for every
