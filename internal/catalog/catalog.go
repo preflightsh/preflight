@@ -11,7 +11,10 @@
 // implementations and a test there proves the two stay in step.
 package catalog
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Check describes a core (non-service) check for listing and rendering.
 type Check struct {
@@ -315,6 +318,45 @@ func LookupService(id string) (Service, bool) {
 func IsService(id string) bool {
 	_, ok := serviceByID[id]
 	return ok
+}
+
+// Suggest returns the check or service ID closest to id, for "did you
+// mean" hints, or "" when nothing is within two edits.
+func Suggest(id string) string {
+	best, bestDist := "", 3
+	try := func(candidate string) {
+		if d := editDistance(strings.ToLower(id), candidate); d < bestDist {
+			best, bestDist = candidate, d
+		}
+	}
+	for _, c := range Checks {
+		try(c.ID)
+	}
+	for _, s := range Services {
+		try(s.ID)
+	}
+	return best
+}
+
+// editDistance is the Levenshtein distance between a and b.
+func editDistance(a, b string) int {
+	prev := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur := make([]int, len(b)+1)
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+		}
+		prev = cur
+	}
+	return prev[len(b)]
 }
 
 // ServiceName returns the display name for a service ID, or the ID itself

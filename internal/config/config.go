@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
@@ -175,10 +176,8 @@ func Load(rootDir string) (*PreflightConfig, error) {
 // Validate checks values that yaml's KnownFields cannot validate, including
 // map keys and ignore IDs. Source-file globs remain supported for debug checks.
 func Validate(cfg *PreflightConfig) error {
-	for id := range cfg.Services {
-		if _, ok := catalog.LookupService(id); !ok {
-			return fmt.Errorf("unknown service ID %q", id)
-		}
+	if err := validateServices(cfg); err != nil {
+		return err
 	}
 	for _, id := range cfg.Ignore {
 		if err := catalog.RenamedError(id); err != nil {
@@ -190,9 +189,23 @@ func Validate(cfg *PreflightConfig) error {
 		if check || service {
 			continue
 		}
-		if !strings.ContainsAny(id, "/*?[.") || !doublestar.ValidatePattern(filepath.ToSlash(id)) {
-			return fmt.Errorf("unknown check ID or invalid glob %q", id)
+		if strings.ContainsAny(id, "/*?[.") {
+			if !doublestar.ValidatePattern(filepath.ToSlash(id)) {
+				return fmt.Errorf("invalid glob %q in ignore", id)
+			}
+			continue
 		}
+		// v0.23 loaded any entry, and the source scans read every entry
+		// as a path pattern, so a bare word still loads. It matches only
+		// a file of that name at the project root, which is rarely what
+		// was meant, so say so.
+		note := fmt.Sprintf("ignore entry %q is not a check or service ID, so it only skips a file named %q at the project root in source scans", id, id)
+		if near := catalog.Suggest(id); near != "" {
+			note += fmt.Sprintf("; did you mean %q?", near)
+		} else {
+			note += fmt.Sprintf("; use %q to skip a directory", id+"/**")
+		}
+		cfg.Notes = append(cfg.Notes, note)
 	}
 	if c := cfg.Checks.Secrets; c != nil {
 		for _, entry := range c.Allowlist {
@@ -227,6 +240,54 @@ func Validate(cfg *PreflightConfig) error {
 			}
 		}
 		c.Domain = domain
+	}
+	return nil
+}
+
+// serviceRenames maps service IDs that preflight init once wrote to their
+// current IDs. init v0.2.1 through v0.3.0 wrote the xAI service as groq.
+var serviceRenames = map[string]string{
+	"groq": "grok",
+}
+
+// validateServices resolves renamed service IDs and rejects unknown ones
+// that are declared. Service IDs are map keys rather than schema keys:
+// init writes every service it knows with declared: false, so a config
+// from a newer Preflight lists services this one has never heard of, and
+// those are harmless. A declared unknown service is most likely a typo
+// that would silently skip the check the user asked for, so it fails.
+func validateServices(cfg *PreflightConfig) error {
+	ids := make([]string, 0, len(cfg.Services))
+	for id := range cfg.Services {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	var unknown []string
+	for _, id := range ids {
+		svc := cfg.Services[id]
+		if current, ok := serviceRenames[id]; ok {
+			merged := cfg.Services[current]
+			merged.Declared = merged.Declared || svc.Declared
+			cfg.Services[current] = merged
+			delete(cfg.Services, id)
+			cfg.Notes = append(cfg.Notes, fmt.Sprintf("service ID %q is now %q; rename it under services: in preflight.yml.", id, current))
+			continue
+		}
+		if _, ok := catalog.LookupService(id); ok {
+			continue
+		}
+		if svc.Declared {
+			msg := fmt.Sprintf("unknown service ID %q under services:", id)
+			if near := catalog.Suggest(id); near != "" {
+				msg += fmt.Sprintf(" (did you mean %q?)", near)
+			}
+			return fmt.Errorf("%s; run 'preflight checks' to list service IDs, or upgrade if this config came from a newer Preflight", msg)
+		}
+		unknown = append(unknown, id)
+		delete(cfg.Services, id)
+	}
+	if len(unknown) > 0 {
+		cfg.Notes = append(cfg.Notes, fmt.Sprintf("skipping undeclared service IDs this version does not know: %s (a newer Preflight may support them).", strings.Join(unknown, ", ")))
 	}
 	return nil
 }
