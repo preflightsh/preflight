@@ -23,6 +23,11 @@ type PreflightConfig struct {
 	Services    map[string]ServiceConfig `yaml:"services,omitempty"`
 	Checks      ChecksConfig             `yaml:"checks,omitempty"`
 	Ignore      []string                 `yaml:"ignore,omitempty"`
+
+	// Notes are messages about how the file was read (a legacy shape kept
+	// working, an entry that does nothing) for the caller to print on
+	// stderr. They are never written back to the file.
+	Notes []string `yaml:"-"`
 }
 
 type URLConfig struct {
@@ -57,6 +62,19 @@ type EnvParityConfig struct {
 type HealthEndpointConfig struct {
 	Enabled bool   `yaml:"enabled"`
 	Path    string `yaml:"path"`
+	// EnabledSet records that the file had an enabled key. Health runs by
+	// default when a URL is set, so a block that only names a path must not
+	// read as enabled: false.
+	EnabledSet bool `yaml:"-"`
+}
+
+// Resolve reports whether the health check runs, given whether it runs by
+// default. Only an explicit enabled: false turns a default-on check off.
+func (c *HealthEndpointConfig) Resolve(byDefault bool) bool {
+	if c == nil || (!c.Enabled && !c.EnabledSet) {
+		return byDefault
+	}
+	return c.Enabled
 }
 
 type StripeWebhookConfig struct {
@@ -67,6 +85,18 @@ type StripeWebhookConfig struct {
 type SEOMetaConfig struct {
 	Enabled    bool   `yaml:"enabled"`
 	MainLayout string `yaml:"mainLayout"`
+	// EnabledSet records that the file had an enabled key; see
+	// HealthEndpointConfig.EnabledSet.
+	EnabledSet bool `yaml:"-"`
+}
+
+// Resolve reports whether the SEO checks run, given whether they run by
+// default. A block that names a layout without an enabled key runs them.
+func (c *SEOMetaConfig) Resolve(byDefault bool) bool {
+	if c == nil || (!c.Enabled && !c.EnabledSet) {
+		return byDefault || (c != nil && c.MainLayout != "")
+	}
+	return c.Enabled
 }
 
 type SecurityConfig struct {
@@ -127,6 +157,10 @@ func Load(rootDir string) (*PreflightConfig, error) {
 	dec.KnownFields(true)
 	if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("failed to parse preflight.yml: %w", err)
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err == nil {
+		markExplicitEnabled(&cfg, &doc)
 	}
 
 	// Apply defaults
@@ -193,6 +227,47 @@ func Validate(cfg *PreflightConfig) error {
 			}
 		}
 		c.Domain = domain
+	}
+	return nil
+}
+
+// markExplicitEnabled sets EnabledSet on the default-on check blocks whose
+// enabled key is present in the file. The typed decode cannot tell a
+// missing key from enabled: false.
+func markExplicitEnabled(cfg *PreflightConfig, doc *yaml.Node) {
+	checks := nodeAt(doc, "checks")
+	if h := cfg.Checks.HealthEndpoint; h != nil {
+		block := nodeAt(checks, "healthEndpoint")
+		h.EnabledSet = nodeAt(block, "enabled") != nil
+		// preflight init wrote exactly this block for CMS and static
+		// stacks without asking, and before 0.24 it did not stop the check
+		// running when a URL was set. It cannot be told apart from a
+		// deliberate opt-out, so it keeps its old meaning and says how to
+		// turn the check off.
+		if h.EnabledSet && !h.Enabled && h.Path == "/health" && len(block.Content) == 4 {
+			h.EnabledSet = false
+			cfg.Notes = append(cfg.Notes, "checks.healthEndpoint has enabled: false with the default path, which preflight init used to write for CMS and static sites. "+
+				"health_endpoint still runs when a URL is set, as it did before 0.24; run 'preflight ignore health_endpoint' to turn it off, or delete the block to silence this note.")
+		}
+	}
+	if s := cfg.Checks.SEOMeta; s != nil {
+		s.EnabledSet = nodeAt(nodeAt(checks, "seoMeta"), "enabled") != nil
+	}
+}
+
+// nodeAt returns the value under key in a mapping node (or in a document
+// node's top-level mapping), or nil.
+func nodeAt(n *yaml.Node, key string) *yaml.Node {
+	if n != nil && n.Kind == yaml.DocumentNode && len(n.Content) > 0 {
+		n = n.Content[0]
+	}
+	if n == nil || n.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == key {
+			return n.Content[i+1]
+		}
 	}
 	return nil
 }

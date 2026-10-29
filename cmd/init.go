@@ -369,10 +369,6 @@ func buildDefaultChecks(cwd, stack string, services map[string]config.ServiceCon
 			EnvFile:     ".env",
 			ExampleFile: ".env.example",
 		},
-		HealthEndpoint: &config.HealthEndpointConfig{
-			Enabled: stackNeedsHealthEndpoint(stack),
-			Path:    "/health",
-		},
 		Security: &config.SecurityConfig{
 			Enabled: productionURL != "",
 		},
@@ -395,6 +391,14 @@ func buildDefaultChecks(cwd, stack string, services map[string]config.ServiceCon
 		HumansTxt: &config.HumansTxtConfig{
 			Enabled: checkHumansTxt,
 		},
+	}
+
+	// App stacks are expected to expose /health. Other stacks get no block,
+	// which runs the lenient check (common paths, then the site itself)
+	// whenever a URL is set; writing enabled: false for them would turn it
+	// off without the user having chosen that.
+	if stackNeedsHealthEndpoint(stack) {
+		checks.HealthEndpoint = &config.HealthEndpointConfig{Enabled: true, Path: "/health"}
 	}
 
 	// Configure Stripe webhook if Stripe is declared

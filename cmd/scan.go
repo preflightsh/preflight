@@ -231,6 +231,9 @@ func executeScan(ctx context.Context, opts scanOptions, stdout, stderr io.Writer
 		}
 		return ExitUsage, &ExitError{Code: ExitUsage, Err: fmt.Errorf("%s", msg)}
 	}
+	for _, note := range cfg.Notes {
+		fmt.Fprintf(stderr, "Note: %s\n", note)
+	}
 
 	// SafeHTTPClient refuses to dial private/loopback/metadata IPs for
 	// any URL the config did not name.
@@ -469,11 +472,9 @@ func buildEnabledChecks(cfg *config.PreflightConfig, rootDir string) []checks.Ch
 
 	// === SEO & Social ===
 	// Auto-enable SEO checks if layout can be detected or explicitly configured
-	seoEnabled := canAutoDetectLayout(rootDir, cfg.Stack) || cfg.URLs.Production != "" || cfg.URLs.Staging != ""
-	if cfg.Checks.SEOMeta != nil {
-		seoEnabled = cfg.Checks.SEOMeta.Enabled
-	}
-	if seoEnabled {
+	// A seoMeta block turns them off only with an explicit enabled: false.
+	seoDefault := canAutoDetectLayout(rootDir, cfg.Stack) || cfg.URLs.Production != "" || cfg.URLs.Staging != ""
+	if cfg.Checks.SEOMeta.Resolve(seoDefault) {
 		enabledChecks = append(enabledChecks, checks.SEOMetadataCheck{})
 		enabledChecks = append(enabledChecks, checks.CanonicalURLCheck{})
 		enabledChecks = append(enabledChecks, checks.OGTwitterCheck{})
@@ -504,12 +505,10 @@ func buildEnabledChecks(cfg *config.PreflightConfig, rootDir string) []checks.Ch
 	if cfg.Checks.EnvParity != nil && cfg.Checks.EnvParity.Enabled {
 		enabledChecks = append(enabledChecks, checks.EnvParityCheck{})
 	}
-	// Health check runs if explicitly enabled OR if any URLs are configured
-	healthEnabled := cfg.URLs.Production != "" || cfg.URLs.Staging != ""
-	if cfg.Checks.HealthEndpoint != nil {
-		healthEnabled = cfg.Checks.HealthEndpoint.Enabled
-	}
-	if healthEnabled {
+	// Health check runs if explicitly enabled OR if any URLs are configured,
+	// unless the block says enabled: false.
+	healthDefault := cfg.URLs.Production != "" || cfg.URLs.Staging != ""
+	if cfg.Checks.HealthEndpoint.Resolve(healthDefault) {
 		enabledChecks = append(enabledChecks, checks.HealthCheck{})
 	}
 

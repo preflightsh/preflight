@@ -52,7 +52,7 @@ func TestExplicitCheckDisableAndMailEnablement(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html/>"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cfg := &config.PreflightConfig{Stack: "static", URLs: config.URLConfig{Production: "https://example.com"}, Checks: config.ChecksConfig{SEOMeta: &config.SEOMetaConfig{}, HealthEndpoint: &config.HealthEndpointConfig{}}}
+	cfg := &config.PreflightConfig{Stack: "static", URLs: config.URLConfig{Production: "https://example.com"}, Checks: config.ChecksConfig{SEOMeta: &config.SEOMetaConfig{EnabledSet: true}, HealthEndpoint: &config.HealthEndpointConfig{EnabledSet: true}}}
 	for _, c := range buildEnabledChecks(cfg, dir) {
 		if c.ID() == "seo_meta" || c.ID() == "health_endpoint" {
 			t.Fatalf("disabled %s ran", c.ID())
