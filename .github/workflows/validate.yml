@@ -75,7 +75,7 @@ jobs:
           go-version: '1.26'
           check-latest: true
       - name: Vulnerability scan
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
       - name: Formatting
         run: test -z "$(gofmt -l cmd internal main.go)"
       - name: ShellCheck
