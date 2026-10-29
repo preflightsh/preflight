@@ -14,8 +14,8 @@ func TestAuditCancellationKillsDescendantGroup(t *testing.T) {
 	root := t.TempDir()
 	writeFixture(t, root, "Cargo.lock", "fixture")
 	bin := t.TempDir()
-	writeFixture(t, bin, "cargo", "#!/bin/sh\nsleep 20 &\nwait\n")
-	if err := os.Chmod(filepath.Join(bin, "cargo"), 0700); err != nil {
+	writeFixture(t, bin, "cargo-audit", "#!/bin/sh\nsleep 20 &\nwait\n")
+	if err := os.Chmod(filepath.Join(bin, "cargo-audit"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
