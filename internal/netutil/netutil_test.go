@@ -258,3 +258,16 @@ func TestIsPrivateIPExtraRanges(t *testing.T) {
 		}
 	}
 }
+
+// A host whose DNS lists a private or link-local address next to a public
+// one is dialed on the public one; only an all-private set is refused.
+func TestPublicIPs(t *testing.T) {
+	addr := func(s string) net.IPAddr { return net.IPAddr{IP: net.ParseIP(s)} }
+	got, err := publicIPs([]net.IPAddr{addr("fe80::a423:90ff:fe66:bcdb"), addr("157.245.130.183"), addr("127.0.0.1")})
+	if err != nil || len(got) != 1 || got[0].IP.String() != "157.245.130.183" {
+		t.Errorf("mixed set = %v, %v; want only the public address", got, err)
+	}
+	if _, err := publicIPs([]net.IPAddr{addr("127.0.0.1"), addr("169.254.169.254")}); !errors.Is(err, ErrPrivateAddress) {
+		t.Errorf("all-private set = %v, want ErrPrivateAddress", err)
+	}
+}

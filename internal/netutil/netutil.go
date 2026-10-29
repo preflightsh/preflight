@@ -163,10 +163,9 @@ func safeDialer(timeout time.Duration, exempt exemptAddrs) func(ctx context.Cont
 		if len(ips) == 0 {
 			return nil, fmt.Errorf("no IP addresses for %s", host)
 		}
-		for _, ip := range ips {
-			if IsPrivateIP(ip.IP) {
-				return nil, fmt.Errorf("%w: %s", ErrPrivateAddress, ip.IP)
-			}
+		ips, err = publicIPs(ips)
+		if err != nil {
+			return nil, err
 		}
 		var lastErr error
 		for _, ip := range ips {
@@ -178,6 +177,30 @@ func safeDialer(timeout time.Duration, exempt exemptAddrs) func(ctx context.Cont
 		}
 		return nil, lastErr
 	}
+}
+
+// publicIPs drops the private addresses from a host's resolved set and
+// fails only when none are left. Dialing is by the literal IPs returned, so
+// a public host whose DNS also lists a private or link-local address (a
+// stray fe80:: AAAA record, as sidehustling.com had) connects over its
+// public address the way a browser would, while a name that resolves only
+// to private addresses is still refused.
+func publicIPs(ips []net.IPAddr) ([]net.IPAddr, error) {
+	var public []net.IPAddr
+	var firstPrivate net.IP
+	for _, ip := range ips {
+		if IsPrivateIP(ip.IP) {
+			if firstPrivate == nil {
+				firstPrivate = ip.IP
+			}
+			continue
+		}
+		public = append(public, ip)
+	}
+	if len(public) == 0 {
+		return nil, fmt.Errorf("%w: %s", ErrPrivateAddress, firstPrivate)
+	}
+	return public, nil
 }
 
 // SafeHTTPClient returns an *http.Client that refuses to dial private
@@ -292,10 +315,9 @@ func SafeTLSDialContext(parent context.Context, network, addr string, cfg *tls.C
 	if len(ips) == 0 {
 		return nil, fmt.Errorf("no IP addresses for %s", host)
 	}
-	for _, ip := range ips {
-		if IsPrivateIP(ip.IP) {
-			return nil, fmt.Errorf("%w: %s", ErrPrivateAddress, ip.IP)
-		}
+	ips, err = publicIPs(ips)
+	if err != nil {
+		return nil, err
 	}
 	// Start with TLS 1.2 as the floor. Modern Go already defaults here,
 	// but being explicit lets the linter prove it and shields us from a
