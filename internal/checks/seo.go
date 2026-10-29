@@ -43,7 +43,7 @@ func (c SEOMetadataCheck) Run(ctx Context) (CheckResult, error) {
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
-			Passed:   true,
+			Skipped:  true,
 			Message:  "No layout file found, skipping",
 		}, nil
 	}
@@ -75,16 +75,21 @@ func (c SEOMetadataCheck) Run(ctx Context) (CheckResult, error) {
 		nextSources = nextRootRouteSources(filepath.Dir(layoutPath))
 	}
 
-	// Required SEO elements
-	checks := map[string]*regexp.Regexp{
-		"title":          regexp.MustCompile(`<title[^>]*>`),
-		"description":    regexp.MustCompile(`<meta[^>]+name=["']description["'][^>]*>`),
-		"og:title":       regexp.MustCompile(`<meta[^>]+property=["']og:title["'][^>]*>`),
-		"og:description": regexp.MustCompile(`<meta[^>]+property=["']og:description["'][^>]*>`),
+	// Required SEO elements, in a fixed order so the message does not
+	// change from run to run.
+	checks := []struct {
+		name    string
+		pattern *regexp.Regexp
+	}{
+		{"title", regexp.MustCompile(`<title[^>]*>`)},
+		{"description", regexp.MustCompile(`<meta[^>]+name=["']description["'][^>]*>`)},
+		{"og:title", regexp.MustCompile(`<meta[^>]+property=["']og:title["'][^>]*>`)},
+		{"og:description", regexp.MustCompile(`<meta[^>]+property=["']og:description["'][^>]*>`)},
 	}
 
 	var missing []string
-	for name, pattern := range checks {
+	for _, check := range checks {
+		name, pattern := check.name, check.pattern
 		if !pattern.MatchString(contentStr) {
 			// Check for alternate patterns (some frameworks use different formats)
 			if !checkAlternatePatterns(contentStr, name) && !anyNextSource(nextSources, name, hasNextJSMetadata) {
