@@ -1,17 +1,24 @@
 package catalog
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
-func TestCanonicalFollowsAliases(t *testing.T) {
-	for old, current := range Aliases {
-		if got := Canonical(old); got != current {
-			t.Errorf("Canonical(%q) = %q, want %q", old, got, current)
-		}
+func TestRenamesPointAtCurrentChecks(t *testing.T) {
+	for old, current := range Renames {
 		if _, ok := LookupCheck(current); !ok {
-			t.Errorf("alias %q points at %q, which is not a catalog check", old, current)
+			t.Errorf("rename %q points at %q, which is not a catalog check", old, current)
 		}
 		if _, ok := LookupCheck(old); ok {
-			t.Errorf("old ID %q is still a catalog check; the alias would shadow it", old)
+			t.Errorf("old ID %q is still a catalog check", old)
+		}
+		if got := Canonical(old); got != old {
+			t.Errorf("Canonical(%q) = %q; pre-1.0 names are rejected, not resolved", old, got)
+		}
+		err := RenamedError(old)
+		if err == nil || !strings.Contains(err.Error(), `renamed to "`+current+`"`) {
+			t.Errorf("RenamedError(%q) = %v, want it to name %q", old, err, current)
 		}
 	}
 	if got := Canonical("sitemap"); got != "sitemap" {
@@ -19,6 +26,9 @@ func TestCanonicalFollowsAliases(t *testing.T) {
 	}
 	if got := Canonical("nope"); got != "nope" {
 		t.Errorf("Canonical of an unknown ID = %q, want unchanged", got)
+	}
+	if err := RenamedError("seo_meta"); err != nil {
+		t.Errorf("RenamedError of a current ID = %v, want nil", err)
 	}
 }
 
@@ -44,7 +54,7 @@ func TestCheckIDsAreSnakeCase(t *testing.T) {
 }
 
 // "indexnow" is the IndexNow service ID, but the check is index_now. Before
-// the alias, --only indexnow was rejected and ignore: [indexnow] did nothing.
+// this mapping, --only indexnow was rejected and ignore: [indexnow] did nothing.
 func TestIndexNowServiceIDResolvesToCheck(t *testing.T) {
 	if got := Canonical("indexnow"); got != "index_now" {
 		t.Errorf("Canonical(indexnow) = %q, want index_now", got)

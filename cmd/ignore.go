@@ -40,9 +40,8 @@ func init() {
 
 func runIgnore(cmd *cobra.Command, args []string) error {
 	checkID := args[0]
-	if current, renamed := catalog.Renamed(checkID); renamed {
-		fmt.Fprintf(os.Stderr, "Note: check ID %q is now %q; writing the new name.\n", checkID, current)
-		checkID = current
+	if err := catalog.RenamedError(checkID); err != nil {
+		return &ExitError{Code: ExitUsage, Err: err}
 	}
 
 	doc, err := loadConfigDocument()
@@ -70,6 +69,18 @@ func runIgnore(cmd *cobra.Command, args []string) error {
 
 	ignoreList := ensureSequence(root, "ignore")
 	for _, item := range ignoreList.Content {
+		// A pre-1.0 spelling of the same check is rewritten in place, so
+		// `preflight ignore seo_meta` is also how an old seoMeta line,
+		// which scan now rejects, gets fixed.
+		if current, renamed := catalog.Renamed(item.Value); renamed && current == checkID {
+			old := item.Value
+			item.Value = checkID
+			if err := doc.write(); err != nil {
+				return err
+			}
+			fmt.Printf("Renamed '%s' to '%s' in the ignore list\n", old, checkID)
+			return nil
+		}
 		if catalog.Canonical(item.Value) == checkID {
 			fmt.Printf("'%s' is already in the ignore list\n", item.Value)
 			return nil
@@ -137,7 +148,11 @@ func init() {
 }
 
 func runUnignore(cmd *cobra.Command, args []string) error {
-	checkID := catalog.Canonical(args[0])
+	checkID := args[0]
+	if current, renamed := catalog.Renamed(checkID); renamed {
+		checkID = current
+	}
+	checkID = catalog.Canonical(checkID)
 
 	doc, err := loadConfigDocument()
 	if err != nil {
@@ -151,8 +166,12 @@ func runUnignore(cmd *cobra.Command, args []string) error {
 		kept := ignoreList.Content[:0]
 		for _, item := range ignoreList.Content {
 			// Match the entry however it was spelled, so `unignore llms_txt`
-			// also removes a pre-1.0 `llmsTxt` line.
-			if catalog.Canonical(item.Value) == checkID {
+			// also removes a pre-1.0 `llmsTxt` line, which scan rejects.
+			value := item.Value
+			if current, renamed := catalog.Renamed(value); renamed {
+				value = current
+			}
+			if catalog.Canonical(value) == checkID {
 				found = true
 				continue
 			}

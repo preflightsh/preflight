@@ -94,9 +94,9 @@ var ServiceChecks = map[string]Check{
 	"iubenda":       IubendaCheck{},
 }
 
-// KnownID reports whether id names a registered check, by its current ID
-// or a pre-1.0 alias. It is the validation used by --only, --skip and
-// `preflight ignore`.
+// KnownID reports whether id names a registered check, by its ID or by
+// the ID of a service that a core check verifies (indexnow). It is the
+// validation used by --only, --skip and `preflight ignore`.
 func KnownID(id string) bool {
 	id = catalog.Canonical(id)
 	for _, c := range Registry {

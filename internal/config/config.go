@@ -147,6 +147,9 @@ func Validate(cfg *PreflightConfig) error {
 		}
 	}
 	for _, id := range cfg.Ignore {
+		if err := catalog.RenamedError(id); err != nil {
+			return err
+		}
 		current := catalog.Canonical(id)
 		_, check := catalog.LookupCheck(current)
 		_, service := catalog.LookupService(current)
@@ -164,6 +167,10 @@ func Validate(cfg *PreflightConfig) error {
 			}
 		}
 	}
+	// An empty emailAuth.domain is left to the check, which reports it as
+	// an inconclusive warning. Rejecting it here failed every scan of a
+	// pre-0.24 config that had emailAuth enabled, since those had no
+	// domain key.
 	if c := cfg.Checks.EmailAuth; c != nil && c.Enabled {
 		domain := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(c.Domain)), ".")
 		if domain == "" {
@@ -171,10 +178,6 @@ func Validate(cfg *PreflightConfig) error {
 			return nil
 		}
 		if strings.ContainsAny(domain, "/:@ ?#") || !strings.Contains(domain, ".") {
-	// An empty emailAuth.domain is left to the check, which reports it as
-	// an inconclusive warning. Rejecting it here failed every scan of a
-	// pre-0.24 config that had emailAuth enabled, since those had no
-	// domain key.
 			return fmt.Errorf("emailAuth.domain must name the email sending domain, e.g. mail.example.com")
 		}
 		for _, label := range strings.Split(domain, ".") {

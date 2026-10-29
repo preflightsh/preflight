@@ -267,28 +267,25 @@ func TestRunChecksCancelledMidFlight(t *testing.T) {
 	}
 }
 
-// The pre-1.0 camelCase IDs are accepted by --only/--skip and the ignore
-// list, resolve to the same check, and produce a note rather than an error.
-func TestRenamedIDsStillWork(t *testing.T) {
-	if _, err := filterChecksByFlags(nil, []string{"llmsTxt"}, nil); err != nil && !strings.Contains(err.Error(), "no enabled checks match") {
-		t.Errorf("old ID rejected by --only: %v", err)
+// The pre-1.0 camelCase IDs are rejected by --only/--skip and the ignore
+// list with a usage error that names the current ID.
+func TestRenamedIDsAreRejected(t *testing.T) {
+	if _, err := filterChecksByFlags(nil, []string{"llmsTxt"}, nil); err == nil || !strings.Contains(err.Error(), `renamed to "llms_txt"`) {
+		t.Errorf("--only llmsTxt: want an error naming llms_txt, got %v", err)
+	}
+	if _, err := filterChecksByFlags(nil, nil, []string{"indexNow"}); err == nil || !strings.Contains(err.Error(), `renamed to "index_now"`) {
+		t.Errorf("--skip indexNow: want an error naming index_now, got %v", err)
 	}
 	dir := scanProject(t, "projectName: demo\nstack: unknown\nignore:\n  - robotsTxt\n")
 	var stdout, stderr bytes.Buffer
-	_, err := executeScan(context.Background(), scanOptions{ProjectDir: dir, Format: "json", Only: []string{"robotsTxt", "sitemap"}, Quiet: true}, &stdout, &stderr)
-	if err != nil {
-		t.Fatal(err)
+	code, err := executeScan(context.Background(), scanOptions{ProjectDir: dir, Format: "json", Quiet: true}, &stdout, &stderr)
+	if code != ExitUsage || err == nil {
+		t.Fatalf("robotsTxt in the ignore list: want exit %d and an error, got %d, %v", ExitUsage, code, err)
 	}
-	if strings.Contains(stdout.String(), `"id": "robots_txt"`) {
-		t.Error("robotsTxt in the ignore list should still silence the robots_txt check")
+	if !strings.Contains(err.Error(), `renamed to "robots_txt"`) || !strings.Contains(err.Error(), "preflight ignore robots_txt") {
+		t.Errorf("want the rename and the fix in the error, got:\n%v", err)
 	}
-	if !strings.Contains(stdout.String(), `"id": "sitemap"`) {
-		t.Error("the --only list should still include sitemap")
-	}
-	if !strings.Contains(stderr.String(), `"robotsTxt" is now "robots_txt"`) {
-		t.Errorf("expected a rename note on stderr, got:\n%s", stderr.String())
-	}
-	if strings.Count(stderr.String(), "robotsTxt") != 1 {
-		t.Errorf("the note should appear once per ID, got:\n%s", stderr.String())
+	if strings.Contains(err.Error(), "preflight init") {
+		t.Errorf("a renamed ID should not suggest re-running init:\n%v", err)
 	}
 }

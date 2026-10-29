@@ -13,7 +13,7 @@ import (
 // field changes meaning or goes away; adding a field does not count.
 //
 //	2: skipped and inconclusive outcomes; skipped checks no longer pass.
-//	1: the 1.0 contract. Check IDs are snake_case (see catalog.Aliases).
+//	1: the 1.0 contract. Check IDs are snake_case (see catalog.Renames).
 //	   Output without a schema_version is from a pre-1.0 CLI, with the old
 //	   camelCase IDs.
 const SchemaVersion = 2

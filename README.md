@@ -345,10 +345,11 @@ other lines in the same file.
 
 ### Check IDs renamed in 0.22
 
-Every check ID is now snake_case. The old camelCase names keep working
-everywhere an ID is accepted (`ignore:` lists, `--only`, `--skip`,
-`preflight ignore`) through the 1.x line, with a note on stderr, and go
-away in 2.0. `preflight ignore` writes the new name. The keys under
+Every check ID is now snake_case. 0.22 accepted the old camelCase names
+with a note on stderr; 1.0 rejects them. An old name in an `ignore:`
+list, `--only`, or `--skip` is a usage error (exit 64) that names the new
+ID. `preflight ignore <new-id>` rewrites an old entry in place, and
+`preflight unignore` removes an entry by either name. The keys under
 `checks:` in `preflight.yml` (`healthEndpoint`, `seoMeta`, ...) are a
 separate schema and did not change.
 
@@ -364,7 +365,6 @@ separate schema and did not change.
 | `adsTxt` | `ads_txt` |
 | `humansTxt` | `humans_txt` |
 | `indexNow` | `index_now` |
-| `indexnow` | `index_now` |
 
 ### What a successful scan means
 

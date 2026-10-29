@@ -153,26 +153,26 @@ func TestIgnoreKeepsDocumentComment(t *testing.T) {
 	}
 }
 
-// Pre-1.0 IDs keep working: `ignore llmsTxt` writes the current name, and
-// `unignore` removes an entry however it was spelled.
-func TestIgnoreAcceptsRenamedIDs(t *testing.T) {
-	path := inTempProject(t, "projectName: demo\nignore:\n  - seoMeta\n")
-	if err := runIgnore(nil, []string{"llmsTxt"}); err != nil {
-		t.Fatal(err)
-	}
-	if got := readFile(t, path); !strings.HasSuffix(got, "ignore:\n  - seoMeta\n  - llms_txt\n") {
-		t.Errorf("want the current name written, got:\n%s", got)
+// Pre-1.0 IDs are rejected as arguments, but `ignore` rewrites an old
+// entry in place and `unignore` removes one however it was spelled, since
+// those are how a config that scan now rejects gets fixed.
+func TestIgnoreRejectsRenamedIDs(t *testing.T) {
+	path := inTempProject(t, "projectName: demo\nignore:\n  - seoMeta\n  - llmsTxt\n")
+	err := runIgnore(nil, []string{"robotsTxt"})
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != ExitUsage || !strings.Contains(err.Error(), `renamed to "robots_txt"`) {
+		t.Fatalf("ignore robotsTxt: want a usage error naming robots_txt, got %v", err)
 	}
 	if err := runIgnore(nil, []string{"seo_meta"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := readFile(t, path); strings.Count(got, "seo") != 1 {
-		t.Errorf("seo_meta is already listed as seoMeta and must not be added twice:\n%s", got)
+	if got := readFile(t, path); !strings.HasSuffix(got, "ignore:\n  - seo_meta\n  - llmsTxt\n") {
+		t.Errorf("want seoMeta rewritten in place, got:\n%s", got)
 	}
-	if err := runUnignore(nil, []string{"seo_meta"}); err != nil {
+	if err := runUnignore(nil, []string{"llms_txt"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := readFile(t, path); strings.Contains(got, "seoMeta") {
+	if got := readFile(t, path); strings.Contains(got, "llmsTxt") {
 		t.Errorf("unignore by the new name should remove the old spelling:\n%s", got)
 	}
 }

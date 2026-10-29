@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -85,6 +86,9 @@ func filterChecksByFlags(enabled []checks.Check, only, skip []string) ([]checks.
 	}
 
 	for _, id := range append(append([]string(nil), only...), skip...) {
+		if err := catalog.RenamedError(id); err != nil {
+			return nil, err
+		}
 		if !checks.KnownID(id) {
 			return nil, fmt.Errorf("unknown check ID %q (run 'preflight checks' to list IDs)", id)
 		}
@@ -218,7 +222,11 @@ func executeScan(ctx context.Context, opts scanOptions, stdout, stderr io.Writer
 	cfg, err := config.Load(opts.ProjectDir)
 	if err != nil {
 		msg := fmt.Sprintf("Error: %v", err)
-		if !opts.CI {
+		var renamed *catalog.RenamedIDError
+		switch {
+		case errors.As(err, &renamed):
+			msg += fmt.Sprintf("\nRun 'preflight ignore %s' to update the ignore list.", renamed.Current)
+		case !opts.CI:
 			msg += "\nRun 'preflight init' to create a configuration file."
 		}
 		return ExitUsage, &ExitError{Code: ExitUsage, Err: fmt.Errorf("%s", msg)}
@@ -257,8 +265,6 @@ func executeScan(ctx context.Context, opts scanOptions, stdout, stderr io.Writer
 		spinner.Start("Preparing scan...")
 		defer spinner.Stop()
 	}
-
-	noteRenamedIDs(stderr, cfg.Ignore, opts.Only, opts.Skip)
 
 	cctx := checks.Context{
 		Ctx:     ctx,
@@ -319,23 +325,6 @@ func executeScan(ctx context.Context, opts scanOptions, stdout, stderr io.Writer
 	}
 
 	return determineExitCode(results), nil
-}
-
-// noteRenamedIDs tells the user, once per ID, that a pre-1.0 check name in
-// their ignore list or flags has a new name. The old one keeps working
-// through 1.x, so this is a note on stderr rather than an error.
-func noteRenamedIDs(stderr io.Writer, lists ...[]string) {
-	seen := map[string]bool{}
-	for _, list := range lists {
-		for _, id := range list {
-			current, renamed := catalog.Renamed(id)
-			if !renamed || seen[id] {
-				continue
-			}
-			seen[id] = true
-			fmt.Fprintf(stderr, "Note: check ID %q is now %q; the old name keeps working until 2.0.\n", id, current)
-		}
-	}
 }
 
 // prefetchHomepages fetches each configured environment's homepage once, in

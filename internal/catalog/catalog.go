@@ -11,6 +11,8 @@
 // implementations and a test there proves the two stay in step.
 package catalog
 
+import "fmt"
+
 // Check describes a core (non-service) check for listing and rendering.
 type Check struct {
 	// ID is what `preflight ignore`, `--only` and `--skip` accept.
@@ -69,14 +71,16 @@ var Checks = []Check{
 	{ID: "license", Category: "LICENSE", Group: "Web Standard Files", OptIn: true},
 }
 
-// Aliases maps the check IDs Preflight used before 1.0 to their current
-// names. Half the IDs were camelCase and half snake_case, and IDs are the
-// one thing that cannot change after 1.0: they sit in every user's
-// preflight.yml ignore list and CI --only flags. The old names are
-// accepted everywhere an ID is accepted (with a note on stderr) through
-// the 1.x line and go away in 2.0. Config keys (checks.healthEndpoint and
-// friends) are a separate schema and did not change.
-var Aliases = map[string]string{
+// Renames maps the check IDs Preflight used before 1.0 to their current
+// names. Half the IDs were camelCase and half snake_case; v0.22.0 made
+// them all snake_case and accepted the old names with a note, and 1.0
+// stopped accepting them. The table remains so an old name in an ignore
+// list or a --only/--skip flag is rejected with the exact fix (see
+// RenamedError) rather than a bare "unknown check ID", and so
+// `preflight ignore` and `unignore` can rewrite or remove an old entry.
+// Config keys (checks.healthEndpoint and friends) are a separate schema
+// and did not change.
+var Renames = map[string]string{
 	"seoMeta":         "seo_meta",
 	"ogTwitter":       "og_twitter",
 	"securityHeaders": "security_headers",
@@ -87,13 +91,21 @@ var Aliases = map[string]string{
 	"adsTxt":          "ads_txt",
 	"humansTxt":       "humans_txt",
 	"indexNow":        "index_now",
-	"indexnow":        "index_now", // the IndexNow service ID, which has no check of its own
 }
 
-// Canonical returns the current ID for id, following Aliases. IDs the
-// catalog does not know come back unchanged.
+// serviceChecks maps a service ID to the core check that verifies it, for
+// services that have no check of their own. "indexnow" is the IndexNow
+// service ID but the check is index_now, so --only indexnow and
+// ignore: [indexnow] would otherwise be rejected or do nothing.
+var serviceChecks = map[string]string{
+	"indexnow": "index_now",
+}
+
+// Canonical returns the check ID that id selects, resolving a service ID
+// to the core check that verifies it. Every other ID, including a pre-1.0
+// name, comes back unchanged.
 func Canonical(id string) string {
-	if current, ok := Aliases[id]; ok {
+	if current, ok := serviceChecks[id]; ok {
 		return current
 	}
 	return id
@@ -101,8 +113,28 @@ func Canonical(id string) string {
 
 // Renamed reports whether id is a pre-1.0 name and what it is called now.
 func Renamed(id string) (current string, ok bool) {
-	current, ok = Aliases[id]
+	current, ok = Renames[id]
 	return current, ok
+}
+
+// RenamedIDError is the error for a pre-1.0 check ID. Callers use
+// errors.As to offer the fix instead of their generic hint.
+type RenamedIDError struct {
+	Old, Current string
+}
+
+func (e *RenamedIDError) Error() string {
+	return fmt.Sprintf("unknown check ID %q: renamed to %q in v0.22.0", e.Old, e.Current)
+}
+
+// RenamedError returns a *RenamedIDError for a pre-1.0 check ID, or nil
+// when id was never renamed.
+func RenamedError(id string) error {
+	current, ok := Renames[id]
+	if !ok {
+		return nil
+	}
+	return &RenamedIDError{Old: id, Current: current}
 }
 
 // Services lists every service in detection and report order. "stripe" is

@@ -16,7 +16,8 @@ func TestValueValidation(t *testing.T) {
 	}{
 		{"unknown service", "services:\n  sentyr:\n    declared: true\n", true},
 		{"unknown ignore", "ignore: [security_headerz]\n", true},
-		{"legacy ID", "ignore: [seoMeta]\n", false},
+		{"pre-1.0 ID", "ignore: [seoMeta]\n", true},
+		{"service ID", "ignore: [indexnow]\n", false},
 		{"source glob", "ignore: ['web/**/*.js']\n", false},
 		{"missing mail domain", "checks:\n  emailAuth:\n    enabled: true\n", false},
 		{"malformed mail domain", "checks:\n  emailAuth:\n    enabled: true\n    domain: -mail.example.com\n", true},
