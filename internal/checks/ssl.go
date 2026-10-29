@@ -35,6 +35,18 @@ func (c SSLCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
+	// A local dev URL has no public certificate to check. Skip it the same
+	// way www_redirect does, using IsLocalURL so both agree on what is local.
+	if IsLocalURL(ctx.Config.URLs.Production) {
+		return CheckResult{
+			ID:       c.ID(),
+			Title:    c.Title(),
+			Severity: SeverityInfo,
+			Skipped:  true,
+			Message:  "Skipped for local URL",
+		}, nil
+	}
+
 	parsedURL, err := url.Parse(ctx.Config.URLs.Production)
 	if err != nil {
 		return CheckResult{

@@ -9,8 +9,6 @@ import (
 	"crypto/x509/pkix"
 	"math/big"
 	"net"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -95,12 +93,10 @@ func TestSSLConnectFailureIsAWarning(t *testing.T) {
 
 var errNoSuchHost = &net.DNSError{Err: "no such host", Name: "invalid.invalid", IsNotFound: true}
 
-// Keep the http import used: a plain-HTTP production URL is graded before
-// any dial happens.
+// A plain-HTTP public production URL is graded before any dial happens.
+// (A loopback httptest URL is local, which the check now skips.)
 func TestSSLRejectsPlainHTTP(t *testing.T) {
-	srv := httptest.NewServer(http.NotFoundHandler())
-	defer srv.Close()
-	res, _ := SSLCheck{}.Run(Context{Config: &config.PreflightConfig{URLs: config.URLConfig{Production: srv.URL}}})
+	res, _ := SSLCheck{}.Run(Context{Config: &config.PreflightConfig{URLs: config.URLConfig{Production: "http://example.com"}}})
 	if res.Passed || res.Severity != SeverityError || !strings.Contains(res.Message, "HTTPS") {
 		t.Errorf("plain http production URL: got %s passed=%v %q", res.Severity, res.Passed, res.Message)
 	}
