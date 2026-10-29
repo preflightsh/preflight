@@ -158,22 +158,44 @@ func probeFileAtBase(ctx Context, baseURL, path string) (string, bool) {
 	return actualURL, true
 }
 
+// indexNowProbe is the outcome of fetching /{key}.txt from the deployed site.
+type indexNowProbe int
+
+const (
+	// indexNowUnknown: nothing was probed, or no answer was conclusive
+	// (unreachable, blocked by a WAF, a 5xx). Source heuristics decide.
+	indexNowUnknown indexNowProbe = iota
+	// indexNowServed: a host returned 200 with exactly the key.
+	indexNowServed
+	// indexNowNotServed: a configured host answered, and not with the key.
+	indexNowNotServed
+)
+
 // probeIndexNowKeyOverHTTP fetches /{key}.txt from the configured staging and
-// production URLs (and production's parent domains) and reports the URL it was
-// served from when the response is 200 and the body is exactly the key. Unlike
-// robots.txt/sitemap.xml, "200 with non-empty body" is not sufficient: IndexNow
-// requires the file's contents to equal the key, so we compare exactly. This is
-// the authoritative signal — it confirms the key is actually reachable, which is
-// what participating search engines verify — and is stack-agnostic, so it covers
-// dynamic serving (e.g. a Go net/http route) that no on-disk pattern matches.
-func probeIndexNowKeyOverHTTP(ctx Context, key string) (string, bool) {
+// production URLs (and production's parent domains). It returns the URL the
+// key was served from (indexNowServed) or, for indexNowNotServed, the URL and
+// status of the first configured host that answered without it. Unlike
+// robots.txt/sitemap.xml, "200 with non-empty body" is not sufficient:
+// IndexNow requires the file's contents to equal the key, so we compare
+// exactly. This is the authoritative signal: it confirms the key is actually
+// reachable, which is what participating search engines verify, and is
+// stack-agnostic, so it covers dynamic serving (e.g. a Go net/http route) that
+// no on-disk pattern matches. A miss on a parent domain is not a verdict: the
+// key only has to be on the configured host.
+func probeIndexNowKeyOverHTTP(ctx Context, key string) (string, indexNowProbe) {
 	if ctx.Client == nil || key == "" {
-		return "", false
+		return "", indexNowUnknown
 	}
 	path := "/" + key + ".txt"
 
-	bases := append(ctx.probeBaseURLs(), parentBaseURLs(ctx.Config.URLs.Production)...)
+	configured := ctx.probeBaseURLs()
+	authoritative := make(map[string]bool, len(configured))
+	for _, base := range configured {
+		authoritative[base] = true
+	}
+	bases := append(configured, parentBaseURLs(ctx.Config.URLs.Production)...)
 
+	miss := ""
 	seen := make(map[string]bool)
 	for _, base := range bases {
 		base = strings.TrimSuffix(base, "/")
@@ -188,14 +210,20 @@ func probeIndexNowKeyOverHTTP(ctx Context, key string) (string, bool) {
 		}
 		body, readErr := io.ReadAll(io.LimitReader(resp.Body, netutil.MaxResponseBody))
 		resp.Body.Close()
-		if readErr != nil || resp.StatusCode != http.StatusOK {
+		if readErr != nil {
 			continue
 		}
-		if strings.TrimSpace(string(body)) == key {
-			return actualURL, true
+		if resp.StatusCode == http.StatusOK && strings.TrimSpace(string(body)) == key {
+			return actualURL, indexNowServed
+		}
+		if miss == "" && authoritative[base] && !blockedStatus(resp.StatusCode) && resp.StatusCode < 500 {
+			miss = fmt.Sprintf("%s (HTTP %d)", actualURL, resp.StatusCode)
 		}
 	}
-	return "", false
+	if miss != "" {
+		return miss, indexNowNotServed
+	}
+	return "", indexNowUnknown
 }
 
 // detectIndexNowInSource walks common server-side source directories for a file
@@ -1268,6 +1296,34 @@ func (c IndexNowCheck) Run(ctx Context) (CheckResult, error) {
 
 	key := ctx.Config.Checks.IndexNow.Key
 
+	// With a key and a reachable URL, the deployed site decides. A job
+	// named index_now_job.rb or a key file that hasn't shipped yet says
+	// nothing about whether search engines can verify the key. The source
+	// heuristics below only run for offline scans and hosts that gave no
+	// conclusive answer.
+	switch servedAt, probe := probeIndexNowKeyOverHTTP(ctx, key); probe {
+	case indexNowServed:
+		return CheckResult{
+			ID:       c.ID(),
+			Title:    c.Title(),
+			Severity: SeverityInfo,
+			Passed:   true,
+			Message:  "IndexNow key file served at " + servedAt,
+		}, nil
+	case indexNowNotServed:
+		return CheckResult{
+			ID:       c.ID(),
+			Title:    c.Title(),
+			Severity: SeverityWarn,
+			Passed:   false,
+			Message:  "IndexNow key file not served at " + servedAt,
+			Suggestions: []string{
+				fmt.Sprintf("Serve /%s.txt containing: %s", key, key),
+				"If the key file is in the repo, deploy it",
+			},
+		}, nil
+	}
+
 	// Common web root directories across frameworks
 	webRoots := []string{
 		"public", // Laravel, Rails, many Node.js
@@ -1453,7 +1509,7 @@ func (c IndexNowCheck) Run(ctx Context) (CheckResult, error) {
 		if err != nil {
 			continue
 		}
-		if strings.Contains(string(content), "INDEXNOW_KEY") {
+		if indexNowEnvRe.Match(content) {
 			return CheckResult{
 				ID:       c.ID(),
 				Title:    c.Title(),
@@ -1520,19 +1576,6 @@ func (c IndexNowCheck) Run(ctx Context) (CheckResult, error) {
 			Severity: SeverityInfo,
 			Passed:   true,
 			Message:  "IndexNow served dynamically via " + servedAt,
-		}, nil
-	}
-
-	// HTTP verification: authoritative fallback that confirms the key file is
-	// actually reachable at /{key}.txt with the correct body. Covers dynamic
-	// serving on any stack when a staging or production URL is configured.
-	if servedAt, ok := probeIndexNowKeyOverHTTP(ctx, key); ok {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  "IndexNow key file served at " + servedAt,
 		}, nil
 	}
 
@@ -1759,6 +1802,10 @@ func dependencyNames(path string) []string {
 // sitemapEndpointRe matches a route file that serves a sitemap URL by its
 // own name: sitemap.xml.js, sitemap-index.xml.ts, sitemap[.]xml.tsx.
 var sitemapEndpointRe = regexp.MustCompile(`^sitemap[\w-]*(?:\.|\[\.\])xml\.(?:[cm]?[jt]sx?|astro)$`)
+
+// indexNowEnvRe matches an INDEXNOW_KEY assignment with a non-empty value;
+// a placeholder INDEXNOW_KEY= in .env.example configures nothing.
+var indexNowEnvRe = regexp.MustCompile(`(?m)^[ \t]*(?:export[ \t]+)?INDEXNOW_KEY[ \t]*=[ \t]*["']?[^"'\s#]`)
 
 var gemLineRe = regexp.MustCompile(`(?m)^\s*gem\s+['"]([^'"]+)['"]`)
 
