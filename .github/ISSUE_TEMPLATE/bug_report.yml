@@ -1,0 +1,59 @@
+name: Bug report
+description: Preflight crashed, errored, or did something it should not have.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. If a check flagged something that is fine, use the false-positive template instead. Security problems go to private reporting, not here.
+  - type: input
+    id: version
+    attributes:
+      label: Preflight version
+      description: Output of `preflight version`.
+      placeholder: preflight version 0.25.0
+    validations:
+      required: true
+  - type: input
+    id: install
+    attributes:
+      label: Install method and OS
+      description: Homebrew, npm, install.sh, Docker, or go install, plus your OS and architecture.
+      placeholder: Homebrew on macOS arm64
+    validations:
+      required: true
+  - type: input
+    id: stack
+    attributes:
+      label: Stack
+      description: The framework and language of the scanned project (the stack in preflight.yml).
+      placeholder: next, laravel, rails, ...
+    validations:
+      required: true
+  - type: input
+    id: check
+    attributes:
+      label: Check ID
+      description: The check involved, if any (see `preflight checks`).
+      placeholder: og_twitter
+  - type: input
+    id: command
+    attributes:
+      label: Command
+      description: The exact command you ran.
+      placeholder: preflight scan --ci --format json
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Scan JSON (redacted)
+      description: |
+        Output of `preflight scan --format json` (add `--only <check-id>` to keep it short). Remove hostnames, tokens, paths, and anything else private before pasting.
+      render: json

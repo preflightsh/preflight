@@ -1,0 +1,50 @@
+name: False positive
+description: A check failed or warned on something that is actually fine.
+labels: [false-positive]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks. A small example that reproduces the result is the fastest way to a fix. If the finding is a real secret or a security issue in Preflight itself, use private reporting instead.
+  - type: input
+    id: version
+    attributes:
+      label: Preflight version
+      description: Output of `preflight version`.
+      placeholder: preflight version 0.25.0
+    validations:
+      required: true
+  - type: input
+    id: check
+    attributes:
+      label: Check ID
+      description: The check that misfired (see `preflight checks`).
+      placeholder: secrets
+    validations:
+      required: true
+  - type: input
+    id: stack
+    attributes:
+      label: Stack
+      description: The framework and language of the scanned project.
+      placeholder: next, laravel, rails, ...
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why this is a false positive
+      description: What the check flagged, and why it is correct as is.
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: Minimal example
+      description: The file, markup, or response headers that trigger it, trimmed to the smallest case you can share. Redact anything private.
+  - type: textarea
+    id: output
+    attributes:
+      label: Scan JSON (redacted)
+      description: Output of `preflight scan --format json --only <check-id>`, with private values removed.
+      render: json
