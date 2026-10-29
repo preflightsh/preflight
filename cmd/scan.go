@@ -627,6 +627,8 @@ func canAutoDetectLayout(rootDir, stack string) bool {
 		"vue":     {"index.html", "public/index.html", "src/App.vue"},
 		"svelte":  {"src/app.html", "index.html"},
 		"angular": {"src/index.html"},
+		"remix":   {"app/root.tsx", "app/root.jsx"},
+		"nuxt":    {"app.vue", "app/app.vue", "layouts/default.vue", "nuxt.config.ts", "nuxt.config.js"},
 		"rails": {
 			"app/views/layouts/application.html.erb",
 			"app/views/layouts/base.html.erb",
@@ -662,6 +664,8 @@ func canAutoDetectLayout(rootDir, stack string) bool {
 		"app/layout.tsx", "app/layout.js",
 		"src/app/layout.tsx", "src/app/layout.js",
 		"index.html", "public/index.html",
+		// SvelteKit and Remix; configs saved before 0.25 may say stack: vite.
+		"src/app.html", "app/root.tsx", "app/root.jsx",
 	}
 	for _, layout := range commonLayouts {
 		if _, err := os.Stat(filepath.Join(rootDir, layout)); err == nil {

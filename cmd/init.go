@@ -571,6 +571,8 @@ func formatStackName(stack string) string {
 		"vite":    "Vite",
 		"svelte":  "Svelte",
 		"angular": "Angular",
+		"remix":   "Remix",
+		"nuxt":    "Nuxt",
 		"laravel": "Laravel",
 		"django":  "Django",
 		"python":  "Python",
