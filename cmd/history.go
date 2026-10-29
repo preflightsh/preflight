@@ -3,12 +3,14 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"text/tabwriter"
 	"time"
 
 	"github.com/preflightsh/preflight/internal/config"
 	"github.com/preflightsh/preflight/internal/dashboard"
+	"github.com/preflightsh/preflight/internal/output"
 	"github.com/spf13/cobra"
 )
 
@@ -135,9 +137,26 @@ func currentProjectKey() string {
 }
 
 func printJSON(v any) error {
-	enc := json.NewEncoder(os.Stdout)
+	return writeHistoryJSON(os.Stdout, v)
+}
+
+// writeHistoryJSON writes v, a JSON object, with schema_version and
+// cli_version added beside its own keys, so agents can tell which contract
+// the output follows the same way they do for scan JSON.
+func writeHistoryJSON(w io.Writer, v any) error {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return err
+	}
+	doc["schema_version"] = output.SchemaVersion
+	doc["cli_version"] = version
+	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(v)
+	return enc.Encode(doc)
 }
 
 // relTime renders a unix timestamp as a short absolute date.
