@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -233,21 +234,36 @@ func publicOrigin(raw string) string {
 
 // projectKey returns a stable identifier for grouping runs: a hash of the git
 // remote origin URL when present (stable across clones and folder renames),
-// otherwise the project name.
+// otherwise the project name. A scan below the repository root (one app in
+// a monorepo) also hashes its repo-relative directory, so apps/web and
+// apps/api are separate projects; at the root nothing is added, so the
+// keys of existing single-app projects do not change.
 func projectKey(dir, projectName string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	command := exec.CommandContext(ctx, "git", "-C", dir, "config", "--get", "remote.origin.url")
-	command.WaitDelay = time.Second
-	out, err := command.Output()
+	out, err := gitOutput(dir, "config", "--get", "remote.origin.url")
 	if err == nil {
-		remote := normalizeRemote(strings.TrimSpace(string(out)))
+		remote := normalizeRemote(out)
 		if remote != "" {
-			sum := sha256.Sum256([]byte(remote))
+			key := remote
+			if prefix, err := gitOutput(dir, "rev-parse", "--show-prefix"); err == nil {
+				if prefix = strings.Trim(filepath.ToSlash(prefix), "/"); prefix != "" {
+					key += "\x00" + prefix
+				}
+			}
+			sum := sha256.Sum256([]byte(key))
 			return "git:" + hex.EncodeToString(sum[:])[:16]
 		}
 	}
 	return "name:" + projectName
+}
+
+// gitOutput runs git in dir and returns its trimmed stdout.
+func gitOutput(dir string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	command.WaitDelay = time.Second
+	out, err := command.Output()
+	return strings.TrimSpace(string(out)), err
 }
 
 // normalizeRemote canonicalizes a git remote URL so the same repository hashes

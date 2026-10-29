@@ -1,7 +1,12 @@
 package cmd
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -33,6 +38,39 @@ func TestNormalizeRemote(t *testing.T) {
 	// Different repositories must stay different.
 	if normalizeRemote("git@github.com:preflightsh/preflight") == normalizeRemote("git@github.com:preflightsh/other") {
 		t.Error("distinct repositories collapsed to the same key")
+	}
+}
+
+// Two apps in one monorepo used to share a dashboard project because the
+// key hashed only the remote. The subdirectory is part of the key, and a
+// scan at the repository root keeps the key it always had.
+func TestProjectKeySeparatesMonorepoApps(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	root := t.TempDir()
+	for _, args := range [][]string{{"init", "-q"}, {"remote", "add", "origin", "git@github.com:acme/mono.git"}} {
+		c := exec.Command("git", append([]string{"-C", root}, args...)...)
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	for _, sub := range []string{"apps/web", "apps/api"} {
+		if err := os.MkdirAll(filepath.Join(root, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sum := sha256.Sum256([]byte("github.com/acme/mono"))
+	if got, want := projectKey(root, "mono"), "git:"+hex.EncodeToString(sum[:])[:16]; got != want {
+		t.Errorf("root key changed: got %s, want %s", got, want)
+	}
+	web := projectKey(filepath.Join(root, "apps/web"), "web")
+	api := projectKey(filepath.Join(root, "apps/api"), "api")
+	if web == api || web == projectKey(root, "mono") || !strings.HasPrefix(web, "git:") {
+		t.Errorf("monorepo apps collide: root=%s web=%s api=%s", projectKey(root, "mono"), web, api)
+	}
+	if web != projectKey(filepath.Join(root, "apps", "web"), "renamed") {
+		t.Error("the key must not depend on the project name")
 	}
 }
 
