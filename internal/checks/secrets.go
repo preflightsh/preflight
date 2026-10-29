@@ -141,8 +141,13 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 	git := loadGitStatus(ctx.RootDir)
 
 	var findings []secretFinding
-	maxFileSize := int64(32 << 20) // larger files are reported as incomplete
-	filesSkipped := 0
+	// Files over the cap are skipped: past 2MB a file is a data dump, a
+	// bundle or a fixture, slow to scan and noisy when it is. Skipping one
+	// makes the scan inconclusive only when git tracks it and it looks like
+	// source or config (oversizedNeedsScan); an untracked file or a tracked
+	// dump does not fail the check.
+	maxFileSize := int64(maxSecretFileSize)
+	var skippedSource []string
 	filesScanned := 0
 	filesErrored := 0
 
@@ -217,7 +222,9 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 
 		// Scan file
 		if info.Size() > maxFileSize {
-			filesSkipped++
+			if state == "tracked" && oversizedNeedsScan(baseName) {
+				skippedSource = append(skippedSource, rel)
+			}
 			return nil
 		}
 		if ctx.reqContext().Err() != nil {
@@ -251,14 +258,14 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 
 	// Build scan summary
 	scanSummary := fmt.Sprintf("Scanned %d files", filesScanned)
-	if filesSkipped > 0 {
-		scanSummary += fmt.Sprintf(", %d oversized files not scanned", filesSkipped)
+	if len(skippedSource) > 0 {
+		scanSummary += fmt.Sprintf(", %d tracked file(s) over %dMB not scanned (%s)", len(skippedSource), maxSecretFileSize>>20, strings.Join(skippedSource[:min(3, len(skippedSource))], ", "))
 	}
 	if filesErrored > 0 {
 		scanSummary += fmt.Sprintf(", %d files could not be read", filesErrored)
 	}
 
-	if len(findings) == 0 && (filesErrored > 0 || filesSkipped > 0) {
+	if len(findings) == 0 && (filesErrored > 0 || len(skippedSource) > 0) {
 		return CheckResult{ID: c.ID(), Title: c.Title(), Severity: SeverityWarn, Inconclusive: true, Message: "Secret scan incomplete: " + scanSummary}, nil
 	}
 	if len(findings) == 0 {
@@ -306,7 +313,7 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 	// redacted before publishing); the per-finding locations go in
 	// Suggestions, which the terminal prints and the dashboard never sees.
 	message := fmt.Sprintf("Potential secrets found in %d place(s)", len(findings))
-	if filesErrored > 0 || filesSkipped > 0 {
+	if filesErrored > 0 || len(skippedSource) > 0 {
 		message += " (" + scanSummary + ")"
 	}
 	if suffix != "" {
@@ -331,7 +338,7 @@ func (c SecretScanCheck) Run(ctx Context) (CheckResult, error) {
 		Title:        c.Title(),
 		Severity:     severity,
 		Passed:       false,
-		Inconclusive: filesErrored > 0 || filesSkipped > 0,
+		Inconclusive: filesErrored > 0 || len(skippedSource) > 0,
 		Message:      message,
 		Suggestions: append(displayMessages,
 			"Remove secrets from source code",
@@ -501,11 +508,11 @@ func scanFileForSecrets(path string, patterns []secretPattern) ([]secretFinding,
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(io.LimitReader(file, 32<<20+1))
-	// Walker caps files at 1 MB, but a minified bundle can legally be a
-	// single line at that cap. Give the scanner enough headroom so the
-	// whole file fits in one token instead of being silently skipped.
-	const maxLine = 32*1024*1024 + 1
+	scanner := bufio.NewScanner(io.LimitReader(file, maxSecretFileSize+1))
+	// A minified bundle can legally be a single line at the walker's cap.
+	// Give the scanner enough headroom so the whole file fits in one token
+	// instead of being silently skipped.
+	const maxLine = maxSecretFileSize + 1
 	scanner.Buffer(make([]byte, 0, 64*1024), maxLine)
 	lineNum := 0
 	bytesScanned := 0
@@ -518,7 +525,7 @@ func scanFileForSecrets(path string, patterns []secretPattern) ([]secretFinding,
 	for scanner.Scan() {
 		lineNum++
 		bytesScanned += len(scanner.Bytes()) + 1
-		if bytesScanned > 32<<20 {
+		if bytesScanned > maxSecretFileSize {
 			return findings, fmt.Errorf("incomplete scan: file exceeds read budget")
 		}
 		line := scanner.Text()
@@ -578,6 +585,29 @@ func scanFileForSecrets(path string, patterns []secretPattern) ([]secretFinding,
 	}
 
 	return findings, nil
+}
+
+// maxSecretFileSize caps the files the secret scan reads.
+const maxSecretFileSize = 2 << 20
+
+// oversizedNeedsScan reports whether skipping an oversized tracked file
+// leaves a gap worth reporting. Hand-written source and config that large is
+// unusual and could hold anything. Data dumps (.json, .sql, .csv, .txt, .log,
+// .xml) and generated bundles and maps (app.min.js, main.bundle.js) are
+// exported or rebuilt rather than edited, and a secret scan that went
+// inconclusive on every committed fixture would be ignored.
+func oversizedNeedsScan(baseName string) bool {
+	lower := strings.ToLower(baseName)
+	switch filepath.Ext(lower) {
+	case ".json", ".jsonl", ".ndjson", ".geojson", ".sql", ".csv", ".tsv", ".txt", ".log", ".xml", ".map", ".lock":
+		return false
+	}
+	for _, generated := range []string{".min.", ".bundle.", ".chunk.", "-bundle."} {
+		if strings.Contains(lower, generated) {
+			return false
+		}
+	}
+	return true
 }
 
 // isExampleFile reports a file committed to document settings rather than

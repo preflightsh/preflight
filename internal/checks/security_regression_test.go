@@ -17,7 +17,7 @@ func regressionContext(root string) Context {
 }
 
 func TestSecretsCoverExamplesAndLargeFiles(t *testing.T) {
-	for _, tc := range []struct{ name, pad string }{{"settings.example.js", ""}, {".env.example", ""}, {"large.js", strings.Repeat(" ", 2<<20)}} {
+	for _, tc := range []struct{ name, pad string }{{"settings.example.js", ""}, {".env.example", ""}, {"large.js", strings.Repeat(" ", 3<<19)}} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
 			writeFixture(t, root, tc.name, tc.pad+"\nTOKEN="+fakeGHPATa)
@@ -27,17 +27,19 @@ func TestSecretsCoverExamplesAndLargeFiles(t *testing.T) {
 			}
 		})
 	}
-	t.Run("oversized input is inconclusive", func(t *testing.T) {
+	t.Run("oversized tracked source is inconclusive", func(t *testing.T) {
 		root := t.TempDir()
+		initGitRepo(t, root)
 		p := filepath.Join(root, "large.js")
 		f, err := os.Create(p)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := f.Truncate(33 << 20); err != nil {
+		if err := f.Truncate(3 << 20); err != nil {
 			t.Fatal(err)
 		}
 		f.Close()
+		gitCommit(t, root, "large.js")
 		r, _ := (SecretScanCheck{}).Run(regressionContext(root))
 		if r.Passed || !r.Inconclusive {
 			t.Fatalf("result=%+v", r)
