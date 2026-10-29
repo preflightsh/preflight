@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // getWithContext is a context-aware GET that, unlike doGet, does not set
@@ -50,7 +51,14 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 	// base+"/privacy" doesn't become "…//privacy", which servers
 	// 301-redirect (path cleaning) and would be miscounted as the page
 	// existing.
-	for _, baseURL := range ctx.probeBaseURLs() {
+	//
+	// conclusive counts probe answers that say something about the page:
+	// a 403 from a WAF, a 5xx, or a catch-all shell does not. When no
+	// answer was conclusive (or no host could be probed at all) the
+	// source search below decides instead.
+	var conclusive atomic.Int32
+	bases := ctx.probeBaseURLs()
+	for _, baseURL := range bases {
 		if hasPrivacy && hasTerms {
 			break
 		}
@@ -75,13 +83,26 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 		// matching URL (not a path-clean or homepage bounce).
 		accepting := func(keywords ...string) func(int, http.Header, []byte) bool {
 			return func(status int, header http.Header, digest []byte) bool {
+				if blockedStatus(status) || status >= 500 {
+					return false
+				}
 				if status >= 200 && status < 300 {
-					return shell == nil || !bytes.Equal(digest, shell)
+					if shell != nil && bytes.Equal(digest, shell) {
+						return false
+					}
+					conclusive.Add(1)
+					return true
 				}
 				if status >= 300 && status < 400 {
 					loc := header.Get("Location")
-					return isSameDomainRedirect(baseURL, loc) && !isAuthRedirect(loc) && redirectMentions(loc, keywords...)
+					// An auth wall bounces every path to its login page.
+					if isAuthRedirect(loc) {
+						return false
+					}
+					conclusive.Add(1)
+					return isSameDomainRedirect(baseURL, loc) && redirectMentions(loc, keywords...)
 				}
+				conclusive.Add(1)
 				return false
 			}
 		}
@@ -125,7 +146,18 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 			Message:  "Found privacy at " + privacyPath + ", terms at " + termsPath,
 		}, nil
 	}
+	// unverified is the reason the deployed site could not answer, when a
+	// URL is configured but no probe was conclusive.
+	unverified := ""
 	if ctx.Config.URLs.Production != "" || ctx.Config.URLs.Staging != "" {
+		switch {
+		case len(bases) == 0:
+			unverified = "unreachable"
+		case conclusive.Load() == 0:
+			unverified = "blocked or no conclusive answer"
+		}
+	}
+	if unverified == "" && (ctx.Config.URLs.Production != "" || ctx.Config.URLs.Staging != "") {
 		var missing []string
 		if !hasPrivacy {
 			missing = append(missing, "privacy policy")
@@ -199,7 +231,7 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 				checkPath := filepath.Join(ctx.RootDir, dir, pattern+ext)
 				if regularFileExists(checkPath) {
 					hasPrivacy = true
-					privacyPath = filepath.Join(dir, pattern+ext)
+					privacyPath = path.Join(dir, pattern+ext)
 					break
 				}
 				// Also check with /page pattern for Next.js app router
@@ -207,7 +239,7 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 					pagePath := filepath.Join(ctx.RootDir, dir, pattern, "page"+ext)
 					if regularFileExists(pagePath) {
 						hasPrivacy = true
-						privacyPath = filepath.Join(dir, pattern, "page"+ext)
+						privacyPath = path.Join(dir, pattern, "page"+ext)
 						break
 					}
 				}
@@ -228,7 +260,7 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 				checkPath := filepath.Join(ctx.RootDir, dir, pattern+ext)
 				if regularFileExists(checkPath) {
 					hasTerms = true
-					termsPath = filepath.Join(dir, pattern+ext)
+					termsPath = path.Join(dir, pattern+ext)
 					break
 				}
 				// Also check with /page pattern for Next.js app router
@@ -236,7 +268,7 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 					pagePath := filepath.Join(ctx.RootDir, dir, pattern, "page"+ext)
 					if regularFileExists(pagePath) {
 						hasTerms = true
-						termsPath = filepath.Join(dir, pattern, "page"+ext)
+						termsPath = path.Join(dir, pattern, "page"+ext)
 						break
 					}
 				}
@@ -395,6 +427,9 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 		} else {
 			msg += ", terms at " + termsPath
 		}
+		if unverified != "" {
+			msg += " (not verified on the deployed site: " + unverified + ")"
+		}
 		return CheckResult{
 			ID:       c.ID(),
 			Title:    c.Title(),
@@ -410,6 +445,19 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 	}
 	if !hasTerms {
 		missing = append(missing, "terms of service")
+	}
+
+	// The deployed site could not be checked and the source doesn't show
+	// the pages either: they may well be CMS pages, so this is not a miss.
+	if unverified != "" {
+		return CheckResult{
+			ID:           c.ID(),
+			Title:        c.Title(),
+			Severity:     SeverityWarn,
+			Passed:       false,
+			Inconclusive: true,
+			Message:      "Could not verify " + strings.Join(missing, ", ") + ": deployed site " + unverified + ", and not found in source",
+		}, nil
 	}
 
 	return CheckResult{
@@ -615,15 +663,39 @@ func catchAllDigest(ctx Context, client *http.Client, baseURL string) []byte {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil
 	}
-	return bodyDigest(resp.Body)
+	return pageDigest(resp.Body, catchAllProbePath)
 }
 
-// bodyDigest is the sha256 of the first MiB of a response body.
+// bodyDigest is pageDigest for callers that don't know the request path.
 func bodyDigest(r io.Reader) []byte {
-	h := sha256.New()
-	_, _ = io.Copy(h, io.LimitReader(r, 1<<20))
-	return h.Sum(nil)
+	return pageDigest(r, "")
 }
+
+// pageDigest is the sha256 of the first MiB of a response body after
+// removing what a server stamps fresh on every request (CSP nonces, CSRF
+// tokens, hidden form values) and the request path itself, which soft-404
+// pages often echo ("/privacy was not found"). Hashing the raw body made
+// every path of a nonce-stamping catch-all look unique, so every legal page
+// read as present.
+func pageDigest(r io.Reader, reqPath string) []byte {
+	body, _ := io.ReadAll(io.LimitReader(r, 1<<20))
+	s := string(body)
+	if reqPath != "" {
+		s = strings.ReplaceAll(s, reqPath, "")
+	}
+	s = perRequestTagRe.ReplaceAllString(s, "")
+	s = perRequestValueRe.ReplaceAllString(s, "")
+	sum := sha256.Sum256([]byte(s))
+	return sum[:]
+}
+
+var (
+	// Whole tags that only carry a per-request token: hidden inputs and
+	// csrf meta tags (<meta name="csrf-token" content="...">).
+	perRequestTagRe = regexp.MustCompile(`(?i)<input\b[^>]*\btype\s*=\s*["']?hidden\b[^>]*>|<meta\b[^>]*(?:csrf|xsrf|_token)[^>]*>`)
+	// nonce="...", data-csrf='...', "csrfToken":"...", xsrf_token = '...'.
+	perRequestValueRe = regexp.MustCompile(`(?i)[\w-]*(?:nonce|csrf|xsrf|authenticity_token)[\w-]*["']?\s*[:=]\s*(?:"[^"]*"|'[^']*')`)
+)
 
 // legalProbeBatch is how many candidate paths probeFirstHit requests at once.
 const legalProbeBatch = 5
@@ -653,7 +725,7 @@ func probeFirstHit(ctx Context, client *http.Client, baseURL string, paths []str
 				defer resp.Body.Close()
 				var digest []byte
 				if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-					digest = bodyDigest(resp.Body)
+					digest = pageDigest(resp.Body, path)
 				}
 				hits[i] = accept(resp.StatusCode, resp.Header, digest)
 			}(i, path)
