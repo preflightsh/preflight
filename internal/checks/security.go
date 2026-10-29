@@ -25,7 +25,7 @@ func (c SecurityHeadersCheck) Run(ctx Context) (CheckResult, error) {
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
-			Passed:   true,
+			Skipped:  true,
 			Message:  "No staging or production URL configured, skipping",
 		}, nil
 	}

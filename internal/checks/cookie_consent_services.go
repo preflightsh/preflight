@@ -51,7 +51,7 @@ func (c CookiebotCheck) Run(ctx Context) (CheckResult, error) {
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
-			Passed:   true,
+			Skipped:  true,
 			Message:  "Cookiebot not declared, skipping",
 		}, nil
 	}
@@ -160,7 +160,7 @@ func (c OneTrustCheck) Run(ctx Context) (CheckResult, error) {
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
-			Passed:   true,
+			Skipped:  true,
 			Message:  "OneTrust not declared, skipping",
 		}, nil
 	}
@@ -268,7 +268,7 @@ func (c TermlyCheck) Run(ctx Context) (CheckResult, error) {
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
-			Passed:   true,
+			Skipped:  true,
 			Message:  "Termly not declared, skipping",
 		}, nil
 	}
@@ -373,7 +373,7 @@ func (c CookieYesCheck) Run(ctx Context) (CheckResult, error) {
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
-			Passed:   true,
+			Skipped:  true,
 			Message:  "CookieYes not declared, skipping",
 		}, nil
 	}
@@ -479,7 +479,7 @@ func (c IubendaCheck) Run(ctx Context) (CheckResult, error) {
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
-			Passed:   true,
+			Skipped:  true,
 			Message:  "Iubenda not declared, skipping",
 		}, nil
 	}

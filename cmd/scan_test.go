@@ -193,6 +193,7 @@ type fakeCheck struct {
 	delay time.Duration
 	err   error
 	panic bool
+	msg   string
 }
 
 func (f fakeCheck) ID() string    { return f.id }
@@ -205,7 +206,19 @@ func (f fakeCheck) Run(checks.Context) (checks.CheckResult, error) {
 	if f.err != nil {
 		return checks.CheckResult{}, f.err
 	}
-	return checks.CheckResult{ID: f.id, Passed: true, Severity: checks.SeverityInfo}, nil
+	return checks.CheckResult{ID: f.id, Passed: true, Severity: checks.SeverityInfo, Message: f.msg}, nil
+}
+
+// TestRunOneCheckKeepsMessageOutOfOutcome: skipped and passed are frozen
+// JSON fields, so the scan takes them from the check and never from its
+// message. A pass that mentions skipped files is still a pass.
+func TestRunOneCheckKeepsMessageOutOfOutcome(t *testing.T) {
+	for _, msg := range []string{"2 files skipped", "Acme not declared, skipping", "No URLs configured to check", "Check not configured"} {
+		r := runOneCheck(checks.Context{}, fakeCheck{id: "x", msg: msg})
+		if !r.Passed || r.Skipped {
+			t.Errorf("%q: passed=%v skipped=%v, want the check's own pass", msg, r.Passed, r.Skipped)
+		}
+	}
 }
 
 // Checks run concurrently now; the report must still come out in list

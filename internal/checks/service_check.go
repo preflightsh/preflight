@@ -9,7 +9,7 @@ import (
 // Most service integrations are verified the same mechanical way; the steps
 // below run in order and the first hit wins:
 //
-//  1. pass (skip) when the service is not declared in preflight.yml
+//  1. skip when the service is not declared in preflight.yml
 //  2. pass when an env var with one of EnvPrefixes exists in the project's
 //     env files
 //  3. pass when any LivePatterns matches the live homepage (production
@@ -65,7 +65,10 @@ func (c ServiceCheck) Run(ctx Context) (CheckResult, error) {
 
 	service, declared := ctx.Config.Services[c.CheckID]
 	if !declared || !service.Declared {
-		return pass(c.CheckTitle + " not declared, skipping")
+		return CheckResult{
+			ID: c.CheckID, Title: c.CheckTitle,
+			Severity: SeverityInfo, Skipped: true, Message: c.CheckTitle + " not declared, skipping",
+		}, nil
 	}
 
 	for _, prefix := range c.EnvPrefixes {

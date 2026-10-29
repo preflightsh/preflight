@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -459,11 +458,6 @@ func runOneCheck(cctx checks.Context, check checks.Check) (result checks.CheckRe
 	result, err := check.Run(cctx)
 	if err != nil {
 		return failed(err)
-	}
-	message := strings.ToLower(result.Message)
-	if result.Passed && (strings.Contains(message, "skipping") || strings.Contains(message, "skipped") || message == "no production url configured" || message == "no urls configured to check" || message == "check not configured") {
-		result.Passed = false
-		result.Skipped = true
 	}
 	return result
 }

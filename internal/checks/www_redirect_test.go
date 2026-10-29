@@ -16,8 +16,8 @@ import (
 func TestWWWRedirectSkipsSubdomains(t *testing.T) {
 	ctx := Context{Config: &config.PreflightConfig{URLs: config.URLConfig{Production: "https://app.preflight.sh"}}}
 	res, _ := WWWRedirectCheck{}.Run(ctx)
-	if !res.Passed || !strings.Contains(res.Message, "Skipped for subdomain") {
-		t.Fatalf("passed=%v msg=%q", res.Passed, res.Message)
+	if res.Passed || !res.Skipped || !strings.Contains(res.Message, "Skipped for subdomain") {
+		t.Fatalf("passed=%v skipped=%v msg=%q", res.Passed, res.Skipped, res.Message)
 	}
 }
 

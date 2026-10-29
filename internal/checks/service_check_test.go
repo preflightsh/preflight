@@ -73,8 +73,8 @@ func runServiceCheck(t *testing.T, o svcOpts) CheckResult {
 func TestServiceCheckPriority(t *testing.T) {
 	t.Run("not declared skips", func(t *testing.T) {
 		res := runServiceCheck(t, svcOpts{declared: false})
-		if !res.Passed || res.Message != "Acme not declared, skipping" {
-			t.Errorf("got passed=%v msg=%q, want the skip message", res.Passed, res.Message)
+		if res.Passed || !res.Skipped || res.Message != "Acme not declared, skipping" {
+			t.Errorf("got passed=%v skipped=%v msg=%q, want a skip", res.Passed, res.Skipped, res.Message)
 		}
 	})
 

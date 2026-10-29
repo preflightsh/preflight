@@ -74,10 +74,6 @@ func (h HumanOutputter) Output(w io.Writer, projectName string, results []checks
 		if r.Skipped {
 			continue
 		}
-		if r.Passed && (strings.Contains(strings.ToLower(r.Message), "skipping") ||
-			strings.Contains(strings.ToLower(r.Message), "skipped")) {
-			continue
-		}
 		if catalog.IsService(catalog.Canonical(r.ID)) {
 			serviceResults = append(serviceResults, r)
 		} else {

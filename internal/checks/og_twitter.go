@@ -60,7 +60,7 @@ func (c OGTwitterCheck) Run(ctx Context) (CheckResult, error) {
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
-			Passed:   true,
+			Skipped:  true,
 			Message:  "No layout file found, skipping",
 		}, nil
 	}

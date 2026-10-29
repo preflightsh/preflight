@@ -25,7 +25,7 @@ func (c PostmarkCheck) Run(ctx Context) (CheckResult, error) {
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
-			Passed:   true,
+			Skipped:  true,
 			Message:  "Postmark not declared, skipping",
 		}, nil
 	}
@@ -94,7 +94,7 @@ func (c SendGridCheck) Run(ctx Context) (CheckResult, error) {
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
-			Passed:   true,
+			Skipped:  true,
 			Message:  "SendGrid not declared, skipping",
 		}, nil
 	}
@@ -162,7 +162,7 @@ func (c MailgunCheck) Run(ctx Context) (CheckResult, error) {
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
-			Passed:   true,
+			Skipped:  true,
 			Message:  "Mailgun not declared, skipping",
 		}, nil
 	}
@@ -230,7 +230,7 @@ func (c ResendCheck) Run(ctx Context) (CheckResult, error) {
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
-			Passed:   true,
+			Skipped:  true,
 			Message:  "Resend not declared, skipping",
 		}, nil
 	}
@@ -298,7 +298,7 @@ func (c AWSSESCheck) Run(ctx Context) (CheckResult, error) {
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
-			Passed:   true,
+			Skipped:  true,
 			Message:  "AWS SES not declared, skipping",
 		}, nil
 	}

@@ -24,7 +24,7 @@ func (c SentryCheck) Run(ctx Context) (CheckResult, error) {
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
-			Passed:   true,
+			Skipped:  true,
 			Message:  "Sentry not declared, skipping",
 		}, nil
 	}

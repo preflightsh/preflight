@@ -24,7 +24,7 @@ func (c FathomCheck) Run(ctx Context) (CheckResult, error) {
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
-			Passed:   true,
+			Skipped:  true,
 			Message:  "Fathom not declared, skipping",
 		}, nil
 	}
@@ -79,7 +79,7 @@ func (c GoogleAnalyticsCheck) Run(ctx Context) (CheckResult, error) {
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
-			Passed:   true,
+			Skipped:  true,
 			Message:  "Google Analytics not declared, skipping",
 		}, nil
 	}
@@ -137,7 +137,7 @@ func (c RedisCheck) Run(ctx Context) (CheckResult, error) {
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
-			Passed:   true,
+			Skipped:  true,
 			Message:  "Redis not declared, skipping",
 		}, nil
 	}
@@ -222,7 +222,7 @@ func (c SidekiqCheck) Run(ctx Context) (CheckResult, error) {
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
-			Passed:   true,
+			Skipped:  true,
 			Message:  "Sidekiq not declared, skipping",
 		}, nil
 	}

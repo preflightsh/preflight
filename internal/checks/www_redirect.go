@@ -32,7 +32,7 @@ func (c WWWRedirectCheck) Run(ctx Context) (CheckResult, error) {
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
-			Passed:   true,
+			Skipped:  true,
 			Message:  "No production URL configured",
 		}, nil
 	}
@@ -58,7 +58,7 @@ func (c WWWRedirectCheck) Run(ctx Context) (CheckResult, error) {
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
-			Passed:   true,
+			Skipped:  true,
 			Message:  "Skipped for local URL",
 		}, nil
 	}
@@ -71,7 +71,7 @@ func (c WWWRedirectCheck) Run(ctx Context) (CheckResult, error) {
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
-			Passed:   true,
+			Skipped:  true,
 			Message:  "Skipped for subdomain " + host,
 		}, nil
 	}

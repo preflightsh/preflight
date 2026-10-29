@@ -1217,7 +1217,7 @@ func (c AdsTxtCheck) Run(ctx Context) (CheckResult, error) {
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
-			Passed:   true,
+			Skipped:  true,
 			Message:  "ads.txt check not enabled",
 		}, nil
 	}
@@ -1289,7 +1289,7 @@ func (c IndexNowCheck) Run(ctx Context) (CheckResult, error) {
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
-			Passed:   true,
+			Skipped:  true,
 			Message:  "IndexNow check not enabled",
 		}, nil
 	}
@@ -1624,7 +1624,7 @@ func (c HumansTxtCheck) Run(ctx Context) (CheckResult, error) {
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
-			Passed:   true,
+			Skipped:  true,
 			Message:  "humans.txt check not enabled",
 		}, nil
 	}

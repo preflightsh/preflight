@@ -25,7 +25,7 @@ func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityInfo,
-			Passed:   true,
+			Skipped:  true,
 			Message:  "Stripe not declared, skipping",
 		}, nil
 	}
