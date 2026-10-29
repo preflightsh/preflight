@@ -193,6 +193,13 @@ func getLayoutFile(rootDir string, stack string, configuredLayout string) string
 		"svelte": {
 			"src/app.html", "index.html",
 		},
+		"remix": {
+			"app/root.tsx", "app/root.jsx",
+		},
+		"nuxt": {
+			"app.vue", "app/app.vue", "layouts/default.vue",
+			"nuxt.config.ts", "nuxt.config.js", "nuxt.config.mjs",
+		},
 		"angular": {
 			"src/index.html",
 		},
@@ -261,6 +268,8 @@ func getLayoutFile(rootDir string, stack string, configuredLayout string) string
 	commonLayouts := []string{
 		"app/layout.tsx", "app/layout.js",
 		"index.html", "public/index.html",
+		"src/app.html",                 // SvelteKit
+		"app/root.tsx", "app/root.jsx", // Remix
 		"templates/_layout.twig",
 		"app/views/layouts/application.html.erb",
 	}

@@ -155,6 +155,12 @@ func (c ViewportCheck) Run(ctx Context) (CheckResult, error) {
 }
 
 func hasViewportMeta(content, stack string) bool {
+	// Nuxt renders <meta name="viewport" content="width=device-width,
+	// initial-scale=1"> by default; app.vue never carries it.
+	if stack == "nuxt" {
+		return true
+	}
+
 	// Strip comments to avoid false positives on commented-out code
 	content = stripComments(content)
 

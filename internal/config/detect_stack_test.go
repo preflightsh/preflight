@@ -36,6 +36,34 @@ func TestDetectStackDependencyMatching(t *testing.T) {
 			"craft":     "#!/usr/bin/env php\n<?php\n// Craft console application\n",
 			"index.php": "<?php echo 1;",
 		}, "craft"},
+		// Vite-based meta-frameworks ship a vite.config.*, which used to win
+		// and turn off the layout-based SEO checks.
+		{"sveltekit with vite config", map[string]string{
+			"package.json":     `{"devDependencies":{"@sveltejs/kit":"^2","svelte":"^5","vite":"^5"}}`,
+			"vite.config.ts":   "export default {}",
+			"svelte.config.js": "export default {}",
+		}, "svelte"},
+		{"remix with vite config", map[string]string{
+			"package.json":   `{"dependencies":{"@remix-run/react":"^2","react":"^18"}}`,
+			"vite.config.ts": "export default {}",
+		}, "remix"},
+		{"remix classic compiler", map[string]string{
+			"package.json":    `{"dependencies":{"@remix-run/node":"^2","react":"^18"}}`,
+			"remix.config.js": "module.exports = {}",
+			"app/root.tsx":    "export default function App() {}",
+		}, "remix"},
+		{"nuxt with vite config", map[string]string{
+			"package.json":   `{"dependencies":{"nuxt":"^3","vue":"^3"}}`,
+			"vite.config.ts": "export default {}",
+		}, "nuxt"},
+		{"nuxt config only", map[string]string{
+			"package.json":   `{"scripts":{"dev":"nuxi dev"}}`,
+			"nuxt.config.ts": "export default defineNuxtConfig({})",
+		}, "nuxt"},
+		{"plain vite react app", map[string]string{
+			"package.json":   `{"dependencies":{"react":"^18"},"devDependencies":{"vite":"^5"}}`,
+			"vite.config.ts": "export default {}",
+		}, "vite"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -152,6 +152,19 @@ func DetectStack(rootDir string) string {
 
 	// Check for Node.js frameworks
 	if fileExists(rootDir, "package.json") {
+		// Vite-based meta-frameworks (SvelteKit, Remix, Nuxt) all ship a
+		// vite.config.*, so they must be told apart before plain Vite: each
+		// has its own layout file for the SEO checks.
+		if fileContains(rootDir, "package.json", `"@sveltejs/kit"`) {
+			return "svelte"
+		}
+		if fileContains(rootDir, "package.json", `"@remix-run/`) || fileExists(rootDir, "remix.config.js") || fileExists(rootDir, "remix.config.mjs") {
+			return "remix"
+		}
+		if fileContains(rootDir, "package.json", `"nuxt"`) || fileExists(rootDir, "nuxt.config.ts") || fileExists(rootDir, "nuxt.config.js") || fileExists(rootDir, "nuxt.config.mjs") {
+			return "nuxt"
+		}
+
 		// Check for Vite
 		if fileExists(rootDir, "vite.config.js") || fileExists(rootDir, "vite.config.ts") || fileExists(rootDir, "vite.config.mjs") {
 			return "vite"
