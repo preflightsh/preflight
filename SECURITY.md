@@ -8,10 +8,8 @@ release is the fix.
 
 | Version | Supported |
 | ------- | --------- |
-| 0.25.x  | Yes       |
-| < 0.25  | No        |
-
-Once 1.0 ships, the latest 1.x minor will be the supported line.
+| 1.x     | Yes       |
+| < 1.0   | No        |
 
 ## Reporting a vulnerability
 
