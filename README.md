@@ -587,7 +587,7 @@ preflight completion fish | source
 | `PREFLIGHT_TOKEN` | Token for `preflight auth login` to store instead of opening a browser |
 | `PREFLIGHT_NO_UPDATE_CHECK` | Any non-empty value turns off the daily update check (it is already skipped with `--ci` and `--format json`) |
 | `PREFLIGHT_INSTALL_DIR` | Where `install.sh` puts the binary (default `/usr/local/bin`) |
-| `PREFLIGHT_VERSION` | Release tag for `install.sh` to install, such as `v0.25.0` (default: latest) |
+| `PREFLIGHT_VERSION` | Release tag for `install.sh` to install, such as `v1.0.0` (default: latest) |
 | `PREFLIGHT_API_URL` | Dashboard base URL. Internal, for testing against a local dashboard only |
 
 ## Supported Stacks
