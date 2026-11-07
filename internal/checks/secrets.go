@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/preflightsh/preflight/internal/config"
+	"github.com/preflightsh/preflight/internal/gitutil"
 )
 
 // secretPattern holds a regex pattern and its human-readable description
@@ -434,11 +434,13 @@ func loadGitStatus(root string) gitStatus {
 }
 
 // runGit runs `git -C root <args...>` and returns stdout. Stderr is
-// discarded; callers only care whether the command succeeded.
+// discarded; callers only care whether the command succeeded. The scanned
+// repo controls its own git config, so this goes through gitutil.Command,
+// which keeps that config from running commands.
 func runGit(root string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
+	cmd := gitutil.Command(ctx, root, args...)
 	cmd.WaitDelay = time.Second
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout

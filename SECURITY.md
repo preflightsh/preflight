@@ -37,6 +37,11 @@ and `pip-audit` only runs on a fully pinned `requirements.txt`, without
 installing anything), but these tools still read project-level configuration,
 so a hostile repository can influence what they do.
 
+Preflight also runs `git` in the scanned directory to tell tracked files
+from ignored ones and to read the remote. It turns off `core.fsmonitor`
+and hooks and refuses directories laid out as bare repositories, so
+git configuration shipped in the repository cannot run commands.
+
 To scan a repository you do not trust, skip that check:
 
 ```sh

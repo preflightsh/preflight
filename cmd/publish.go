@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	"github.com/preflightsh/preflight/internal/checks"
 	"github.com/preflightsh/preflight/internal/config"
 	"github.com/preflightsh/preflight/internal/dashboard"
+	"github.com/preflightsh/preflight/internal/gitutil"
 	"github.com/preflightsh/preflight/internal/output"
 	"gopkg.in/yaml.v3"
 )
@@ -256,11 +256,12 @@ func projectKey(dir, projectName string) string {
 	return "name:" + projectName
 }
 
-// gitOutput runs git in dir and returns its trimmed stdout.
+// gitOutput runs git in dir and returns its trimmed stdout. dir is the
+// scanned project, whose git config is not trusted (see gitutil.Command).
 func gitOutput(dir string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	command := gitutil.Command(ctx, dir, args...)
 	command.WaitDelay = time.Second
 	out, err := command.Output()
 	return strings.TrimSpace(string(out)), err
