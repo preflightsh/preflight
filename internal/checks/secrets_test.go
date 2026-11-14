@@ -10,11 +10,14 @@ import (
 	"github.com/preflightsh/preflight/internal/config"
 )
 
-// Two distinct values that match the GitHub PAT regex — 36 chars after ghp_.
-// Using them in tests gives us two findings with distinct fingerprints.
+// Two distinct values that match the GitHub PAT regex: 36 chars after ghp_.
+// Using them in tests gives us two findings with distinct fingerprints. The
+// bodies vary like a real token does; a run of one repeated character is a
+// placeholder and is not reported.
 const (
-	fakeGHPATa = "ghp_" + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	fakeGHPATb = "ghp_" + "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	fakeStripeTestKey = "sk_test_" + "a1B2c3D4e5F6g7H8i9J0k1L2"
+	fakeGHPATa        = "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
+	fakeGHPATb        = "ghp_" + "Z9y8X7w6V5u4T3s2R1q0P9o8N7m6L5k4J3i2"
 )
 
 // writeFile is a tiny helper that creates parent dirs and writes a file.
@@ -66,7 +69,7 @@ func TestSecrets_FingerprintMismatchStillAlerts(t *testing.T) {
 	res := runSecretsCheck(t, root, &config.SecretsConfig{
 		Enabled: true,
 		Allowlist: []config.SecretAllowlistEntry{
-			// Fingerprint belongs to a different secret value — should NOT suppress.
+			// Fingerprint belongs to a different secret value: should NOT suppress.
 			{Path: "web/js/golden-hour.js", Fingerprint: fingerprintSecret(fakeGHPATb)},
 		},
 	})
@@ -103,7 +106,7 @@ func TestSecrets_UnrelatedSecretInAllowlistedFileStillAlerts(t *testing.T) {
 	writeFile(t, root, "web/js/mixed.js", body)
 
 	// Allowlist only the first secret by (path + fingerprint). The second must
-	// still alert — proving findings are matched by path+fingerprint rather
+	// still alert, proving findings are matched by path+fingerprint rather
 	// than whole-file suppression.
 	res := runSecretsCheck(t, root, &config.SecretsConfig{
 		Enabled: true,
@@ -138,7 +141,7 @@ func TestSecrets_NoAllowlistBehavesAsBefore(t *testing.T) {
 
 // .env.<env> files (production/staging/development) were being silently
 // dropped by the extension filter because filepath.Ext(".env.production")
-// returns ".production" — not in codeExtensions, and the bare ".env"
+// returns ".production": not in codeExtensions, and the bare ".env"
 // carve-out only matched the exact filename. These are the most
 // important files for a pre-launch secrets check.
 func TestSecrets_ScansEnvProductionAndSiblings(t *testing.T) {
@@ -189,7 +192,7 @@ func TestSecrets_SkipsSymlinks(t *testing.T) {
 
 	res := runSecretsCheck(t, root, &config.SecretsConfig{Enabled: true})
 	if !res.Passed {
-		t.Fatalf("expected no findings — symlink should be skipped — got: %s", res.Message)
+		t.Fatalf("expected no findings (symlink should be skipped), got: %s", res.Message)
 	}
 }
 
@@ -231,9 +234,9 @@ func gitCommit(t *testing.T, root string, paths ...string) {
 func TestSecrets_TrackedButGitignoredStillAlerts(t *testing.T) {
 	root := t.TempDir()
 	initGitRepo(t, root)
-	writeFile(t, root, ".env.development", "STRIPE=sk_test_"+strings.Repeat("a", 24)+"\n")
+	writeFile(t, root, ".env.development", "STRIPE="+fakeStripeTestKey+"\n")
 	gitCommit(t, root, ".env.development")
-	// Add the ignore rule *after* committing — git keeps tracking it.
+	// Add the ignore rule *after* committing: git keeps tracking it.
 	writeFile(t, root, ".gitignore", ".env.development\n")
 	gitCommit(t, root, ".gitignore")
 
@@ -247,14 +250,14 @@ func TestSecrets_TrackedButGitignoredStillAlerts(t *testing.T) {
 }
 
 // Bucket 2: an untracked file covered by .gitignore will never be
-// committed, so it's allowed to hold real secrets — PASS.
+// committed, so it's allowed to hold real secrets: PASS.
 func TestSecrets_GitignoredUntrackedSkipped(t *testing.T) {
 	root := t.TempDir()
 	initGitRepo(t, root)
 	writeFile(t, root, ".gitignore", ".env.development\n")
 	gitCommit(t, root, ".gitignore")
-	// Never added — untracked and ignored.
-	writeFile(t, root, ".env.development", "STRIPE=sk_test_"+strings.Repeat("a", 24)+"\n")
+	// Never added: untracked and ignored.
+	writeFile(t, root, ".env.development", "STRIPE="+fakeStripeTestKey+"\n")
 
 	res := runSecretsCheck(t, root, &config.SecretsConfig{Enabled: true})
 	if !res.Passed {
@@ -267,7 +270,7 @@ func TestSecrets_GitignoredUntrackedSkipped(t *testing.T) {
 func TestSecrets_UntrackedNotIgnoredAlerts(t *testing.T) {
 	root := t.TempDir()
 	initGitRepo(t, root)
-	writeFile(t, root, ".env.development", "STRIPE=sk_test_"+strings.Repeat("a", 24)+"\n")
+	writeFile(t, root, ".env.development", "STRIPE="+fakeStripeTestKey+"\n")
 
 	res := runSecretsCheck(t, root, &config.SecretsConfig{Enabled: true})
 	if res.Passed {
@@ -284,7 +287,7 @@ func TestSecrets_UntrackedNotIgnoredAlerts(t *testing.T) {
 func TestSecrets_TrackedEnvLocalAlertsInRepo(t *testing.T) {
 	root := t.TempDir()
 	initGitRepo(t, root)
-	writeFile(t, root, ".env.local", "STRIPE=sk_test_"+strings.Repeat("a", 24)+"\n")
+	writeFile(t, root, ".env.local", "STRIPE="+fakeStripeTestKey+"\n")
 	gitCommit(t, root, ".env.local")
 
 	res := runSecretsCheck(t, root, &config.SecretsConfig{Enabled: true})

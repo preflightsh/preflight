@@ -17,12 +17,18 @@ func regressionContext(root string) Context {
 }
 
 func TestSecretsCoverExamplesAndLargeFiles(t *testing.T) {
-	for _, tc := range []struct{ name, pad string }{{"settings.example.js", ""}, {".env.example", ""}, {"large.js", strings.Repeat(" ", 3<<19)}} {
+	// A key-shaped value that is not an obvious placeholder is still
+	// reported in an example file, as a warning: the file is there to show
+	// key shapes.
+	for _, tc := range []struct {
+		name, pad string
+		severity  Severity
+	}{{"settings.example.js", "", SeverityWarn}, {".env.example", "", SeverityWarn}, {"large.js", strings.Repeat(" ", 3<<19), SeverityError}} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
 			writeFixture(t, root, tc.name, tc.pad+"\nTOKEN="+fakeGHPATa)
 			r, _ := (SecretScanCheck{}).Run(regressionContext(root))
-			if r.Passed || r.Severity != SeverityError {
+			if r.Passed || r.Severity != tc.severity {
 				t.Fatalf("result=%+v", r)
 			}
 		})
@@ -227,7 +233,12 @@ func TestDependencyDiscoveryAndUnavailableTools(t *testing.T) {
 	}
 	for _, manifest := range []string{"pyproject.toml", "Pipfile", "poetry.lock", "uv.lock", "pnpm-lock.yaml", "bun.lock", "pom.xml", "build.gradle.kts", "mix.exs"} {
 		unsupported := t.TempDir()
-		writeFixture(t, unsupported, manifest, "fixture")
+		body := "fixture"
+		if manifest == "pyproject.toml" {
+			// One that only configures tools has nothing to audit.
+			body = "[project]\ndependencies = [\"requests\"]\n"
+		}
+		writeFixture(t, unsupported, manifest, body)
 		r, _ = VulnerabilityCheck{}.Run(regressionContext(unsupported))
 		if r.Passed || !r.Inconclusive || r.Skipped {
 			t.Fatalf("%s result=%+v", manifest, r)

@@ -25,7 +25,14 @@ func TestSecretsExampleKeyPlaceholders(t *testing.T) {
 		{"template file", "config.template.yml", "key: |\n  -----BEGIN OPENSSH PRIVATE KEY-----\n  <paste your key>\n  -----END OPENSSH PRIVATE KEY-----\n", false},
 		{"real key escaped", ".env.example", `GITHUB_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n` + fakeKeyBody + `\n-----END RSA PRIVATE KEY-----"` + "\n", true},
 		{"real key multiline", ".env.example", "GITHUB_PRIVATE_KEY=\"-----BEGIN RSA PRIVATE KEY-----\n" + fakeKeyBody + "\n" + fakeKeyBody + "\n-----END RSA PRIVATE KEY-----\"\n", true},
-		{"placeholder outside an example file", ".env", "KEY=\"-----BEGIN RSA PRIVATE KEY-----\nYour private key here\n-----END RSA PRIVATE KEY-----\"\n", true},
+		// A header inside a value or a string literal needs key material
+		// after it in any file, not only in example files.
+		{"placeholder outside an example file", ".env", "KEY=\"-----BEGIN RSA PRIVATE KEY-----\nYour private key here\n-----END RSA PRIVATE KEY-----\"\n", false},
+		{"header literal in source", "src/pem.js", "const body = k.replace(\"-----BEGIN PRIVATE KEY-----\", \"\")\n", false},
+		{"real key in a value outside an example file", ".env", "KEY=\"-----BEGIN RSA PRIVATE KEY-----\n" + fakeKeyBody + "\n-----END RSA PRIVATE KEY-----\"\n", true},
+		{"real key in a source string", "src/key.js", "const k = \"-----BEGIN PRIVATE KEY-----\\n" + fakeKeyBody + "\\n-----END PRIVATE KEY-----\"\n", true},
+		// A header that opens its line is a key file's layout.
+		{"key file layout", "deploy.pem", "-----BEGIN PRIVATE KEY-----\nprivate key data\n-----END PRIVATE KEY-----\n", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

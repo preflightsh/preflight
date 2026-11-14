@@ -13,7 +13,7 @@ import (
 // reported "No secrets detected".
 func TestSecretsScansConfigAndTemplateFiles(t *testing.T) {
 	root := t.TempDir()
-	key := "sk_live_" + strings.Repeat("a1B2", 8)
+	key := "sk_live_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6"
 	files := []string{"next.config.mjs", "wrangler.toml", "main.tf", "src/App.vue", "src/Pay.svelte", "index.html", "app.properties", "server.cjs", "control.js"}
 	for _, n := range files {
 		writeFixture(t, root, n, "const k = \""+key+"\"\n")
