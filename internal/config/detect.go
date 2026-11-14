@@ -652,6 +652,7 @@ func detectServicesFromContent(content string, services map[string]bool, lang st
 	}
 	// Google AI - be specific to avoid matching "gemini" (zodiac sign)
 	if strings.Contains(content, "@google/generative-ai") || strings.Contains(content, "google-generativeai") ||
+		strings.Contains(content, "@google/genai") || strings.Contains(content, "google-genai") ||
 		strings.Contains(content, "gemini-pro") || strings.Contains(content, "gemini-1.5") ||
 		strings.Contains(content, "generativelanguage.googleapis") {
 		services["google_ai"] = true
@@ -945,9 +946,11 @@ var analyticsServicePatterns = map[string]*regexp.Regexp{
 	"algolia": regexp.MustCompile(`(?i)algolia\.com/|@algolia/|algoliasearch`),
 
 	// AI - require SDK or API patterns
-	"openai":      regexp.MustCompile(`(?i)api\.openai\.com|openai\.ChatCompletion|from openai|openai\.create`),
-	"anthropic":   regexp.MustCompile(`(?i)api\.anthropic\.com|anthropic\.Anthropic|from anthropic|@anthropic/`),
-	"google_ai":   regexp.MustCompile(`(?i)@google/generative-ai|generativelanguage\.googleapis\.com|gemini-pro|gemini-1\.5`),
+	// "from openai" has to open a line (a Python import): anywhere else it
+	// is prose, as in "a reply from OpenAI".
+	"openai":      regexp.MustCompile(`(?im)api\.openai\.com|openai\.ChatCompletion|^\s*from\s+openai\b|openai\.create`),
+	"anthropic":   regexp.MustCompile(`(?im)api\.anthropic\.com|anthropic\.Anthropic|^\s*from\s+anthropic\b|@anthropic/`),
+	"google_ai":   regexp.MustCompile(`(?im)@google/(?:generative-ai|genai)|generativelanguage\.googleapis\.com|\bgemini-(?:\d|pro|flash)|^\s*from\s+google\s+import\s+genai\b`),
 	"mistral":     regexp.MustCompile(`(?i)api\.mistral\.ai|@mistralai/`),
 	"cohere":      regexp.MustCompile(`(?i)api\.cohere\.ai|cohere\.Client|cohere-ai`),
 	"replicate":   regexp.MustCompile(`(?i)api\.replicate\.com|replicate\.run`),
