@@ -584,27 +584,6 @@ func resolveTemplate(rootDir, fromDir, target string) string {
 	return ""
 }
 
-// isSameDomainRedirect checks if a redirect Location stays on the same domain
-func isSameDomainRedirect(baseURL, location string) bool {
-	if location == "" {
-		return false
-	}
-	// Relative redirects are same-domain
-	if strings.HasPrefix(location, "/") && !strings.HasPrefix(location, "//") {
-		return true
-	}
-	baseU, err := url.Parse(baseURL)
-	if err != nil {
-		return false
-	}
-	reference, err := url.Parse(location)
-	if err != nil {
-		return false
-	}
-	locU := baseU.ResolveReference(reference)
-	return locU.User == nil && strings.EqualFold(baseU.Scheme, locU.Scheme) && strings.EqualFold(baseU.Host, locU.Host)
-}
-
 // isAuthRedirect reports whether a redirect Location points to a login or
 // authentication page. Apps that gate everything behind auth redirect unknown
 // paths to /login, which must not be miscounted as the requested page existing.

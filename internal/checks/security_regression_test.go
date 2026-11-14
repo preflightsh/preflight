@@ -175,7 +175,7 @@ func TestEnvConfigurationRequiresMeaningfulAssignments(t *testing.T) {
 	}
 }
 
-func TestLegalEvidenceCannotBeDirectoryOrExternalRedirect(t *testing.T) {
+func TestLegalEvidenceCannotBeADirectory(t *testing.T) {
 	root := t.TempDir()
 	for _, name := range []string{"privacy", "terms"} {
 		if err := os.Mkdir(filepath.Join(root, name), 0700); err != nil {
@@ -184,14 +184,6 @@ func TestLegalEvidenceCannotBeDirectoryOrExternalRedirect(t *testing.T) {
 	}
 	if r, _ := (LegalPagesCheck{}).Run(regressionContext(root)); r.Passed {
 		t.Fatal("directories counted as pages")
-	}
-	for _, location := range []string{"//attacker.invalid/privacy", "https://attacker.invalid/privacy", "http://example.com/privacy", "https://example.com:8443/privacy"} {
-		if isSameDomainRedirect("https://example.com", location) {
-			t.Fatalf("accepted %q", location)
-		}
-	}
-	if !isSameDomainRedirect("https://example.com", "/privacy-policy") {
-		t.Fatal("local redirect rejected")
 	}
 }
 

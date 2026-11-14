@@ -399,7 +399,7 @@ func hasNextJSOGTwitterMeta(content, name string) bool {
 
 	switch name {
 	case "og:image":
-		ogBlock := extractNestedBlockOG(metadataContent, "openGraph")
+		ogBlock := extractNestedBlock(metadataContent, "openGraph")
 		if ogBlock != "" {
 			// Check for images array or image property
 			imagesPattern := regexp.MustCompile(`(?m)images\s*:\s*\[`)
@@ -413,7 +413,7 @@ func hasNextJSOGTwitterMeta(content, name string) bool {
 		if regexp.MustCompile(`(?m)metadataBase\s*:`).MatchString(metadataContent) {
 			return true
 		}
-		ogBlock := extractNestedBlockOG(metadataContent, "openGraph")
+		ogBlock := extractNestedBlock(metadataContent, "openGraph")
 		if ogBlock != "" {
 			urlPattern := regexp.MustCompile(`(?m)url\s*:\s*[^\s,}]`)
 			return urlPattern.MatchString(ogBlock)
@@ -421,7 +421,7 @@ func hasNextJSOGTwitterMeta(content, name string) bool {
 		return false
 
 	case "og:type":
-		ogBlock := extractNestedBlockOG(metadataContent, "openGraph")
+		ogBlock := extractNestedBlock(metadataContent, "openGraph")
 		if ogBlock != "" {
 			typePattern := regexp.MustCompile(`(?m)type\s*:\s*[^\s,}]`)
 			return typePattern.MatchString(ogBlock)
@@ -429,7 +429,7 @@ func hasNextJSOGTwitterMeta(content, name string) bool {
 		return false
 
 	case "twitter:card":
-		twitterBlock := extractNestedBlockOG(metadataContent, "twitter")
+		twitterBlock := extractNestedBlock(metadataContent, "twitter")
 		if twitterBlock != "" {
 			cardPattern := regexp.MustCompile(`(?m)card\s*:\s*[^\s,}]`)
 			return cardPattern.MatchString(twitterBlock)
@@ -437,7 +437,7 @@ func hasNextJSOGTwitterMeta(content, name string) bool {
 		return false
 
 	case "twitter:image":
-		twitterBlock := extractNestedBlockOG(metadataContent, "twitter")
+		twitterBlock := extractNestedBlock(metadataContent, "twitter")
 		if twitterBlock != "" {
 			imagesPattern := regexp.MustCompile(`(?m)images\s*:\s*\[`)
 			imagePattern := regexp.MustCompile(`(?m)image\s*:\s*[^\s,}]`)
@@ -449,7 +449,9 @@ func hasNextJSOGTwitterMeta(content, name string) bool {
 	return false
 }
 
-// extractBraceBlock extracts content between matching braces starting at pos
+// extractBraceBlock extracts content between matching braces starting at
+// pos, skipping braces inside string literals. The SEO and OG checks both
+// read Next.js metadata objects with it.
 func extractBraceBlock(content string, pos int) string {
 	if pos >= len(content) || content[pos] != '{' {
 		return ""
@@ -478,8 +480,8 @@ func extractBraceBlock(content string, pos int) string {
 	return ""
 }
 
-// extractNestedBlockOG extracts a nested object block like openGraph: { ... }
-func extractNestedBlockOG(content, key string) string {
+// extractNestedBlock extracts a nested object block like openGraph: { ... }
+func extractNestedBlock(content, key string) string {
 	pattern := regexp.MustCompile(`(?s)` + regexp.QuoteMeta(key) + `\s*:\s*\{`)
 	loc := pattern.FindStringIndex(content)
 	if loc == nil {

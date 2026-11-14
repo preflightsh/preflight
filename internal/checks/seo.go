@@ -323,7 +323,7 @@ func hasNextJSMetadata(content, name string) bool {
 	}
 
 	// Extract metadata block with proper brace matching
-	metadataContent := extractBraceBlockSEO(content, loc[1]-1)
+	metadataContent := extractBraceBlock(content, loc[1]-1)
 	if metadataContent == "" {
 		return false
 	}
@@ -337,7 +337,7 @@ func hasNextJSMetadata(content, name string) bool {
 
 	case "og:title":
 		// openGraph: { ... title: ... }
-		ogBlock := extractNestedBlockSEO(metadataContent, "openGraph")
+		ogBlock := extractNestedBlock(metadataContent, "openGraph")
 		if ogBlock != "" {
 			titleInOG := regexp.MustCompile(`(?m)title\s*:\s*[^\s,}]`)
 			return titleInOG.MatchString(ogBlock)
@@ -346,7 +346,7 @@ func hasNextJSMetadata(content, name string) bool {
 
 	case "og:description":
 		// openGraph: { ... description: ... }
-		ogBlock := extractNestedBlockSEO(metadataContent, "openGraph")
+		ogBlock := extractNestedBlock(metadataContent, "openGraph")
 		if ogBlock != "" {
 			descInOG := regexp.MustCompile(`(?m)description\s*:\s*[^\s,}]`)
 			return descInOG.MatchString(ogBlock)
@@ -355,36 +355,6 @@ func hasNextJSMetadata(content, name string) bool {
 	}
 
 	return false
-}
-
-// extractBraceBlockSEO extracts content between matching braces starting at pos
-func extractBraceBlockSEO(content string, pos int) string {
-	if pos >= len(content) || content[pos] != '{' {
-		return ""
-	}
-	depth := 0
-	inString := false
-	stringChar := byte(0)
-	for i := pos; i < len(content); i++ {
-		c := content[i]
-		// Handle string literals to avoid counting braces inside strings
-		if !inString && (c == '"' || c == '\'' || c == '`') {
-			inString = true
-			stringChar = c
-		} else if inString && c == stringChar && (i == 0 || content[i-1] != '\\') {
-			inString = false
-		} else if !inString {
-			if c == '{' {
-				depth++
-			} else if c == '}' {
-				depth--
-				if depth == 0 {
-					return content[pos : i+1]
-				}
-			}
-		}
-	}
-	return ""
 }
 
 // topLevelKeyRe matches key: <value> where key starts an entry of the
@@ -433,16 +403,6 @@ func topLevelOnly(block string) string {
 		}
 	}
 	return string(out)
-}
-
-// extractNestedBlockSEO extracts a nested object block like openGraph: { ... }
-func extractNestedBlockSEO(content, key string) string {
-	pattern := regexp.MustCompile(`(?s)` + regexp.QuoteMeta(key) + `\s*:\s*\{`)
-	loc := pattern.FindStringIndex(content)
-	if loc == nil {
-		return ""
-	}
-	return extractBraceBlockSEO(content, loc[1]-1)
 }
 
 // resolveTemplateIncludes extracts template include/extends paths from content,
