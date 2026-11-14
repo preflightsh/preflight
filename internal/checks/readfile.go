@@ -26,3 +26,17 @@ func openRegular(path string) (*os.File, error) {
 func readSourceFile(path string) ([]byte, error) {
 	return fsutil.ReadFile(path, maxSourceFileSize)
 }
+
+// openProjectFile opens rel, a path taken from preflight.yml, only if it is
+// a regular file inside root. The config belongs to the scanned repo, so
+// rel can be "../outside" or pass through a symlinked directory; joining it
+// onto root and opening the result read files outside the project.
+func openProjectFile(root, rel string) (*os.File, error) {
+	return fsutil.OpenRegularFileIn(root, rel)
+}
+
+// readProjectFile is readSourceFile for a path taken from preflight.yml
+// (see openProjectFile).
+func readProjectFile(root, rel string) ([]byte, error) {
+	return fsutil.ReadFileIn(root, rel, maxSourceFileSize)
+}

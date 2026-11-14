@@ -93,6 +93,74 @@ func OpenRegularFile(path string) (*os.File, error) {
 	return f, nil
 }
 
+// OpenRegularFileIn opens rel, a path that comes from the scanned project's
+// own config, only if it names a regular file inside root. A cloned repo
+// controls that path: "../../.ssh/config" or an absolute path would read a
+// file outside the project, and so would "config/.env" when config is a
+// symlink to another directory. os.Root resolves the path without leaving
+// root, whatever symlinks are in the way.
+func OpenRegularFileIn(root, rel string) (*os.File, error) {
+	if !filepath.IsLocal(rel) {
+		return nil, fmt.Errorf("%s: path is outside the project", rel)
+	}
+	dir, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = dir.Close() }()
+	info, err := dir.Lstat(rel)
+	if err != nil {
+		return nil, relError(rel, err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s: not a regular file", rel)
+	}
+	f, err := dir.OpenFile(rel, openFlags, 0)
+	if err != nil {
+		return nil, relError(rel, err)
+	}
+	info, err = f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		_ = f.Close()
+		return nil, fmt.Errorf("%s: not a regular file", rel)
+	}
+	return f, nil
+}
+
+// relError keeps a missing file recognizable as fs.ErrNotExist and names the
+// file by its path inside the project, never by an absolute one.
+func relError(rel string, err error) error {
+	if errors.Is(err, fs.ErrNotExist) {
+		return &fs.PathError{Op: "open", Path: rel, Err: fs.ErrNotExist}
+	}
+	var pe *fs.PathError
+	if errors.As(err, &pe) {
+		return fmt.Errorf("%s: %w", rel, pe.Err)
+	}
+	return fmt.Errorf("%s: %w", rel, err)
+}
+
+// ReadFileIn is ReadFile for a config-supplied path that must stay inside
+// root (see OpenRegularFileIn).
+func ReadFileIn(root, rel string, maxBytes int64) ([]byte, error) {
+	if maxBytes <= 0 {
+		return nil, fmt.Errorf("invalid read limit")
+	}
+	f, err := OpenRegularFileIn(root, rel)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("%s: exceeds %d byte read limit", rel, maxBytes)
+	}
+	return data, nil
+}
+
 // ReadFile reads an entire regular file within maxBytes. Oversized files are
 // errors rather than successful, truncated input.
 func ReadFile(path string, maxBytes int64) ([]byte, error) {

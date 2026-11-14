@@ -17,4 +17,7 @@ func TestReadRegularFileSkipsFIFO(t *testing.T) {
 	if _, ok := ReadRegularFile(fifo, 1024); ok {
 		t.Error("FIFO should be skipped")
 	}
+	if _, err := ReadFileIn(filepath.Dir(fifo), "fifo.js", 1024); err == nil {
+		t.Error("FIFO should be refused by ReadFileIn")
+	}
 }
