@@ -301,10 +301,12 @@ ignore:
   - google_analytics
 ```
 
-A block under `checks:` without an `enabled:` key keeps the check's default.
-`healthEndpoint` runs whenever a URL is set and `seoMeta` runs when a layout
-or URL is found, so a block that only sets `path` or `mainLayout` leaves them
-on; only `enabled: false` turns them off. A `healthEndpoint` path with no
+A block under `checks:` without an `enabled:` key turns the check on: writing
+`secrets.allowlist` or `envParity.envFile` is asking for that check. Only
+`enabled: false` turns a check off, and a key with no block at all (`secrets:`
+on its own) changes nothing. `healthEndpoint` runs whenever a URL is set and
+`seoMeta` runs when a layout or URL is found, so a block that only sets `path`
+or `mainLayout` leaves them on as well. A `healthEndpoint` path with no
 `enabled` key is probed first, then the common paths. One exception: the exact
 block `healthEndpoint: {enabled: false, path: /health}`, which `preflight init`
 used to write for CMS and static sites, keeps its pre-0.24 meaning (the check
@@ -425,7 +427,8 @@ separate schema and did not change.
 A pass means the check verified its stated requirement. Skipped checks are
 reported separately and do not add to the passed count. Inconclusive checks
 produce warnings and exit code 1 unless another check produces an error.
-A scan containing only skipped checks also exits 1. Disabled checks are outside
+A scan containing only skipped checks also exits 1, and so does a scan where
+no check ran at all (everything ignored or skipped). Disabled checks are outside
 the scan's scope; a partial scan cannot establish overall launch readiness.
 
 JSON schema version **2** (since 0.24) adds `skipped` and `inconclusive` to
@@ -476,8 +479,11 @@ when these limits are exceeded. Cancellation terminates subprocess trees on
 Unix and Windows and bounds waits on inherited output pipes.
 
 The Docker image contains the CLI and CA certificates, without package-manager
-auditors. Dependency audits in that image report missing tools as inconclusive.
-Run package-manager audits on the host or in the relevant language image.
+auditors and without git. Dependency audits in that image report missing tools
+as inconclusive, and so does the secrets check when the mounted project is a
+git repository, because it cannot ask git which files are tracked or ignored.
+Run package-manager audits and the secrets check on the host or in the
+relevant language image.
 
 ### Email authentication domain
 
@@ -551,7 +557,7 @@ All services have validation checks that verify proper integration (env vars, SD
 | Code | Meaning |
 |------|---------|
 | 0 | All checks passed |
-| 1 | Warnings only |
+| 1 | Warnings only, or no check ran |
 | 2 | Errors found |
 | 64 | Preflight could not run (bad path, unreadable or invalid config, unknown or pre-0.22 check ID, bad flag) |
 | 130 | Scan cancelled (Ctrl-C / SIGTERM) |
