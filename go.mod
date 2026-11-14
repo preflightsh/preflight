@@ -2,13 +2,13 @@ module github.com/preflightsh/preflight
 
 go 1.26.0
 
-toolchain go1.26.10
+toolchain go1.26.11
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.4
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/image v0.47.0
-	golang.org/x/mod v0.42.0
+	golang.org/x/image v0.48.0
+	golang.org/x/mod v0.43.0
 	golang.org/x/net v0.62.0
 	gopkg.in/yaml.v3 v3.0.1
 )
