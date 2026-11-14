@@ -1,6 +1,6 @@
 #!/bin/sh
 # Preflight CLI Installer
-# Usage: curl -sSL https://preflight.sh/install.sh | sh
+# Usage: curl -fsSL https://preflight.sh/install.sh | sh
 
 set -e
 

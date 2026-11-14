@@ -35,7 +35,7 @@ docker pull ghcr.io/preflightsh/preflight
 ### Shell Script
 
 ```bash
-curl -sSL https://preflight.sh/install.sh | sh
+curl -fsSL https://preflight.sh/install.sh | sh
 ```
 
 ### Manual Download
@@ -120,7 +120,7 @@ Preflight is fully usable from the command line with no account. The optional da
 - Each check's ID, title, status (passed, skipped, inconclusive, severity), and the summary counts.
 - The real message for checks whose messages are built from fixed text, counts, repo-relative paths, DNS names, or public page content: the SEO and social checks, `security_headers`, `ssl`, `www_redirect`, `email_auth`, `debug_statements`, `error_pages`, `image_optimization`, `legal_pages`, and the web standard file checks. `debug_statements` and `image_optimization` include up to five findings (file and line, or file and size).
 - Before sending, those messages are scrubbed: the configured staging and production URLs are cut to their origins, and the IndexNow key, the Stripe webhook URL, the `seoMeta` layout path, and the env file names are removed, as are URL credentials, query strings, and fragments.
-- A generic message for everything else: `secrets`, `vulnerability`, `env_parity`, `health_endpoint`, `stripe_webhook`, `index_now`, every service check, and any "Check failed:" error.
+- A generic message for everything else: `secrets`, `vulnerability`, `env_parity`, `health_endpoint`, `stripe`, `index_now`, every service check, and any "Check failed:" error.
 - A redacted `preflight.yml`: project name, stack, URL origins, service declarations, and which checks are enabled. The IndexNow key, Stripe webhook URL, secrets allowlist, env file names, health path, layout path, and ignore list are dropped.
 
 Suggestions, file contents, audit tool output, and secret values are never sent.
@@ -164,7 +164,7 @@ Open any failed or warning check on a published run to generate a step-by-step f
 
 | Check | Description |
 |-------|-------------|
-| **ENV Parity** | Compares `.env` and `.env.example` for missing variables |
+| **ENV Parity** | Compares `.env` and `.env.example` for missing variables (opt-in; `preflight init` turns it on) |
 | **Health Endpoint** | Verifies site is reachable; tries `/health`, `/healthz`, `/api/health`, `/_health`, and `/status`, then falls back to root |
 | **Vulnerability Scan** | Checks for dependency vulnerabilities with your package manager's audit tool (bundle-audit, npm audit, etc.) |
 | **SEO Metadata** | Checks for title, description, and Open Graph tags |
@@ -173,11 +173,11 @@ Open any failed or warning check on a published run to generate a step-by-step f
 | **Viewport** | Checks for proper viewport meta tag for mobile |
 | **Lang Attribute** | Validates html lang attribute for accessibility |
 | **Structured Data** | Checks for JSON-LD Schema.org markup |
-| **Security Headers** | Validates HSTS, CSP, X-Content-Type-Options, and Referrer-Policy on both prod and staging; a weak CSP (such as `'unsafe-inline'` scripts) is a suggestion, not a failure |
+| **Security Headers** | Validates HSTS, CSP, X-Content-Type-Options, and Referrer-Policy on both prod and staging; a weak CSP (such as `'unsafe-inline'` scripts) is a suggestion, not a failure (opt-in; `preflight init` turns it on when you give it a production URL) |
 | **SSL Certificate** | Checks SSL validity and warns before expiration; skipped for local URLs |
 | **WWW Redirect** | Verifies www/non-www redirect to canonical URL |
 | **Email Auth** | Checks SPF/DMARC records for the email sending domain, or the production URL's domain when none is set (opt-in) |
-| **Secret Scanning** | Finds leaked API keys and credentials in code |
+| **Secret Scanning** | Finds leaked API keys and credentials in code (opt-in; `preflight init` turns it on) |
 | **Debug Statements** | Detects console.log, var_dump, debugger left in code; statements behind a development guard (in code, or in Twig, ERB, Blade, Django, and Go templates, including same-line `&&` and ternaries) are not reported |
 | **Error Pages** | Checks for custom 404/500 error pages |
 | **Image Optimization** | Finds large images (>500KB) that hurt load times |
@@ -386,10 +386,10 @@ other lines in the same file.
 `seo_meta`, `canonical`, `structured_data`, `index_now` (opt-in), `og_twitter`, `viewport`, `lang`
 
 **Security & Infrastructure:**
-`security_headers`, `ssl`, `www_redirect`, `email_auth` (opt-in), `secrets`
+`security_headers` (opt-in), `ssl`, `www_redirect`, `email_auth` (opt-in), `secrets` (opt-in)
 
 **Environment & Health:**
-`env_parity`, `health_endpoint`
+`env_parity` (opt-in), `health_endpoint`
 
 **Code Quality & Performance:**
 `vulnerability`, `debug_statements`, `error_pages`, `image_optimization`
@@ -569,7 +569,7 @@ All services have validation checks that verify proper integration (env vars, SD
 | 0 | All checks passed |
 | 1 | Warnings only, or no check ran |
 | 2 | Errors found |
-| 64 | Preflight could not run (bad path, unreadable or invalid config, unknown or pre-0.22 check ID, bad flag) |
+| 64 | Preflight could not run (bad path, missing, unreadable, or invalid `preflight.yml`, unknown or pre-0.22 check ID, `--only` matching no enabled check, bad flag) |
 | 130 | Scan cancelled (Ctrl-C / SIGTERM) |
 
 Codes 1 and 2 mean the scan ran and reported something. Code 64 means it
@@ -632,7 +632,7 @@ preflight completion fish | source
 # GitHub Actions example (curl)
 - name: Run Preflight
   run: |
-    curl -sSL https://preflight.sh/install.sh | sh
+    curl -fsSL https://preflight.sh/install.sh | sh
     preflight scan --ci --format json
 ```
 
