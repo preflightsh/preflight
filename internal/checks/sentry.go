@@ -64,7 +64,7 @@ func (c SentryCheck) Run(ctx Context) (CheckResult, error) {
 		}
 	}
 
-	found = found || sentrySDKFound(ctx.RootDir)
+	found = found || sentrySDKFound(ctx)
 
 	if found {
 		return CheckResult{
@@ -74,6 +74,12 @@ func (c SentryCheck) Run(ctx Context) (CheckResult, error) {
 			Passed:   true,
 			Message:  "Sentry initialization found",
 		}, nil
+	}
+
+	// A DSN in an env file: the SDK is configured from the environment
+	// (and it is what gets the service declared in the first place).
+	if r, ok := serviceEnvPass(ctx, c.ID(), c.Title(), "SENTRY_"); ok {
+		return r, nil
 	}
 
 	return CheckResult{
@@ -109,29 +115,15 @@ var sentryCodePatterns = []*regexp.Regexp{
 
 // sentrySDKFound reports whether a Sentry SDK is a declared dependency or is
 // initialized anywhere in the project's source, comments excluded.
-func sentrySDKFound(rootDir string) bool {
+func sentrySDKFound(ctx Context) bool {
 	for _, name := range dependencyManifests {
-		content, err := readSourceFile(filepath.Join(rootDir, name))
+		content, err := readSourceFile(filepath.Join(ctx.RootDir, name))
 		if err != nil {
 			continue
 		}
-		deps := stripComments(string(content))
-		for _, p := range sentryDependencyPatterns {
-			if p.MatchString(deps) {
-				return true
-			}
+		if _, ok := firstMatch(sentryDependencyPatterns, manifestDependencies(name, content)); ok {
+			return true
 		}
 	}
-	return walkSourceFiles(rootDir, func(path string, content []byte) bool {
-		code := stripCodeComments(string(content))
-		if ext := filepath.Ext(path); ext == ".rb" || ext == ".py" {
-			code = stripComments(code)
-		}
-		for _, p := range sentryCodePatterns {
-			if p.MatchString(code) {
-				return true
-			}
-		}
-		return false
-	})
+	return ctx.serviceCodeMatch("sentry") != nil
 }

@@ -112,7 +112,7 @@ var HotjarCheck = ServiceCheck{
 	CodePatterns: []*regexp.Regexp{
 		regexp.MustCompile(`hotjar\.com`),
 		regexp.MustCompile(`static\.hotjar\.com`),
-		regexp.MustCompile(`hj\s*\(`),
+		regexp.MustCompile(`(?:^|[^\w.])hj\s*\(\s*['"]`),
 		regexp.MustCompile(`_hjSettings`),
 	},
 	CodeFoundMsg: "Hotjar tracking code found",
@@ -147,11 +147,14 @@ var SegmentCheck = ServiceCheck{
 	CheckID:    "segment",
 	CheckTitle: "Segment",
 	CodePatterns: []*regexp.Regexp{
-		regexp.MustCompile(`analytics\.load`),
-		regexp.MustCompile(`analytics\.track`),
-		regexp.MustCompile(`analytics\.identify`),
+		// analytics.load() is Segment's own loader. analytics.track() and
+		// analytics.identify() are what every analytics wrapper calls its
+		// methods, so they are not evidence of Segment.
+		regexp.MustCompile(`\banalytics\.load\s*\(`),
+		regexp.MustCompile(`\bAnalyticsBrowser\.load\s*\(`),
 		regexp.MustCompile(`cdn\.segment\.com`),
-		regexp.MustCompile(`@segment/analytics`),
+		regexp.MustCompile(`@segment/`),
+		regexp.MustCompile(`\banalytics-node\b`),
 	},
 	CodeFoundMsg: "Segment initialization found",
 	NotFoundMsg:  "Segment is declared but initialization not found",

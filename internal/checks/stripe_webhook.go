@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -36,13 +37,15 @@ func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {
 	// A value in a real env file (.env, .env.local, .env.development.local)
 	// sets a key; a name in .env.example only documents it. Documented is
 	// enough to pass (CI has no real .env), and the message says which.
-	webhookKey := "STRIPE_WEBHOOK_SECRET"
-	keyStatus := func(key string) (envKeyStatus, string) {
-		return envKeyLookup(ctx.RootDir, func(name string) bool { return name == key })
+	//
+	// Laravel Cashier names the pair STRIPE_KEY and STRIPE_SECRET; those and
+	// the other common spellings count as the same keys.
+	keyStatus := func(keys ...string) (envKeyStatus, string) {
+		return envKeyLookup(ctx.RootDir, func(name string) bool { return slices.Contains(keys, name) })
 	}
-	secretStatus, secretWhere := keyStatus("STRIPE_SECRET_KEY")
-	publishableStatus, _ := keyStatus("STRIPE_PUBLISHABLE_KEY")
-	webhookStatus, _ := keyStatus(webhookKey)
+	secretStatus, secretWhere := keyStatus("STRIPE_SECRET_KEY", "STRIPE_SECRET", "STRIPE_API_KEY")
+	publishableStatus, _ := keyStatus("STRIPE_PUBLISHABLE_KEY", "STRIPE_KEY", "STRIPE_PUBLIC_KEY")
+	webhookStatus, _ := keyStatus("STRIPE_WEBHOOK_SECRET")
 
 	// The secret key is required. The publishable key only matters for
 	// Stripe.js in the browser (a Checkout-only server app never needs it),
@@ -59,7 +62,7 @@ func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {
 	// Check webhook secret (warn but don't fail)
 	hasWebhookSecret := webhookStatus != envKeyMissing
 
-	initFound := stripeInitFound(ctx.RootDir)
+	initFound := stripeInitFound(ctx)
 
 	if !initFound {
 		issues = append(issues, "Stripe initialization not found")
@@ -116,55 +119,48 @@ func (c StripeWebhookCheck) Run(ctx Context) (CheckResult, error) {
 // stripeCodePatterns match Stripe being set up in code, across the
 // languages with an official Stripe SDK.
 var stripeCodePatterns = []*regexp.Regexp{
-	regexp.MustCompile(`Stripe\.api_key`),                 // Ruby
-	regexp.MustCompile(`stripe\.(?:Key|api_key)\b`),       // Go, Python
-	regexp.MustCompile(`new Stripe\(`),                    // Node
-	regexp.MustCompile(`Stripe\(`),                        // Node alt
-	regexp.MustCompile(`stripe\.setApiKey`),               // Node alt
-	regexp.MustCompile(`\\Stripe\\StripeClient|Stripe::`), // PHP, Ruby
-	regexp.MustCompile(`STRIPE_SECRET_KEY`),               // Generic env usage
+	regexp.MustCompile(`\bStripe\.api_key\b`),                                   // Ruby
+	regexp.MustCompile(`\bstripe\.(?:Key|api_key)\b`),                           // Go, Python
+	regexp.MustCompile(`\bnew Stripe\(`),                                        // Node
+	regexp.MustCompile(`\bStripe\(`),                                            // Node alt
+	regexp.MustCompile(`\bstripe\.setApiKey\b`),                                 // Node alt
+	regexp.MustCompile(`\\Stripe\\StripeClient|\bStripe::`),                     // PHP, Ruby
+	regexp.MustCompile(`\bLaravel\\Cashier\b|\bCashier::`),                      // Laravel Cashier
+	regexp.MustCompile(`\bSTRIPE_(?:SECRET_KEY|SECRET|API_KEY)\b`),              // Generic env usage
+	regexp.MustCompile(`from\s+["']stripe["']|require\s*\(\s*["']stripe["']\)`), // Node import
 }
 
-// stripeDependencyPatterns match Stripe declared in a package manifest.
-var stripeDependencyPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`stripe/stripe-php`),                                 // composer.json
-	regexp.MustCompile(`gem ['"]stripe['"]`),                                // Gemfile
-	regexp.MustCompile(`(?m)^\s+stripe \(`),                                 // Gemfile.lock
-	regexp.MustCompile(`"(?:stripe|@stripe/[\w-]+)"\s*:`),                   // package.json
-	regexp.MustCompile(`github\.com/stripe/stripe-go`),                      // go.mod
-	regexp.MustCompile(`(?im)(?:^|["'\s,\[])stripe\s*(?:[=<>~!\[]|["']|$)`), // requirements.txt, pyproject, Pipfile
+// stripeDependencyPatterns match Stripe declared in a package manifest, by
+// manifest. One list for every manifest let the Python form, a bare
+// "stripe" word, match the prose in a package.json description.
+var stripeDependencyPatterns = map[string][]*regexp.Regexp{
+	"composer.json":    re(`"stripe/stripe-php"`, `"laravel/cashier"`),
+	"Gemfile":          re(`gem ['"](?:stripe|pay|stripe-rails)['"]`),
+	"Gemfile.lock":     re(`(?m)^\s+stripe \(`),
+	"package.json":     re(`"(?:stripe|@stripe/[\w-]+)"\s*:`),
+	"go.mod":           re(`github\.com/stripe/stripe-go`),
+	"requirements.txt": re(`(?im)^\s*(?:stripe|dj-stripe)\s*(?:[=<>~!\[;]|$)`),
+	"pyproject.toml":   re(`(?im)["']stripe\s*(?:[=<>~!\[]|["'])`, `(?im)^\s*stripe\s*=`),
+	"Pipfile":          re(`(?im)^\s*stripe\s*=`),
 }
 
 // stripeInitFound reports whether Stripe is initialized anywhere in the
-// project's source or declared as a dependency. Manifests are compared with
-// comments stripped (a Gemfile comments with "#", so `# gem "stripe"` must not
-// count), and source with code comments stripped: the patterns are broad on
-// purpose (`Stripe\(` alone counts), so "// TODO: call Stripe() here" must not.
-func stripeInitFound(rootDir string) bool {
+// project's source or declared as a dependency. Manifests are reduced to
+// their dependencies (manifestDependencies), so neither `# gem "stripe"` nor
+// a description that mentions Stripe counts. Source has comments stripped:
+// the patterns are broad on purpose (`Stripe(` alone counts), so
+// "// TODO: call Stripe() here" must not.
+func stripeInitFound(ctx Context) bool {
 	for _, name := range append([]string{"Gemfile.lock"}, dependencyManifests...) {
-		content, err := readSourceFile(filepath.Join(rootDir, name))
+		content, err := readSourceFile(filepath.Join(ctx.RootDir, name))
 		if err != nil {
 			continue
 		}
-		deps := stripComments(string(content))
-		for _, p := range stripeDependencyPatterns {
-			if p.MatchString(deps) {
-				return true
-			}
+		if _, ok := firstMatch(stripeDependencyPatterns[name], manifestDependencies(name, content)); ok {
+			return true
 		}
 	}
-	return walkSourceFiles(rootDir, func(path string, content []byte) bool {
-		code := stripCodeComments(string(content))
-		if ext := filepath.Ext(path); ext == ".rb" || ext == ".py" {
-			code = stripComments(code) // "#" comments too
-		}
-		for _, p := range stripeCodePatterns {
-			if p.MatchString(code) {
-				return true
-			}
-		}
-		return false
-	})
+	return ctx.serviceCodeMatch("stripe") != nil
 }
 
 type webhookProbe int

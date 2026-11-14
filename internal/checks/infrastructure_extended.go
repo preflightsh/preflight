@@ -13,8 +13,10 @@ var RabbitMQCheck = ServiceCheck{
 		regexp.MustCompile(`amqp://`),
 		regexp.MustCompile(`amqps://`),
 		regexp.MustCompile(`amqplib`),
-		regexp.MustCompile(`bunny`),
-		regexp.MustCompile(`pika`),
+		// The Ruby and Python clients, as they are used: a bare "bunny" or
+		// "pika" is a word (and BunnyCDN).
+		regexp.MustCompile(`\bBunny\.new\b|require ['"]bunny['"]`),
+		regexp.MustCompile(`(?m)^\s*import\s+pika\b|\bpika\.(?:BlockingConnection|ConnectionParameters|URLParameters)\b`),
 	},
 	CodeFoundMsg: "RabbitMQ connection found",
 	NotFoundMsg:  "RabbitMQ is declared but connection not found",

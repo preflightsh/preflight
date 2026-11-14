@@ -19,7 +19,13 @@ import (
 //     live), otherwise pass. "Otherwise" covers no URL configured and a URL
 //     that could not be reached: neither says anything about what the live
 //     page contains.
-//  5. warn: declared but nothing found
+//  5. pass when a root env file names the service by one of the prefixes
+//     `preflight init` declares it from (serviceSignals), unless a live page
+//     was read and did not show it
+//  6. warn: declared but nothing found
+//
+// CodePatterns are joined by the service's detection signals, and the search
+// is shared across every declared service (Context.serviceCodeMatch).
 //
 // Steps 2 and 3 are skipped when their pattern lists are empty. Checks that
 // need anything beyond this shape (DNS lookups, webhook probing, env-var
@@ -83,14 +89,46 @@ func (c ServiceCheck) Run(ctx Context) (CheckResult, error) {
 		liveURL = url
 	}
 
-	if len(c.CodePatterns) > 0 && searchForPatterns(ctx.RootDir, ctx.Config.Stack, c.CodePatterns) {
+	if c.codeFound(ctx) {
 		if liveURL != "" {
 			return warn(c.LiveMissingMsg, c.LiveMissingSuggestions)
 		}
 		return pass(c.CodeFoundMsg)
 	}
 
+	// The env names `preflight init` declares the service from, beyond the
+	// check's own (serviceSignals). Asked last, so a script or SDK that is
+	// there is still what gets reported.
+	if liveURL == "" {
+		if r, ok := serviceEnvPass(ctx, c.CheckID, c.CheckTitle); ok {
+			return r, nil
+		}
+	}
+
 	return warn(c.NotFoundMsg, c.NotFoundSuggestions)
+}
+
+// codeFound reports whether the project's code or manifests show the
+// service wired up. A registered service shares the scan's one pass over the
+// source; a ServiceCheck outside the registry searches on its own.
+func (c ServiceCheck) codeFound(ctx Context) bool {
+	if registered, ok := ServiceChecks[c.CheckID].(ServiceCheck); ok && sameCheck(registered, c) {
+		return ctx.serviceCodeMatch(c.CheckID) != nil
+	}
+	return len(c.CodePatterns) > 0 && searchForPatterns(ctx.RootDir, ctx.Config.Stack, c.CodePatterns)
+}
+
+// sameCheck reports whether two ServiceChecks search for the same patterns.
+func sameCheck(a, b ServiceCheck) bool {
+	if len(a.CodePatterns) != len(b.CodePatterns) {
+		return false
+	}
+	for i := range a.CodePatterns {
+		if a.CodePatterns[i] != b.CodePatterns[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // checkLiveSiteForPatterns fetches the live site (production URL first, then
@@ -131,7 +169,8 @@ func checkLiveSiteForPatterns(ctx Context, patterns []*regexp.Regexp) (bool, str
 		return false, ""
 	}
 
-	content := strings.ToLower(html)
+	// Comments out first: a commented-out script tag is not on the page.
+	content := strings.ToLower(stripSourceComments(html, false))
 	for _, pattern := range patterns {
 		if pattern.MatchString(content) {
 			return true, url

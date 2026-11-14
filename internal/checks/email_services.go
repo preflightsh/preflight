@@ -3,351 +3,112 @@ package checks
 import (
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 )
+
+// transactionalEmailCheck is the shape the transactional email checks share:
+// a key in an env file, the SDK in the code or a manifest, or the key
+// referenced from a config or deploy file.
+type transactionalEmailCheck struct {
+	id, name    string
+	envPrefixes []string
+	suggestions []string
+}
+
+func (c transactionalEmailCheck) run(ctx Context) (CheckResult, error) {
+	if !serviceDeclared(ctx, c.id) {
+		return serviceSkipped(c.id, c.name, c.name), nil
+	}
+	if r, ok := serviceEnvPass(ctx, c.id, c.name, c.envPrefixes...); ok {
+		return r, nil
+	}
+	if ctx.serviceCodeMatch(c.id) != nil {
+		return servicePassed(c.id, c.name, c.name+" SDK initialization found"), nil
+	}
+	if where, ok := hasEnvVarReference(ctx.RootDir, c.envPrefixes...); ok {
+		return servicePassed(c.id, c.name, c.name+" configured via env reference in "+where+" (secret resolved from the deploy environment)"), nil
+	}
+	return serviceWarned(c.id, c.name, c.name+" is declared but configuration not found", c.suggestions...), nil
+}
 
 // PostmarkCheck verifies Postmark is properly set up
 type PostmarkCheck struct{}
 
-func (c PostmarkCheck) ID() string {
-	return "postmark"
-}
-
-func (c PostmarkCheck) Title() string {
-	return "Postmark"
-}
+func (c PostmarkCheck) ID() string    { return "postmark" }
+func (c PostmarkCheck) Title() string { return "Postmark" }
 
 func (c PostmarkCheck) Run(ctx Context) (CheckResult, error) {
-	service, declared := ctx.Config.Services["postmark"]
-	if !declared || !service.Declared {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Skipped:  true,
-			Message:  "Postmark not declared, skipping",
-		}, nil
-	}
-
-	if r, ok := envKeyPass(c.ID(), c.Title(), ctx.RootDir, "POSTMARK_"); ok {
-		return r, nil
-	}
-
-	patterns := []*regexp.Regexp{
-		regexp.MustCompile(`postmarkapp`),
-		regexp.MustCompile(`postmark-client`),
-		regexp.MustCompile(`@wildbit/postmark`),
-		regexp.MustCompile(`ServerClient`),
-	}
-
-	found := searchForPatterns(ctx.RootDir, ctx.Config.Stack, patterns)
-
-	if found {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  "Postmark SDK initialization found",
-		}, nil
-	}
-
-	if where, ok := hasEnvVarReference(ctx.RootDir, "POSTMARK_"); ok {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  "Postmark configured via env reference in " + where + " (secret resolved from the deploy environment)",
-		}, nil
-	}
-
-	return CheckResult{
-		ID:       c.ID(),
-		Title:    c.Title(),
-		Severity: SeverityWarn,
-		Passed:   false,
-		Message:  "Postmark is declared but configuration not found",
-		Suggestions: []string{
+	return transactionalEmailCheck{
+		id: c.ID(), name: c.Title(), envPrefixes: []string{"POSTMARK_"},
+		suggestions: []string{
 			"Add POSTMARK_API_TOKEN to your environment",
 			"Initialize the Postmark client in your application",
 		},
-	}, nil
+	}.run(ctx)
 }
 
 // SendGridCheck verifies SendGrid is properly set up
 type SendGridCheck struct{}
 
-func (c SendGridCheck) ID() string {
-	return "sendgrid"
-}
-
-func (c SendGridCheck) Title() string {
-	return "SendGrid"
-}
+func (c SendGridCheck) ID() string    { return "sendgrid" }
+func (c SendGridCheck) Title() string { return "SendGrid" }
 
 func (c SendGridCheck) Run(ctx Context) (CheckResult, error) {
-	service, declared := ctx.Config.Services["sendgrid"]
-	if !declared || !service.Declared {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Skipped:  true,
-			Message:  "SendGrid not declared, skipping",
-		}, nil
-	}
-
-	if r, ok := envKeyPass(c.ID(), c.Title(), ctx.RootDir, "SENDGRID_"); ok {
-		return r, nil
-	}
-
-	patterns := []*regexp.Regexp{
-		regexp.MustCompile(`@sendgrid/mail`),
-		regexp.MustCompile(`sendgrid-ruby`),
-		regexp.MustCompile(`SendGrid`),
-	}
-
-	found := searchForPatterns(ctx.RootDir, ctx.Config.Stack, patterns)
-
-	if found {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  "SendGrid SDK initialization found",
-		}, nil
-	}
-
-	if where, ok := hasEnvVarReference(ctx.RootDir, "SENDGRID_"); ok {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  "SendGrid configured via env reference in " + where + " (secret resolved from the deploy environment)",
-		}, nil
-	}
-
-	return CheckResult{
-		ID:       c.ID(),
-		Title:    c.Title(),
-		Severity: SeverityWarn,
-		Passed:   false,
-		Message:  "SendGrid is declared but configuration not found",
-		Suggestions: []string{
+	return transactionalEmailCheck{
+		id: c.ID(), name: c.Title(), envPrefixes: []string{"SENDGRID_"},
+		suggestions: []string{
 			"Add SENDGRID_API_KEY to your environment",
 			"Initialize the SendGrid client in your application",
 		},
-	}, nil
+	}.run(ctx)
 }
 
 // MailgunCheck verifies Mailgun is properly set up
 type MailgunCheck struct{}
 
-func (c MailgunCheck) ID() string {
-	return "mailgun"
-}
-
-func (c MailgunCheck) Title() string {
-	return "Mailgun"
-}
+func (c MailgunCheck) ID() string    { return "mailgun" }
+func (c MailgunCheck) Title() string { return "Mailgun" }
 
 func (c MailgunCheck) Run(ctx Context) (CheckResult, error) {
-	service, declared := ctx.Config.Services["mailgun"]
-	if !declared || !service.Declared {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Skipped:  true,
-			Message:  "Mailgun not declared, skipping",
-		}, nil
-	}
-
-	if r, ok := envKeyPass(c.ID(), c.Title(), ctx.RootDir, "MAILGUN_"); ok {
-		return r, nil
-	}
-
-	patterns := []*regexp.Regexp{
-		regexp.MustCompile(`mailgun-js`),
-		regexp.MustCompile(`mailgun\.client`),
-		regexp.MustCompile(`Mailgun`),
-	}
-
-	found := searchForPatterns(ctx.RootDir, ctx.Config.Stack, patterns)
-
-	if found {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  "Mailgun SDK initialization found",
-		}, nil
-	}
-
-	if where, ok := hasEnvVarReference(ctx.RootDir, "MAILGUN_"); ok {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  "Mailgun configured via env reference in " + where + " (secret resolved from the deploy environment)",
-		}, nil
-	}
-
-	return CheckResult{
-		ID:       c.ID(),
-		Title:    c.Title(),
-		Severity: SeverityWarn,
-		Passed:   false,
-		Message:  "Mailgun is declared but configuration not found",
-		Suggestions: []string{
+	return transactionalEmailCheck{
+		id: c.ID(), name: c.Title(), envPrefixes: []string{"MAILGUN_"},
+		suggestions: []string{
 			"Add MAILGUN_API_KEY to your environment",
 			"Initialize the Mailgun client in your application",
 		},
-	}, nil
+	}.run(ctx)
 }
 
 // ResendCheck verifies Resend is properly set up
 type ResendCheck struct{}
 
-func (c ResendCheck) ID() string {
-	return "resend"
-}
-
-func (c ResendCheck) Title() string {
-	return "Resend"
-}
+func (c ResendCheck) ID() string    { return "resend" }
+func (c ResendCheck) Title() string { return "Resend" }
 
 func (c ResendCheck) Run(ctx Context) (CheckResult, error) {
-	service, declared := ctx.Config.Services["resend"]
-	if !declared || !service.Declared {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Skipped:  true,
-			Message:  "Resend not declared, skipping",
-		}, nil
-	}
-
-	if r, ok := envKeyPass(c.ID(), c.Title(), ctx.RootDir, "RESEND_"); ok {
-		return r, nil
-	}
-
-	patterns := []*regexp.Regexp{
-		regexp.MustCompile(`resend\.emails\.send`),
-		regexp.MustCompile(`new Resend`),
-		regexp.MustCompile(`Resend\(`),
-	}
-
-	found := searchForPatterns(ctx.RootDir, ctx.Config.Stack, patterns)
-
-	if found {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  "Resend SDK initialization found",
-		}, nil
-	}
-
-	if where, ok := hasEnvVarReference(ctx.RootDir, "RESEND_"); ok {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  "Resend configured via env reference in " + where + " (secret resolved from the deploy environment)",
-		}, nil
-	}
-
-	return CheckResult{
-		ID:       c.ID(),
-		Title:    c.Title(),
-		Severity: SeverityWarn,
-		Passed:   false,
-		Message:  "Resend is declared but configuration not found",
-		Suggestions: []string{
+	return transactionalEmailCheck{
+		id: c.ID(), name: c.Title(), envPrefixes: []string{"RESEND_"},
+		suggestions: []string{
 			"Add RESEND_API_KEY to your environment",
 			"Initialize the Resend client in your application",
 		},
-	}, nil
+	}.run(ctx)
 }
 
 // AWSSESCheck verifies AWS SES is properly set up
 type AWSSESCheck struct{}
 
-func (c AWSSESCheck) ID() string {
-	return "aws_ses"
-}
-
-func (c AWSSESCheck) Title() string {
-	return "AWS SES"
-}
+func (c AWSSESCheck) ID() string    { return "aws_ses" }
+func (c AWSSESCheck) Title() string { return "AWS SES" }
 
 func (c AWSSESCheck) Run(ctx Context) (CheckResult, error) {
-	service, declared := ctx.Config.Services["aws_ses"]
-	if !declared || !service.Declared {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Skipped:  true,
-			Message:  "AWS SES not declared, skipping",
-		}, nil
-	}
-
-	if r, ok := envKeyPass(c.ID(), c.Title(), ctx.RootDir, "AWS_SES_", "SES_REGION"); ok {
-		return r, nil
-	}
-
-	patterns := []*regexp.Regexp{
-		regexp.MustCompile(`@aws-sdk/client-ses`),
-		regexp.MustCompile(`aws-sdk-ses`),
-		regexp.MustCompile(`SESClient`),
-		regexp.MustCompile(`ses\.sendEmail`),
-		regexp.MustCompile(`craft-amazon-ses`),
-	}
-
-	found := searchForPatterns(ctx.RootDir, ctx.Config.Stack, patterns)
-
-	if found {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  "AWS SES SDK initialization found",
-		}, nil
-	}
-
-	if where, ok := hasEnvVarReference(ctx.RootDir, "AWS_SES_", "SES_REGION"); ok {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  "AWS SES configured via env reference in " + where + " (secret resolved from the deploy environment)",
-		}, nil
-	}
-
-	return CheckResult{
-		ID:       c.ID(),
-		Title:    c.Title(),
-		Severity: SeverityWarn,
-		Passed:   false,
-		Message:  "AWS SES is declared but configuration not found",
-		Suggestions: []string{
+	return transactionalEmailCheck{
+		id: c.ID(), name: c.Title(), envPrefixes: []string{"AWS_SES_", "SES_REGION"},
+		suggestions: []string{
 			"Configure AWS credentials for SES",
 			"Initialize the SES client in your application",
 		},
-	}, nil
+	}.run(ctx)
 }
 
 // hasEnvVar reports whether a root env file sets or documents a name the
@@ -394,7 +155,7 @@ var envRefConfigFiles = []string{
 const maxEnvRefScanBytes = 512 * 1024
 
 // hasEnvVarReference reports whether any of the given env-var prefixes is
-// *referenced* (not necessarily valued) in a non-.env config or deploy file —
+// *referenced* (not necessarily valued) in a non-.env config or deploy file:
 // e.g. Craft's project.yaml using `apiKey: $AWS_SES_API_KEY`, a Laravel config
 // calling `env('MAILGUN_SECRET')`, or a fly.toml/render.yaml declaring the var.
 // A service wired this way is correctly configured: the secret lives in the

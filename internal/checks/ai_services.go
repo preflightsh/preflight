@@ -13,12 +13,15 @@ var OpenAICheck = ServiceCheck{
 	CheckTitle:  "OpenAI",
 	EnvPrefixes: []string{"OPENAI_"},
 	CodePatterns: []*regexp.Regexp{
-		regexp.MustCompile(`new OpenAI\(`),
-		regexp.MustCompile(`OpenAI\(\s*\{`),
+		regexp.MustCompile(`\bnew OpenAI\(`),
+		regexp.MustCompile(`\b(?:Async)?OpenAI\(`),
 		regexp.MustCompile(`api\.openai\.com`),
 		regexp.MustCompile(`from\s+["']openai["']`),
 		regexp.MustCompile(`require\s*\(\s*["']openai["']\)`),
-		regexp.MustCompile(`import\s+openai`),
+		// Python: `import openai` and `from openai import OpenAI`, as a
+		// statement (prose says "a reply from OpenAI").
+		regexp.MustCompile(`(?m)^\s*(?:import|from)\s+openai\b`),
+		regexp.MustCompile(`\bopenai\.(?:ChatCompletion|chat|responses|create)\b`),
 	},
 	CodeFoundMsg: "OpenAI SDK initialization found",
 	NotFoundMsg:  "OpenAI is declared but SDK not found",
@@ -35,11 +38,13 @@ var AnthropicCheck = ServiceCheck{
 	EnvPrefixes: []string{"ANTHROPIC_"},
 	CodePatterns: []*regexp.Regexp{
 		regexp.MustCompile(`@anthropic-ai/sdk`),
-		regexp.MustCompile(`new Anthropic\(`),
-		regexp.MustCompile(`Anthropic\(\s*\{`),
+		regexp.MustCompile(`\bnew Anthropic\(`),
+		regexp.MustCompile(`\b(?:Async)?Anthropic\(`),
 		regexp.MustCompile(`api\.anthropic\.com`),
 		regexp.MustCompile(`from\s+["']@anthropic-ai`),
-		regexp.MustCompile(`import\s+anthropic`),
+		// Python: `import anthropic` and `from anthropic import Anthropic`.
+		regexp.MustCompile(`(?m)^\s*(?:import|from)\s+anthropic\b`),
+		regexp.MustCompile(`\banthropic\.Anthropic\b`),
 	},
 	CodeFoundMsg: "Anthropic SDK initialization found",
 	NotFoundMsg:  "Anthropic is declared but SDK not found",
@@ -55,11 +60,14 @@ var GoogleAICheck = ServiceCheck{
 	CheckTitle:  "Google AI",
 	EnvPrefixes: []string{"GOOGLE_AI_", "GEMINI_"},
 	CodePatterns: []*regexp.Regexp{
-		regexp.MustCompile(`@google/generative-ai`),
+		regexp.MustCompile(`@google/(?:generative-ai|genai)`),
 		regexp.MustCompile(`generativelanguage\.googleapis\.com`),
-		regexp.MustCompile(`GoogleGenerativeAI`),
-		regexp.MustCompile(`gemini-pro`),
-		regexp.MustCompile(`gemini-1\.5`),
+		regexp.MustCompile(`\bGoogleGenerativeAI\b|\bGoogleGenAI\b`),
+		// Python: google-generativeai and its successor, google-genai.
+		regexp.MustCompile(`\bgoogle\.generativeai\b`),
+		regexp.MustCompile(`(?m)^\s*from\s+google\s+import\s+genai\b`),
+		// A model name: gemini-pro, gemini-1.5-pro, gemini-2.5-flash.
+		regexp.MustCompile(`\bgemini-(?:\d|pro|flash|ultra|nano)`),
 		regexp.MustCompile(`models/gemini`),
 	},
 	CodeFoundMsg: "Google AI SDK initialization found",
@@ -159,7 +167,8 @@ var GrokCheck = ServiceCheck{
 	CodePatterns: []*regexp.Regexp{
 		regexp.MustCompile(`api\.x\.ai`),
 		regexp.MustCompile(`xai-sdk`),
-		regexp.MustCompile(`grok-`),
+		// A model name. The boundary keeps "ngrok-free" out.
+		regexp.MustCompile(`\bgrok-(?:\d|beta|vision|code|mini|fast)`),
 	},
 	CodeFoundMsg: "Grok SDK initialization found",
 	NotFoundMsg:  "Grok is declared but SDK not found",
