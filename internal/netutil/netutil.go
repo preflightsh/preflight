@@ -222,6 +222,9 @@ func SafeHTTPClient(timeout time.Duration) *http.Client {
 // Passing no addrs yields exactly SafeHTTPClient's behavior.
 func SafeHTTPClientAllowing(timeout time.Duration, allowedAddrs []string) *http.Client {
 	exempt := newExemptAddrs(allowedAddrs)
+	// No Proxy is set on purpose: through a proxy the dialer would only ever
+	// see the proxy's address, and the private-address guard would stop
+	// applying to the hosts actually being requested.
 	transport := &http.Transport{
 		DialContext:           safeDialer(timeout, exempt),
 		ResponseHeaderTimeout: timeout,
@@ -268,10 +271,19 @@ func (e exemptAddrs) checkRedirect(req *http.Request, via []*http.Request) error
 	if err != nil {
 		return err
 	}
-	for _, ip := range ips {
-		if IsPrivateIP(ip.IP) {
-			return fmt.Errorf("%w: %s resolves to %s", ErrPrivateAddress, host, ip.IP)
-		}
+	return redirectIPsAllowed(host, ips)
+}
+
+// redirectIPsAllowed applies the dialer's rule to a redirect hop: the hop is
+// refused only when the host has no public address at all. The connection is
+// then dialed by literal public IP, so a stray private or link-local record
+// next to a public one cannot be reached through it.
+func redirectIPsAllowed(host string, ips []net.IPAddr) error {
+	if len(ips) == 0 {
+		return nil
+	}
+	if _, err := publicIPs(ips); err != nil {
+		return fmt.Errorf("%w (%s)", err, host)
 	}
 	return nil
 }
@@ -290,8 +302,8 @@ func LimitBody(body io.Reader, max int64) io.Reader {
 // came from untrusted content (e.g. a URL parsed from preflight.yml).
 //
 // All resolved IPs are tried until one succeeds (so dual-stack hosts
-// with a broken AAAA still work). The total budget — DNS lookup + every
-// dial attempt — is bounded by timeout. If cfg is nil a fresh
+// with a broken AAAA still work). The total budget (DNS lookup plus every
+// dial attempt) is bounded by timeout. If cfg is nil a fresh
 // tls.Config is used; if cfg.ServerName is empty it is set to the
 // hostname portion of addr so SNI and cert verification still work
 // after we substitute a literal IP into the dial target.

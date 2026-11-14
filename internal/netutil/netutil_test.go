@@ -271,3 +271,16 @@ func TestPublicIPs(t *testing.T) {
 		t.Errorf("all-private set = %v, want ErrPrivateAddress", err)
 	}
 }
+
+// A redirect hop follows the dialer's rule: a host with a public address is
+// allowed even when its DNS also lists a link-local one, and a host with
+// only private addresses is refused.
+func TestRedirectIPsAllowed(t *testing.T) {
+	addr := func(s string) net.IPAddr { return net.IPAddr{IP: net.ParseIP(s)} }
+	if err := redirectIPsAllowed("mixed.example", []net.IPAddr{addr("fe80::1"), addr("157.245.130.183")}); err != nil {
+		t.Errorf("mixed public and link-local host refused: %v", err)
+	}
+	if err := redirectIPsAllowed("internal.example", []net.IPAddr{addr("10.0.0.5")}); !errors.Is(err, ErrPrivateAddress) {
+		t.Errorf("private-only host = %v, want ErrPrivateAddress", err)
+	}
+}
