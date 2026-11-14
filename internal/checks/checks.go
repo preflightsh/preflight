@@ -458,7 +458,46 @@ func FetchPage(ctx context.Context, client *http.Client, rawURL string) (html st
 	if err != nil {
 		return "", fetch
 	}
+	if isChallengePage(resp.Header, body) {
+		// A bot challenge served with a 200 is still a refusal. Report it
+		// as one, so no check grades the interstitial's markup and headers
+		// as if they were the site's.
+		fetch.Status = http.StatusForbidden
+		return "", fetch
+	}
 	return string(body), fetch
+}
+
+// challengeTitles are the page titles of bot-protection interstitials.
+var challengeTitles = []string{
+	"<title>just a moment...</title>",
+	"<title>attention required! | cloudflare</title>",
+}
+
+// isChallengePage reports whether a successful response is a bot
+// protection interstitial rather than the page that was asked for. The
+// signals are ones a real page does not carry: Cloudflare's cf-mitigated
+// header and its challenge titles, Sucuri's challenge script, and an
+// Imperva page that is nothing but its challenge resource. A page that
+// merely loads a vendor's detection script is not a challenge.
+func isChallengePage(header http.Header, body []byte) bool {
+	if strings.EqualFold(strings.TrimSpace(header.Get("Cf-Mitigated")), "challenge") {
+		return true
+	}
+	head := body
+	if len(head) > 4096 {
+		head = head[:4096]
+	}
+	lower := strings.ToLower(string(head))
+	for _, title := range challengeTitles {
+		if strings.Contains(lower, title) {
+			return true
+		}
+	}
+	if strings.Contains(lower, "sucuri_cloudproxy_js") {
+		return true
+	}
+	return len(body) < 2048 && strings.Contains(lower, "_incapsula_resource")
 }
 
 // fetchRetryDelay is the pause before FetchPage's single retry.
