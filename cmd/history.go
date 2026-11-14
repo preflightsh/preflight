@@ -96,10 +96,10 @@ func listHistory(client *dashboard.Client, token string) error {
 		return nil
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "RUN ID\tPROJECT\tWHEN\tOK\tWARN\tFAIL")
+	fmt.Fprintln(tw, "RUN ID\tPROJECT\tWHEN\tOK\tWARN\tFAIL\tSKIPPED")
 	for _, r := range runs {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%d\n",
-			output.Sanitize(r.ID), truncate(output.Sanitize(r.ProjectName), 28), shortDate(r.CreatedAt), r.OK, r.Warn, r.Fail)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%d\t%d\n",
+			output.Sanitize(r.ID), truncate(output.Sanitize(r.ProjectName), 28), shortDate(r.CreatedAt), r.OK, r.Warn, r.Fail, r.Skipped)
 	}
 	_ = tw.Flush()
 	fmt.Printf("\nView a run:  preflight history <run-id>\n")
@@ -110,7 +110,13 @@ func listHistory(client *dashboard.Client, token string) error {
 // dashboard, so each is sanitized before it reaches the terminal.
 func writeRun(w io.Writer, run *dashboard.RunDetail) {
 	fmt.Fprintf(w, "%s  (%s)\n", output.Sanitize(run.ProjectName), time.Unix(run.CreatedAt, 0).Format("Jan 2, 2006 3:04 PM"))
-	fmt.Fprintf(w, "%d passed, %d warnings, %d failed\n\n", run.OK, run.Warn, run.Fail)
+	fmt.Fprintf(w, "%d passed, %d warnings, %d failed\n", run.OK, run.Warn, run.Fail)
+	// Inconclusive checks are among the warnings; skipped ones are in
+	// none of the three counts.
+	if run.Skipped > 0 || run.Inconclusive > 0 {
+		fmt.Fprintf(w, "Not verified: %d skipped, %d inconclusive\n", run.Skipped, run.Inconclusive)
+	}
+	fmt.Fprintln(w)
 	for _, c := range run.Checks {
 		fmt.Fprintf(w, "  %s  %s\n", runCheckMark(c), output.Sanitize(c.Title))
 		// A skipped or inconclusive check passes or fails on paper, but

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -18,7 +19,7 @@ import (
 func TestWriteRunMarksSkippedAndInconclusive(t *testing.T) {
 	run := &dashboard.RunDetail{
 		ProjectName: "demo",
-		OK:          1, Warn: 2, Fail: 1,
+		OK:          1, Warn: 2, Fail: 1, Skipped: 1, Inconclusive: 1,
 		Checks: []dashboard.PublishCheck{
 			{Title: "Robots", Passed: true, Severity: "info", Message: "served"},
 			{Title: "Vulnerability scan", Passed: false, Skipped: true, Severity: "info", Message: "No dependency manifests found"},
@@ -31,6 +32,7 @@ func TestWriteRunMarksSkippedAndInconclusive(t *testing.T) {
 	writeRun(&buf, run)
 	out := buf.String()
 	for _, want := range []string{
+		"1 passed, 2 warnings, 1 failed\nNot verified: 1 skipped, 1 inconclusive\n",
 		"  ✓  Robots\n",
 		"  -  Vulnerability scan\n       No dependency manifests found\n",
 		"  ?  Legal pages\n       Host unreachable\n",
@@ -159,5 +161,31 @@ func TestCurrentProjectKeyOutsideAProject(t *testing.T) {
 	dir := scanProject(t, "projectName: demo\n")
 	if key := currentProjectKey(dir); key != "name:demo" {
 		t.Errorf("key = %q, want name:demo", key)
+	}
+}
+
+// The dashboard returns the schema 2 counts; history dropped them because
+// its types had no fields for them.
+func TestHistoryKeepsSkippedAndInconclusiveCounts(t *testing.T) {
+	var run dashboard.RunDetail
+	if err := json.Unmarshal([]byte(`{"id":"r","ok":3,"warn":2,"fail":0,"skipped":4,"inconclusive":1,"checks":[]}`), &run); err != nil {
+		t.Fatal(err)
+	}
+	if run.Skipped != 4 || run.Inconclusive != 1 {
+		t.Fatalf("run = %+v", run)
+	}
+	var buf bytes.Buffer
+	if err := writeHistoryJSON(&buf, &run); err != nil {
+		t.Fatal(err)
+	}
+	if out := buf.String(); !strings.Contains(out, `"skipped": 4`) || !strings.Contains(out, `"inconclusive": 1`) {
+		t.Errorf("counts missing from history JSON:\n%s", out)
+	}
+
+	// A run with nothing unverified prints no second line.
+	buf.Reset()
+	writeRun(&buf, &dashboard.RunDetail{ProjectName: "demo", OK: 2})
+	if strings.Contains(buf.String(), "Not verified") {
+		t.Errorf("unexpected not-verified line:\n%s", buf.String())
 	}
 }

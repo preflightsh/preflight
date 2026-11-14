@@ -327,20 +327,27 @@ type RunSummary struct {
 	OK          int    `json:"ok"`
 	Warn        int    `json:"warn"`
 	Fail        int    `json:"fail"`
-	CreatedAt   int64  `json:"created_at"`
-	URL         string `json:"url"`
+	// Skipped and Inconclusive are the schema 2 counts. The dashboard
+	// returned them all along, but without fields here they were dropped,
+	// so history could not say that a run had verified less than it ran.
+	Skipped      int    `json:"skipped,omitempty"`
+	Inconclusive int    `json:"inconclusive,omitempty"`
+	CreatedAt    int64  `json:"created_at"`
+	URL          string `json:"url"`
 }
 
 // RunDetail is a single run with its check results from GET /api/runs/{id}.
 type RunDetail struct {
-	ID          string         `json:"id"`
-	ProjectName string         `json:"project_name"`
-	Stack       string         `json:"stack"`
-	OK          int            `json:"ok"`
-	Warn        int            `json:"warn"`
-	Fail        int            `json:"fail"`
-	CreatedAt   int64          `json:"created_at"`
-	Checks      []PublishCheck `json:"checks"`
+	ID           string         `json:"id"`
+	ProjectName  string         `json:"project_name"`
+	Stack        string         `json:"stack"`
+	OK           int            `json:"ok"`
+	Warn         int            `json:"warn"`
+	Fail         int            `json:"fail"`
+	Skipped      int            `json:"skipped,omitempty"`
+	Inconclusive int            `json:"inconclusive,omitempty"`
+	CreatedAt    int64          `json:"created_at"`
+	Checks       []PublishCheck `json:"checks"`
 }
 
 // ListRuns fetches recent runs for the authenticated account. projectKey ""
