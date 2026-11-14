@@ -37,6 +37,32 @@ func TestCommandDoesNotRunRepoFsmonitor(t *testing.T) {
 	}
 }
 
+// A repo shipped with a .git/config that claims to be a partial clone makes
+// git lazy-fetch a missing blob, and the fetch runs core.sshCommand. The
+// same must hold when the caller's environment allows the ssh protocol.
+func TestCommandDoesNotLazyFetch(t *testing.T) {
+	for _, allow := range []string{"", "ssh:https:file"} {
+		t.Run("GIT_ALLOW_PROTOCOL="+allow, func(t *testing.T) {
+			dir, marker := gittest.LazyFetchRepo(t)
+			if allow != "" {
+				t.Setenv("GIT_ALLOW_PROTOCOL", allow)
+			}
+			_, _ = output(t, dir, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z")
+			_, _ = output(t, dir, "ls-files", "--others", "--ignored", "--exclude-standard", "-z")
+			_, _ = output(t, dir, "ls-files", "-z")
+			_, _ = output(t, dir, "status", "--porcelain")
+			_, _ = output(t, dir, "rev-parse", "--is-inside-work-tree")
+			if _, err := os.Stat(marker); err == nil {
+				t.Fatal("git ran the repo's core.sshCommand through a lazy fetch")
+			}
+			// Tracked files are still listed: the repo stays scannable.
+			if out, err := output(t, dir, "ls-files"); err != nil || !strings.Contains(out, "package.json") {
+				t.Fatalf("ls-files = %q, %v", out, err)
+			}
+		})
+	}
+}
+
 // Ordinary layouts Preflight scans must still be recognized: a plain repo,
 // a linked worktree, and a submodule (the last two use a .git file), also
 // when Preflight runs from a git hook with GIT_DIR pointing elsewhere.
