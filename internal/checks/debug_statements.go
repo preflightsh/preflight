@@ -1,6 +1,7 @@
 package checks
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,7 +22,7 @@ func (c DebugStatementsCheck) Title() string {
 }
 
 func (c DebugStatementsCheck) Run(ctx Context) (CheckResult, error) {
-	findings := scanForDebugStatements(ctx.RootDir, ctx.Config.Ignore)
+	findings := scanForDebugStatementsCtx(ctx.reqContext(), ctx.RootDir, ctx.Config.Ignore)
 
 	if len(findings) == 0 {
 		return CheckResult{
@@ -72,285 +73,330 @@ var reDebuggerStatement = regexp.MustCompile(`(?:^|[;{}])\s*debugger\s*(?:;|\}|$
 // the same line: documentation that names a debug call.
 var reInlineCodeSpan = regexp.MustCompile(`(?i)<(code|pre)\b[^>]*>.*?</(?:code|pre)>`)
 
-func scanForDebugStatements(rootDir string, ignore []string) []string {
-	var findings []string
+// phpExts are the files PHP debug helpers are looked for in. Drupal keeps
+// PHP in .module, .inc, .theme, .install, and .profile files.
+var phpExts = []string{".php", ".blade.php", ".module", ".inc", ".theme", ".install", ".profile"}
 
-	// Debug patterns by language
-	patterns := []debugPattern{
-		// JavaScript/TypeScript (including templates with inline scripts)
-		{
-			pattern:     regexp.MustCompile(`\bconsole\.(log|debug|info|trace|dir|table)\s*\(`),
-			description: "console.log",
-			extensions:  []string{".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".vue", ".svelte", ".html", ".htm", ".twig", ".blade.php", ".erb", ".ejs", ".hbs", ".njk", ".astro"},
-		},
-		{
-			// The statement, not the word: "og-debugger" in a string or
-			// <code>debugger</code> in docs is not a breakpoint.
-			pattern:     reDebuggerStatement,
-			description: "debugger",
-			extensions:  []string{".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".vue", ".svelte", ".html", ".htm", ".twig", ".blade.php", ".erb", ".ejs", ".hbs", ".njk", ".astro"},
-		},
+// debugPatterns are the debug statements looked for, by language.
+var debugPatterns = []debugPattern{
+	// JavaScript/TypeScript (including templates with inline scripts)
+	{
+		pattern:     regexp.MustCompile(`\bconsole\.(log|debug|info|trace|dir|table)\s*\(`),
+		description: "console.log",
+		extensions:  []string{".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".vue", ".svelte", ".html", ".htm", ".twig", ".blade.php", ".erb", ".ejs", ".hbs", ".njk", ".astro"},
+	},
+	{
+		// The statement, not the word: "og-debugger" in a string or
+		// <code>debugger</code> in docs is not a breakpoint.
+		pattern:     reDebuggerStatement,
+		description: "debugger",
+		extensions:  []string{".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".vue", ".svelte", ".html", ".htm", ".twig", ".blade.php", ".erb", ".ejs", ".hbs", ".njk", ".astro"},
+	},
 
-		// Ruby
-		{
-			pattern:     regexp.MustCompile(`\bbinding\.pry\b`),
-			description: "binding.pry",
-			extensions:  []string{".rb", ".erb", ".rake"},
-		},
-		{
-			pattern:     regexp.MustCompile(`\bbyebug\b`),
-			description: "byebug",
-			extensions:  []string{".rb", ".erb", ".rake"},
-		},
-		{
-			pattern:     regexp.MustCompile(`\bbinding\.irb\b`),
-			description: "binding.irb",
-			extensions:  []string{".rb", ".erb", ".rake"},
-		},
-		{
-			pattern:     reDebuggerStatement,
-			description: "debugger",
-			extensions:  []string{".rb", ".erb", ".rake"},
-		},
-		{
-			pattern:     regexp.MustCompile(`\bpp\s+`),
-			description: "pp (pretty print)",
-			extensions:  []string{".rb", ".erb", ".rake"},
-		},
+	// Ruby
+	{
+		pattern:     regexp.MustCompile(`\bbinding\.pry\b`),
+		description: "binding.pry",
+		extensions:  []string{".rb", ".erb", ".rake"},
+	},
+	{
+		pattern:     regexp.MustCompile(`\bbyebug\b`),
+		description: "byebug",
+		extensions:  []string{".rb", ".erb", ".rake"},
+	},
+	{
+		pattern:     regexp.MustCompile(`\bbinding\.irb\b`),
+		description: "binding.irb",
+		extensions:  []string{".rb", ".erb", ".rake"},
+	},
+	{
+		pattern:     reDebuggerStatement,
+		description: "debugger",
+		extensions:  []string{".rb", ".erb", ".rake"},
+	},
+	{
+		// Kernel#pp called on a value. `pp = Struct.new`, `pp .new`, and
+		// `pp: true` use the name for something else.
+		pattern:     regexp.MustCompile(`(?:^|[^\w.@$:])pp[ \t]+[^\s=.,|&?:)\]}+\-*/%<>]`),
+		description: "pp (pretty print)",
+		extensions:  []string{".rb", ".erb", ".rake"},
+	},
 
-		// PHP
-		{
-			// The global helpers only: Yaml::dump($config), $dumper->dump()
-			// and $collection->dd() are ordinary method calls.
-			pattern:     regexp.MustCompile(`(?:^|[^\w:>.$])dd\s*\(`),
-			description: "dd()",
-			extensions:  []string{".php", ".blade.php"},
-		},
-		{
-			pattern:     regexp.MustCompile(`(?:^|[^\w:>.$])dump\s*\(`),
-			description: "dump()",
-			extensions:  []string{".php", ".blade.php"},
-		},
-		{
-			pattern:     regexp.MustCompile(`\bvar_dump\s*\(`),
-			description: "var_dump()",
-			extensions:  []string{".php", ".blade.php"},
-		},
-		{
-			// print_r($x, true) returns the string instead of printing it.
-			pattern:     regexp.MustCompile(`\bprint_r\s*\(`),
-			exclude:     regexp.MustCompile(`\bprint_r\s*\([^;]*,\s*true\s*\)`),
-			description: "print_r()",
-			extensions:  []string{".php", ".blade.php"},
-		},
-		{
-			pattern:     regexp.MustCompile(`\bray\s*\(`),
-			description: "ray() - Spatie Ray debugger",
-			extensions:  []string{".php", ".blade.php"},
-		},
+	// PHP
+	{
+		// The global helpers only: Yaml::dump($config), $dumper->dump()
+		// and $collection->dd() are ordinary method calls.
+		pattern:     regexp.MustCompile(`(?:^|[^\w:>.$])dd\s*\(`),
+		description: "dd()",
+		extensions:  phpExts,
+	},
+	{
+		pattern:     regexp.MustCompile(`(?:^|[^\w:>.$])dump\s*\(`),
+		description: "dump()",
+		extensions:  phpExts,
+	},
+	{
+		pattern:     regexp.MustCompile(`\bvar_dump\s*\(`),
+		description: "var_dump()",
+		extensions:  phpExts,
+	},
+	{
+		// print_r($x, true) returns the string instead of printing it.
+		pattern:     regexp.MustCompile(`\bprint_r\s*\(`),
+		exclude:     regexp.MustCompile(`(?i)\bprint_r\s*\([^;]*,\s*true\s*\)`),
+		description: "print_r()",
+		extensions:  phpExts,
+	},
+	{
+		// Drupal's Devel module.
+		pattern:     regexp.MustCompile(`(?:^|[^\w:>.$])d(?:pm|sm|vm|pr)\s*\(`),
+		description: "dpm()",
+		extensions:  phpExts,
+	},
+	{
+		pattern:     regexp.MustCompile(`(?:^|[^\w:>.$])k(?:int|sm)\s*\(`),
+		description: "kint()",
+		extensions:  phpExts,
+	},
+	{
+		pattern:     regexp.MustCompile(`\bray\s*\(`),
+		description: "ray() - Spatie Ray debugger",
+		extensions:  phpExts,
+	},
 
-		// Python
-		{
-			pattern:     regexp.MustCompile(`\bbreakpoint\s*\(\s*\)`),
-			description: "breakpoint()",
-			extensions:  []string{".py"},
-		},
-		{
-			pattern:     regexp.MustCompile(`\bpdb\.set_trace\s*\(`),
-			description: "pdb.set_trace()",
-			extensions:  []string{".py"},
-		},
-		{
-			pattern:     regexp.MustCompile(`\bipdb\.set_trace\s*\(`),
-			description: "ipdb.set_trace()",
-			extensions:  []string{".py"},
-		},
-		{
-			pattern:     regexp.MustCompile(`\bimport\s+pdb\b`),
-			description: "import pdb",
-			extensions:  []string{".py"},
-		},
-		{
-			pattern:     regexp.MustCompile(`\bimport\s+ipdb\b`),
-			description: "import ipdb",
-			extensions:  []string{".py"},
-		},
+	// Python
+	{
+		pattern:     regexp.MustCompile(`\bbreakpoint\s*\(\s*\)`),
+		description: "breakpoint()",
+		extensions:  []string{".py"},
+	},
+	{
+		pattern:     regexp.MustCompile(`\bpdb\.set_trace\s*\(`),
+		description: "pdb.set_trace()",
+		extensions:  []string{".py"},
+	},
+	{
+		pattern:     regexp.MustCompile(`\bipdb\.set_trace\s*\(`),
+		description: "ipdb.set_trace()",
+		extensions:  []string{".py"},
+	},
+	{
+		pattern:     regexp.MustCompile(`\bimport\s+pdb\b`),
+		description: "import pdb",
+		extensions:  []string{".py"},
+	},
+	{
+		pattern:     regexp.MustCompile(`\bimport\s+ipdb\b`),
+		description: "import ipdb",
+		extensions:  []string{".py"},
+	},
 
-		// Go
-		{
-			pattern:     regexp.MustCompile(`\bfmt\.Print(ln|f)?\s*\([^)]*"DEBUG`),
-			description: "fmt.Print with DEBUG",
-			extensions:  []string{".go"},
-		},
-		{
-			pattern:     regexp.MustCompile(`\bspew\.Dump\s*\(`),
-			description: "spew.Dump()",
-			extensions:  []string{".go"},
-		},
+	// Go
+	{
+		pattern:     regexp.MustCompile(`\bfmt\.Print(ln|f)?\s*\([^)]*"DEBUG`),
+		description: "fmt.Print with DEBUG",
+		extensions:  []string{".go"},
+	},
+	{
+		pattern:     regexp.MustCompile(`\bspew\.Dump\s*\(`),
+		description: "spew.Dump()",
+		extensions:  []string{".go"},
+	},
 
-		// Rust
-		{
-			pattern:     regexp.MustCompile(`\bdbg!\s*\(`),
-			description: "dbg!()",
-			extensions:  []string{".rs"},
-		},
-		{
-			pattern:     regexp.MustCompile(`\btodo!\s*\(`),
-			description: "todo!()",
-			extensions:  []string{".rs"},
-		},
-		{
-			pattern:     regexp.MustCompile(`\bunimplemented!\s*\(`),
-			description: "unimplemented!()",
-			extensions:  []string{".rs"},
-		},
+	// Rust
+	{
+		pattern:     regexp.MustCompile(`\bdbg!\s*\(`),
+		description: "dbg!()",
+		extensions:  []string{".rs"},
+	},
+	{
+		pattern:     regexp.MustCompile(`\btodo!\s*\(`),
+		description: "todo!()",
+		extensions:  []string{".rs"},
+	},
+	{
+		pattern:     regexp.MustCompile(`\bunimplemented!\s*\(`),
+		description: "unimplemented!()",
+		extensions:  []string{".rs"},
+	},
 
-		// Java/Kotlin
-		{
-			pattern:     regexp.MustCompile(`\bSystem\.out\.print(ln)?\s*\(`),
-			description: "System.out.println()",
-			extensions:  []string{".java", ".kt"},
-		},
+	// Java/Kotlin
+	{
+		pattern:     regexp.MustCompile(`\bSystem\.out\.print(ln)?\s*\(`),
+		description: "System.out.println()",
+		extensions:  []string{".java", ".kt"},
+	},
 
-		// Elixir
-		{
-			pattern:     regexp.MustCompile(`\bIO\.inspect\s*\(`),
-			description: "IO.inspect()",
-			extensions:  []string{".ex", ".exs"},
-		},
-		{
-			pattern:     regexp.MustCompile(`\bIEx\.pry\b`),
-			description: "IEx.pry",
-			extensions:  []string{".ex", ".exs"},
-		},
+	// Elixir
+	{
+		// With or without parentheses: `x |> IO.inspect` is the usual form.
+		pattern:     regexp.MustCompile(`\bIO\.inspect\b`),
+		description: "IO.inspect()",
+		extensions:  []string{".ex", ".exs"},
+	},
+	{
+		pattern:     regexp.MustCompile(`(?:^|[^\w.!])dbg\s*\(|\|>\s*dbg\b`),
+		description: "dbg()",
+		extensions:  []string{".ex", ".exs"},
+	},
+	{
+		pattern:     regexp.MustCompile(`\bIEx\.pry\b`),
+		description: "IEx.pry",
+		extensions:  []string{".ex", ".exs"},
+	},
 
-		// Twig (Craft CMS, Symfony)
-		{
-			pattern:     regexp.MustCompile(`\{\{\s*dump\s*\(`),
-			description: "{{ dump() }}",
-			extensions:  []string{".twig", ".html.twig"},
-		},
-		{
-			pattern:     regexp.MustCompile(`\{%\s*dump\s*`),
-			description: "{% dump %}",
-			extensions:  []string{".twig", ".html.twig"},
-		},
-	}
+	// Twig (Craft CMS, Symfony)
+	{
+		pattern:     regexp.MustCompile(`\{\{\s*(?:dump|kint)\s*\(`),
+		description: "{{ dump() }}",
+		extensions:  []string{".twig"},
+	},
+	{
+		pattern:     regexp.MustCompile(`\{%\s*dump\s*`),
+		description: "{% dump %}",
+		extensions:  []string{".twig"},
+	},
+}
 
-	// Directories to skip
-	skipDirs := map[string]bool{
-		"node_modules": true,
-		"vendor":       true,
-		".git":         true,
-		"dist":         true,
-		"build":        true,
-		".next":        true,
-		".nuxt":        true,
-		"coverage":     true,
-		"__pycache__":  true,
-		".cache":       true,
-		"tmp":          true,
-		"log":          true,
-		"logs":         true,
-		"storage":      true,
-		"cpresources":  true,
-		".turbo":       true,
-		".vercel":      true,
-		".netlify":     true,
-		"public":       true,
-		"static":       true,
-		"_site":        true,
-		"out":          true,
-		"assets":       true,
-		// Agent tooling: vendored skills, and full repo checkouts under
-		// .claude/worktrees.
-		".claude": true,
-		".agents": true,
-	}
-
-	// Every pattern is scoped to extensions, so a file whose extension no
-	// pattern covers is never read.
-	scannedExts := map[string]bool{}
-	for _, p := range patterns {
+// debugPatternsByExt maps a file extension to the patterns that apply to
+// it. Every pattern is scoped to extensions, so a file whose extension is
+// not a key here is never read.
+var debugPatternsByExt = func() map[string][]debugPattern {
+	byExt := map[string][]debugPattern{}
+	for _, p := range debugPatterns {
 		for _, e := range p.extensions {
-			scannedExts[e] = true
+			byExt[e] = append(byExt[e], p)
 		}
 	}
+	return byExt
+}()
 
-	// Bundles, tests and configs, matched anywhere in the file name.
-	skipInfixes := []string{
-		".min.js",
-		".bundle.js",
-		".config.js",
-		".config.ts",
-		".test.",
-		".spec.",
-		"_test.go",
-		"_test.rb",
-	}
-	// Build tooling and vendored libraries, matched as the start of the
-	// file name only: a bare substring hid members.ts ("ember"),
-	// moments.ts ("moment") and piechart.tsx ("chart.") from the scan.
-	skipPrefixes := []string{
-		"webpack.config",
-		"vite.config",
-		// Build scripts log to the terminal by design and never ship.
-		"gulpfile",
-		"gruntfile",
-		"jest.config",
-		"vitest.config",
-		"tailwind.config",
-		"postcss.config",
-		"eslint",
-		"eslintrc",
-		"prettier",
-		"prettierrc",
-		"test_",
-		"alpine",
-		"jquery",
-		"lodash",
-		"underscore",
-		"react.",
-		"react-dom",
-		"vue.",
-		"angular",
-		"ember",
-		"backbone",
-		"moment",
-		"axios",
-		"d3.",
-		"chart.",
-		"three.",
-		"gsap",
-		"anime.",
-		"htmx",
-		"hyperscript",
-		"turbo",
-		"stimulus",
-	}
-	skipFile := func(name string) bool {
-		for _, s := range skipInfixes {
-			if strings.Contains(name, s) {
-				return true
-			}
-		}
-		name = strings.TrimLeft(name, ".") // .eslintrc.js, .prettierrc.cjs
-		for _, p := range skipPrefixes {
-			if !strings.HasPrefix(name, p) {
-				continue
-			}
-			// "jquery.js", "jquery-3.7.js" and "htmx_ext.js" are the library;
-			// "moments.ts" and "turbocharge.ts" are the project's own code.
-			rest := name[len(p):]
-			if strings.HasSuffix(p, ".") || strings.HasSuffix(p, "_") || rest == "" || strings.ContainsRune(".-_", rune(rest[0])) {
-				return true
-			}
-		}
-		return false
-	}
+// Bundles, tests, and configs, matched anywhere in the file name.
+var debugSkipInfixes = []string{
+	".min.js",
+	".bundle.js",
+	".config.js",
+	".config.ts",
+	".test.",
+	".spec.",
+	".stories.",
+	"_test.go",
+	"_test.rb",
+	"_spec.rb",
+	"_test.py",
+	"_test.exs",
+}
 
-	// Walk the project
+// Build tooling and vendored libraries, matched as the start of the file
+// name only: a bare substring hid members.ts ("ember"), moments.ts
+// ("moment"), and piechart.tsx ("chart.") from the scan.
+var debugSkipPrefixes = []string{
+	"webpack.config",
+	"vite.config",
+	// Build scripts log to the terminal by design and never ship.
+	"gulpfile",
+	"gruntfile",
+	"jest.config",
+	"vitest.config",
+	"tailwind.config",
+	"postcss.config",
+	"eslint",
+	"eslintrc",
+	"prettier",
+	"prettierrc",
+	"test_",
+	"conftest.py",
+	"alpine",
+	"jquery",
+	"lodash",
+	"underscore",
+	"react.",
+	"react-dom",
+	"vue.",
+	"angular",
+	"ember",
+	"backbone",
+	"moment",
+	"axios",
+	"d3.",
+	"chart.",
+	"three.",
+	"gsap",
+	"anime.",
+	"htmx",
+	"hyperscript",
+	"turbo",
+	"stimulus",
+}
+
+// debugSkipFile reports whether a lowercased file name is tooling, a test,
+// or a vendored library.
+func debugSkipFile(name string) bool {
+	for _, s := range debugSkipInfixes {
+		if strings.Contains(name, s) {
+			return true
+		}
+	}
+	name = strings.TrimLeft(name, ".") // .eslintrc.js, .prettierrc.cjs
+	for _, p := range debugSkipPrefixes {
+		if !strings.HasPrefix(name, p) {
+			continue
+		}
+		// "jquery.js", "jquery-3.7.js", and "htmx_ext.js" are the library;
+		// "moments.ts" and "turbocharge.ts" are the project's own code.
+		rest := name[len(p):]
+		if strings.HasSuffix(p, ".") || strings.HasSuffix(p, "_") || rest == "" || strings.ContainsRune(".-_", rune(rest[0])) {
+			return true
+		}
+	}
+	return false
+}
+
+// debugFileExt returns the extension debug patterns are keyed by.
+func debugFileExt(path string) string {
+	if strings.HasSuffix(path, ".blade.php") {
+		return ".blade.php"
+	}
+	return strings.ToLower(filepath.Ext(path))
+}
+
+// hashCommentExts are the languages whose line comments start with "#".
+var hashCommentExts = map[string]bool{".rb": true, ".rake": true, ".py": true, ".ex": true, ".exs": true}
+
+// heredocExts are the languages with heredocs (see isInCodeExample).
+var heredocExts = map[string]bool{
+	".rb": true, ".rake": true, ".erb": true,
+	".php": true, ".blade.php": true, ".module": true, ".inc": true, ".theme": true, ".install": true, ".profile": true,
+}
+
+// bundleExts are the files a bundler writes.
+var bundleExts = map[string]bool{".js": true, ".mjs": true, ".cjs": true}
+
+// hashCommentStart returns where a trailing "#" comment starts in a line
+// whose string contents are already masked, or -1.
+func hashCommentStart(masked string) int {
+	for i := 0; i < len(masked); i++ {
+		if masked[i] == '#' && (i == 0 || masked[i-1] == ' ' || masked[i-1] == '\t') {
+			return i
+		}
+	}
+	return -1
+}
+
+func scanForDebugStatements(rootDir string, ignore []string) []string {
+	return scanForDebugStatementsCtx(context.Background(), rootDir, ignore)
+}
+
+// scanForDebugStatementsCtx walks the project's shipped source for debug
+// statements. It stops, returning what it has, once ctx is cancelled.
+func scanForDebugStatementsCtx(ctx context.Context, rootDir string, ignore []string) []string {
+	var findings []string
+	policy := walkPolicy{root: rootDir, tracked: loadTrackedFiles(ctx, rootDir), shipped: true}
+
 	_ = filepath.WalkDir(rootDir, func(path string, d os.DirEntry, err error) error {
+		if ctx.Err() != nil {
+			return filepath.SkipAll
+		}
 		if err != nil {
 			if d != nil && d.IsDir() {
 				return filepath.SkipDir
@@ -358,47 +404,34 @@ func scanForDebugStatements(rootDir string, ignore []string) []string {
 			return nil
 		}
 
-		// Skip directories
 		if d.IsDir() {
-			if path != rootDir && (skipDirs[d.Name()] || toolchainDirs[d.Name()]) {
+			if path != rootDir && policy.skipDir(path) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 
-		// Skip symlinks, devices, pipes — same path-traversal / DoS
-		// concern as the secrets walker (e.g. a symlink to /dev/zero
-		// would let os.ReadFile bypass the 500KB size cap below).
+		// Skip symlinks, devices, and pipes: the same path-traversal and
+		// DoS concern as the secrets walker (a symlink to /dev/zero would
+		// get past the size cap below).
 		if !d.Type().IsRegular() {
+			return nil
+		}
+
+		ext := debugFileExt(path)
+		patterns := debugPatternsByExt[ext]
+		if len(patterns) == 0 || debugSkipFile(strings.ToLower(d.Name())) || policy.skipFile(path) {
 			return nil
 		}
 
 		// Honor user-configured ignore globs (the top-level `ignore` list in
 		// preflight.yml), so build tooling, vendored code, or files that only
-		// mention debug calls in strings/docs can be excluded.
-		if rel, relErr := filepath.Rel(rootDir, path); relErr == nil {
-			rel = filepath.ToSlash(rel)
-			for _, g := range ignore {
-				if ok, _ := doublestar.Match(filepath.ToSlash(g), rel); ok {
-					return nil
-				}
+		// mention debug calls in strings or docs can be excluded.
+		rel := policy.rel(path)
+		for _, g := range ignore {
+			if ok, _ := doublestar.Match(filepath.ToSlash(g), rel); ok {
+				return nil
 			}
-		}
-
-		// Check if file should be skipped
-		if skipFile(strings.ToLower(d.Name())) {
-			return nil
-		}
-
-		// Get file extension
-		ext := strings.ToLower(filepath.Ext(path))
-
-		// Handle .blade.php
-		if strings.HasSuffix(path, ".blade.php") {
-			ext = ".blade.php"
-		}
-		if !scannedExts[ext] {
-			return nil
 		}
 
 		// Skip files larger than 500KB
@@ -407,91 +440,103 @@ func scanForDebugStatements(rootDir string, ignore []string) []string {
 			return nil
 		}
 
-		// Read file content
 		content, err := readSourceFile(path)
 		if err != nil {
 			return nil
 		}
-
-		// Check each line for patterns. Multi-line block comments are blanked
-		// first (newlines kept, so line numbers hold): a console.log inside a
-		// /* ... */ or <!-- ... --> spanning several lines is commented out,
-		// and no per-line test can tell.
-		lines := strings.Split(blankBlockComments(string(content)), "\n")
-		for lineNum, line := range lines {
-			// Skip commented lines (basic check). This only catches whole-line
-			// comments; hash-style ones in particular have to be handled here,
-			// because stripCodeComments deliberately leaves "#" alone (it is a
-			// CSS selector and a YAML key as often as it is a comment).
-			trimmedLine := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmedLine, "//") ||
-				strings.HasPrefix(trimmedLine, "#") ||
-				strings.HasPrefix(trimmedLine, "*") ||
-				strings.HasPrefix(trimmedLine, "/*") ||
-				strings.HasPrefix(trimmedLine, "{#") ||
-				strings.HasPrefix(trimmedLine, "<!--") {
-				continue
-			}
-
-			// A debug statement named in a trailing comment is not a debug
-			// statement: `doWork(); // console.log(x) if this breaks` is real
-			// code plus a note. The prefix check above can't see those, so
-			// strip inline comments before matching. stripCodeComments leaves
-			// URLs intact, so a logged https:// link keeps its line.
-			line = stripCodeComments(line)
-			// <code>console.log()</code> on one line is documentation.
-			line = reInlineCodeSpan.ReplaceAllString(line, "")
-
-			for _, p := range patterns {
-				// Check if this pattern applies to this file type
-				if len(p.extensions) > 0 {
-					matches := false
-					for _, e := range p.extensions {
-						if ext == e {
-							matches = true
-							break
-						}
-					}
-					if !matches {
-						continue
-					}
-				}
-
-				codeLine := maskCodeStrings(line)
-				matchLine := codeLine
-				if strings.HasPrefix(p.description, "fmt.Print") && strings.Contains(codeLine, "fmt.Print") {
-					matchLine = line
-				}
-				if loc := p.pattern.FindStringIndex(matchLine); loc != nil && (p.exclude == nil || !p.exclude.MatchString(line)) {
-					if !isDevGuarded(lines, lineNum, loc[0]) && !isInCodeExample(lines, lineNum) {
-						relPath := relPath(rootDir, path)
-						findings = append(findings, fmt.Sprintf("%s:%d - %s", relPath, lineNum+1, p.description))
-					}
-				}
-			}
+		if bundleExts[ext] && looksBundled(content) {
+			return nil
 		}
 
+		findings = append(findings, debugFindingsInFile(rel, ext, string(content), patterns)...)
 		return nil
 	})
 
 	return findings
 }
 
-// isDevGuarded reports whether the debug statement at lines[lineNum][position:]
-// only runs in development. It replays the file up to that point and tracks
-// the blocks that are open: braces, template blocks ({% if %}, <% if %>,
-// @if, {{ if }}, {#if}), and keyword blocks closed by indentation (Python,
-// Ruby, a braceless if). A block guards when the condition that opened it
-// selects development (devPolarity); its else branch does not. On the
-// statement's own line an inline if, `cond && stmt`, `cond ? stmt :`, and a
-// trailing `stmt if cond` guard too.
-func isDevGuarded(lines []string, lineNum, position int) bool {
-	var g devGuardScanner
-	for i := 0; i < lineNum; i++ {
-		g.line(lines[i], -1)
+// debugFindingsInFile returns the unguarded debug statements in one file.
+func debugFindingsInFile(rel, ext, content string, patterns []debugPattern) []string {
+	var findings []string
+
+	// Multi-line block comments are blanked first (newlines kept, so line
+	// numbers hold): a console.log inside a /* ... */ or <!-- ... -->
+	// spanning several lines is commented out, and no per-line test can
+	// tell.
+	lines := strings.Split(blankBlockComments(content), "\n")
+
+	// One guard scanner per file, advanced to each statement as it is
+	// found. Replaying the file from the top for every statement made a
+	// file of N statements cost N*N lines.
+	var guard devGuardScanner
+	replayed := 0
+
+	for lineNum, line := range lines {
+		// Skip commented lines (basic check). This only catches whole-line
+		// comments; hash-style ones in particular have to be handled here,
+		// because stripCodeComments deliberately leaves "#" alone (it is a
+		// CSS selector and a YAML key as often as it is a comment).
+		trimmedLine := strings.TrimSpace(line)
+		if trimmedLine == "" ||
+			strings.HasPrefix(trimmedLine, "//") ||
+			strings.HasPrefix(trimmedLine, "#") ||
+			strings.HasPrefix(trimmedLine, "*") ||
+			strings.HasPrefix(trimmedLine, "/*") ||
+			strings.HasPrefix(trimmedLine, "{#") ||
+			strings.HasPrefix(trimmedLine, "<!--") {
+			continue
+		}
+
+		// A debug statement named in a trailing comment is not a debug
+		// statement: `doWork(); // console.log(x) if this breaks` is real
+		// code plus a note. The prefix check above can't see those, so
+		// strip inline comments before matching. stripCodeComments leaves
+		// URLs intact, so a logged https:// link keeps its line.
+		line = stripCodeComments(line)
+		// <code>console.log()</code> on one line is documentation.
+		line = reInlineCodeSpan.ReplaceAllString(line, "")
+		codeLine := maskCodeStrings(line)
+		// A trailing "#" comment, in the languages that have them.
+		if hashCommentExts[ext] {
+			if i := hashCommentStart(codeLine); i >= 0 {
+				line, codeLine = line[:i], codeLine[:i]
+			}
+		}
+
+		for _, p := range patterns {
+			matchLine := codeLine
+			if strings.HasPrefix(p.description, "fmt.Print") && strings.Contains(codeLine, "fmt.Print") {
+				matchLine = line
+			}
+			loc := p.pattern.FindStringIndex(matchLine)
+			if loc == nil || (p.exclude != nil && p.exclude.MatchString(line)) {
+				continue
+			}
+			for ; replayed < lineNum; replayed++ {
+				guard.line(lines[replayed], -1)
+			}
+			// The statement's own line is replayed on a copy: the scanner
+			// stops at the statement there, and the whole line still has to
+			// be replayed for whatever follows.
+			statement := guard.clone()
+			if statement.line(lines[lineNum], loc[0]) || isInCodeExample(lines, lineNum, heredocExts[ext]) {
+				continue
+			}
+			findings = append(findings, fmt.Sprintf("%s:%d - %s", rel, lineNum+1, p.description))
+		}
 	}
-	return g.line(lines[lineNum], position)
+
+	return findings
 }
+
+// A devGuardScanner answers whether a debug statement only runs in
+// development. It is fed the file's lines in order and tracks the blocks
+// that are open: braces, template blocks ({% if %}, <% if %>, @if,
+// {{ if }}, {#if}), and keyword blocks closed by indentation (Python, Ruby,
+// a braceless if). A block guards when the condition that opened it selects
+// development (devPolarity); its else branch does not. On the statement's
+// own line an inline if, `cond && stmt`, `cond ? stmt :`, and a trailing
+// `stmt if cond` guard too.
 
 type guardFrame struct {
 	kind string // "{" for a brace, "<family>:<block>" for a template block
@@ -511,6 +556,14 @@ type devGuardScanner struct {
 	// #[cfg(debug_assertions)] attribute, which is sticky: it holds until
 	// the item's brace or semicolon.
 	pending, sticky bool
+}
+
+// clone returns a copy that can be advanced without touching g.
+func (g *devGuardScanner) clone() *devGuardScanner {
+	c := *g
+	c.frames = append([]guardFrame(nil), g.frames...)
+	c.indents = append([]indentFrame(nil), g.indents...)
+	return &c
 }
 
 var (
@@ -985,84 +1038,72 @@ func negatedAt(s string, i int) bool {
 	return strings.EqualFold(s[w:i], "not")
 }
 
-// heredocStart matches Ruby heredocs: <<~WORD, <<-WORD, <<WORD. Package
-// level because isInCodeExample runs once per debug-statement match.
-var heredocStart = regexp.MustCompile(`<<[~-]?([A-Z_]+)`)
+var (
+	// reHeredocStart matches a heredoc opener: Ruby's <<~WORD, <<-WORD, and
+	// <<WORD, PHP's <<<WORD, each with an optionally quoted marker.
+	reHeredocStart = regexp.MustCompile(`<<[<~-]?['"]?([A-Z_][A-Z0-9_]*)`)
+	// reHTMLCodeOpen and reHTMLCodeClose match the <pre> and <code> elements
+	// themselves. A substring test for "<pre" and "<code" also matched
+	// Array<Preference>, <PreviewCard>, and <CodeBlock>.
+	reHTMLCodeOpen  = regexp.MustCompile(`<(?:pre|code|PRE|CODE)(?:\s[^>]*)?>`)
+	reHTMLCodeClose = regexp.MustCompile(`</(?:pre|code|PRE|CODE)>`)
+)
 
-// isInCodeExample checks if a line is inside a documentation code block or example
-func isInCodeExample(lines []string, lineNum int) bool {
-	// Look for code block markers in surrounding lines
-	start := lineNum - 30
-	if start < 0 {
-		start = 0
-	}
+// isInCodeExample reports whether a line sits inside a documentation code
+// block: a heredoc (in the languages that have them), a Markdown fence, or
+// an HTML <pre> or <code> element opened within the last 30 lines.
+func isInCodeExample(lines []string, lineNum int, heredocs bool) bool {
+	start := max(lineNum-30, 0)
 
-	// Track if we're inside a code block
-	inHeredoc := false
 	heredocMarker := ""
 	inMarkdownCode := false
 	inHTMLCode := false
 
 	for i := start; i <= lineNum; i++ {
 		line := lines[i]
-		lineLower := strings.ToLower(line)
 
-		// Ruby heredocs (<<~CODE, <<-CODE, <<CODE, <<~JAVASCRIPT, etc.)
-		if !inHeredoc {
-			if matches := heredocStart.FindStringSubmatch(line); len(matches) > 1 {
-				inHeredoc = true
-				heredocMarker = matches[1]
-			}
-		} else {
-			// End of heredoc - marker alone on a line (possibly indented for <<~)
-			trimmed := strings.TrimSpace(line)
-			if trimmed == heredocMarker {
-				inHeredoc = false
+		if heredocs {
+			if heredocMarker == "" {
+				if m := reHeredocStart.FindStringSubmatch(line); m != nil {
+					heredocMarker = m[1]
+				}
+			} else if closesHeredoc(strings.TrimSpace(line), heredocMarker) {
 				heredocMarker = ""
 			}
 		}
 
-		// Markdown code blocks
 		if strings.HasPrefix(strings.TrimSpace(line), "```") {
 			inMarkdownCode = !inMarkdownCode
 		}
 
-		// HTML code/pre tags
-		if strings.Contains(lineLower, "<code") || strings.Contains(lineLower, "<pre") {
+		if reHTMLCodeOpen.MatchString(line) {
 			inHTMLCode = true
 		}
-		if strings.Contains(lineLower, "</code>") || strings.Contains(lineLower, "</pre>") {
+		if reHTMLCodeClose.MatchString(line) {
 			inHTMLCode = false
 		}
 	}
 
-	// If we're at lineNum and inside any code block, return true
-	if inHeredoc || inMarkdownCode || inHTMLCode {
+	if heredocMarker != "" || inMarkdownCode || inHTMLCode {
 		return true
 	}
 
-	// Also check if the line itself looks like documentation
-	line := lines[lineNum]
-	lineLower := strings.ToLower(line)
-
-	// Common documentation patterns
-	docPatterns := []string{
-		"// example",
-		"# example",
-		"/* example",
-		"<!-- example",
-		"{# example",
-		"example:",
-		"usage:",
-		"sample:",
-		"demo:",
-	}
-
-	for _, pattern := range docPatterns {
-		if strings.Contains(lineLower, pattern) {
+	// A line that is itself labelled as an example in a comment.
+	lineLower := strings.ToLower(lines[lineNum])
+	for _, marker := range []string{"// example", "# example", "/* example", "<!-- example", "{# example"} {
+		if strings.Contains(lineLower, marker) {
 			return true
 		}
 	}
-
 	return false
+}
+
+// closesHeredoc reports whether a trimmed line ends the heredoc opened with
+// marker: the marker alone (Ruby), or followed by punctuation (PHP's "EOT;").
+func closesHeredoc(trimmed, marker string) bool {
+	if !strings.HasPrefix(trimmed, marker) {
+		return false
+	}
+	rest := trimmed[len(marker):]
+	return rest == "" || !isIdentByte(rest[0])
 }
