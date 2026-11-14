@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -29,17 +30,28 @@ then generating a preflight.yml configuration file.`,
 	RunE: runInit,
 }
 
-var initForce bool
+var (
+	initForce bool
+	// initYes accepts every detected default without asking.
+	initYes bool
+	// initInputEnded is set when a prompt found no more input. Without
+	// --yes that used to count as accepting every default, so
+	// `preflight init < /dev/null` (a CI step, a wrapper script) wrote a
+	// config and edited .gitignore on answers nobody gave.
+	initInputEnded bool
+)
 
 func init() {
 	rootCmd.AddCommand(initCmd)
 	initCmd.Flags().BoolVar(&initForce, "force", false, "Overwrite an existing preflight.yml")
+	initCmd.Flags().BoolVar(&initYes, "yes", false, "Accept every detected default without asking (for scripts and CI)")
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
 	CheckForUpdates()
 
 	reader := bufio.NewReader(os.Stdin)
+	initInputEnded = false
 
 	fmt.Println("🚀 Initializing Preflight...")
 	fmt.Println()
@@ -188,6 +200,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// config that would not load.
 	if err := config.Validate(&cfg); err != nil {
 		return couldNotRun(fmt.Errorf("configuration: %w", err))
+	}
+	if initInputEnded && !initYes {
+		return couldNotRun(errors.New("input ended before every question was answered, so nothing was written; run 'preflight init' in a terminal, or pass --yes to accept the detected defaults"))
 	}
 	// Write config file
 	configPath := "preflight.yml"
@@ -367,15 +382,30 @@ func gitignoreCoversPreflightYml(content []byte) bool {
 
 func promptWithDefault(reader *bufio.Reader, prompt, defaultVal string) string {
 	fmt.Printf("%s [%s]: ", prompt, defaultVal)
-	input, err := reader.ReadString('\n')
-	if err != nil {
-		return defaultVal
-	}
-	input = strings.TrimSpace(input)
-	if input == "" {
+	input, ok := readAnswer(reader)
+	if !ok || input == "" {
 		return defaultVal
 	}
 	return input
+}
+
+// readAnswer reads one answer. ok is false when there is none to read:
+// --yes was given, or input has ended, which it records so init can
+// refuse to write a config nobody answered for. A last line without a
+// newline is still an answer.
+func readAnswer(reader *bufio.Reader) (answer string, ok bool) {
+	if initYes {
+		fmt.Println()
+		return "", false
+	}
+	input, err := reader.ReadString('\n')
+	input = strings.TrimSpace(input)
+	if err != nil && input == "" {
+		initInputEnded = true
+		fmt.Println()
+		return "", false
+	}
+	return input, true
 }
 
 func promptOptional(reader *bufio.Reader, prompt string) string {
@@ -387,11 +417,7 @@ func promptOptional(reader *bufio.Reader, prompt string) string {
 // a read error), which tells a caller that would ask again to stop.
 func promptLine(reader *bufio.Reader, prompt string) (answer string, ok bool) {
 	fmt.Printf("%s: ", prompt)
-	input, err := reader.ReadString('\n')
-	if err != nil {
-		return "", false
-	}
-	return strings.TrimSpace(input), true
+	return readAnswer(reader)
 }
 
 func promptYesNo(reader *bufio.Reader, prompt string, defaultYes bool) bool {
@@ -400,13 +426,9 @@ func promptYesNo(reader *bufio.Reader, prompt string, defaultYes bool) bool {
 		defaultStr = "y/N"
 	}
 	fmt.Printf("%s [%s]: ", prompt, defaultStr)
-	input, err := reader.ReadString('\n')
-	if err != nil {
-		return defaultYes
-	}
-	input = strings.ToLower(strings.TrimSpace(input))
-
-	if input == "" {
+	input, ok := readAnswer(reader)
+	input = strings.ToLower(input)
+	if !ok || input == "" {
 		return defaultYes
 	}
 	return input == "y" || input == "yes"

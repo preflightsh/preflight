@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -48,8 +49,9 @@ func initProject(t *testing.T, files map[string]string, answers string) string {
 	if err := os.Chdir(dir); err != nil {
 		t.Fatal(err)
 	}
-	oldForce := initForce
+	oldForce, oldYes := initForce, initYes
 	t.Cleanup(func() {
+		initYes = oldYes
 		os.Stdin, os.Stdout = oldIn, oldOut
 		_ = in.Close()
 		_ = devNull.Close()
@@ -59,10 +61,11 @@ func initProject(t *testing.T, files map[string]string, answers string) string {
 	return dir
 }
 
-// With no answers at all, init takes every default and writes a config
-// that loads, in the 2-space layout `preflight ignore` keeps.
+// With --yes, init takes every default and writes a config that loads,
+// in the 2-space layout `preflight ignore` keeps.
 func TestInitWritesLoadableConfigWithTwoSpaceIndent(t *testing.T) {
 	dir := initProject(t, map[string]string{"index.html": "<html></html>"}, "")
+	initYes = true
 	if err := runInit(initCmd, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +100,9 @@ func TestInitKeepsExistingConfigByDefault(t *testing.T) {
 		t.Error("init touched .gitignore after declining to overwrite")
 	}
 
-	dir = initProject(t, map[string]string{"preflight.yml": existing}, "y\n")
+	// y to the overwrite question, then an empty line (the default) for
+	// every question after it.
+	dir = initProject(t, map[string]string{"preflight.yml": existing}, "y\n"+strings.Repeat("\n", 60))
 	if err := runInit(initCmd, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -322,5 +327,46 @@ func TestDetectWebRoot(t *testing.T) {
 	}
 	if got := detectWebRoot(t.TempDir(), "eleventy"); got != "." {
 		t.Errorf("eleventy with no src/: %q", got)
+	}
+}
+
+// Input that ends before the questions do used to count as accepting
+// every default, so `preflight init < /dev/null` wrote a config and
+// edited .gitignore on answers nobody gave.
+func TestInitRefusesToWriteWhenInputEnds(t *testing.T) {
+	for name, answers := range map[string]string{"no input": "", "input ends partway": "my-project\n"} {
+		dir := initProject(t, map[string]string{"index.html": "<html></html>"}, answers)
+		err := runInit(initCmd, nil)
+		var exit *ExitError
+		if !errors.As(err, &exit) || exit.Code != ExitUsage || !strings.Contains(err.Error(), "--yes") {
+			t.Errorf("%s: err = %v, want a usage error naming --yes", name, err)
+		}
+		for _, f := range []string{"preflight.yml", ".gitignore"} {
+			if _, statErr := os.Stat(filepath.Join(dir, f)); statErr == nil {
+				t.Errorf("%s: init wrote %s", name, f)
+			}
+		}
+	}
+}
+
+// --yes never overwrites on its own: replacing a config still takes
+// --force.
+func TestInitYesKeepsAnExistingConfigWithoutForce(t *testing.T) {
+	const existing = "projectName: mine\nignore:\n  - sitemap\n"
+	dir := initProject(t, map[string]string{"preflight.yml": existing}, "")
+	initYes = true
+	if err := runInit(initCmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, filepath.Join(dir, "preflight.yml")); got != existing {
+		t.Errorf("--yes replaced an existing config:\n%s", got)
+	}
+
+	initForce = true
+	if err := runInit(initCmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, filepath.Join(dir, "preflight.yml")); got == existing {
+		t.Error("--yes --force did not replace the config")
 	}
 }

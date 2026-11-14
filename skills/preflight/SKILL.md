@@ -23,6 +23,7 @@ Use Preflight to scan a project for launch readiness issues before deploy. Treat
 3. Initialize config only when needed.
    - If `preflight.yml` is missing, explain that `preflight init` writes project config and may ask about production URLs and services.
    - Ask before running interactive initialization or writing a starter config.
+   - `preflight init` needs answers on stdin. Run non-interactively it stops and writes nothing unless `--yes` is passed, which accepts the detected defaults; replacing an existing config also needs `--force`.
    - Treat `preflight.yml` as potentially sensitive because it can contain staging and production URLs.
 
 4. Run a parseable scan.

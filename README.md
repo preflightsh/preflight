@@ -55,6 +55,9 @@ gh attestation verify preflight_<version>_<os>_<arch>.tar.gz --repo preflightsh/
 cd your-project
 preflight init
 # (asks before replacing an existing preflight.yml; --force skips the question)
+# In a script or CI job, where nobody can answer, pass --yes to accept the
+# detected defaults. Without it, init stops and writes nothing when its input
+# ends before the questions do.
 
 # Run all checks
 preflight scan
@@ -315,6 +318,13 @@ still runs when a URL is set) and prints a note. `init` no longer writes it.
 Without a URL, the network checks do not pass: `ssl`, `www_redirect`, and
 `health_endpoint` are left out of the scan, and `security_headers` is reported
 as skipped.
+
+Network checks connect directly and do not use `HTTP_PROXY` or `HTTPS_PROXY`.
+Preflight checks each address it is about to connect to and refuses private
+ones, and a proxy would make that connection on its behalf, out of sight. On a
+network that only allows outbound traffic through a proxy, those checks report
+the site as unreachable (inconclusive); run them from a machine with direct
+access.
 
 ### Strict config loading
 
