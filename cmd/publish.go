@@ -133,7 +133,12 @@ func publishedMessage(cfg *config.PreflightConfig, r checks.CheckResult) string 
 		return scrubMessage(cfg, msg)
 	}
 	switch {
-	case r.ID == "secrets" && !r.Passed:
+	// An inconclusive secrets scan (git could not say what is tracked)
+	// found nothing, and a warning is a key-shaped value in an example
+	// file or a browser key; only an error is a secret in the code.
+	case r.ID == "secrets" && !r.Passed && !r.Inconclusive && r.Severity == checks.SeverityWarn:
+		return "Key-shaped values found that are worth a look (details hidden for privacy)."
+	case r.ID == "secrets" && !r.Passed && !r.Inconclusive:
 		return "Potential secrets detected (details hidden for privacy)."
 	case r.Inconclusive:
 		return "Check could not be verified; see the local report for details."

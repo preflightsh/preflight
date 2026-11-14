@@ -147,3 +147,25 @@ func TestRedactChecksAllowlist(t *testing.T) {
 		t.Errorf("public host should survive: %q", byID["www_redirect"])
 	}
 }
+
+// The secrets message is always withheld, but the placeholder has to match
+// the result: a warning about an example file is not a secret in the code,
+// and a scan git could not scope found nothing at all.
+func TestPublishedSecretsMessageMatchesTheResult(t *testing.T) {
+	cfg := &config.PreflightConfig{}
+	cases := []struct {
+		name string
+		r    checks.CheckResult
+		want string
+	}{
+		{"error", checks.CheckResult{ID: "secrets", Severity: checks.SeverityError, Message: "x"}, "Potential secrets detected"},
+		{"warning", checks.CheckResult{ID: "secrets", Severity: checks.SeverityWarn, Message: "x"}, "worth a look"},
+		{"inconclusive", checks.CheckResult{ID: "secrets", Severity: checks.SeverityWarn, Inconclusive: true, Message: "x"}, "could not be verified"},
+		{"passed", checks.CheckResult{ID: "secrets", Passed: true, Message: "x"}, "Check passed."},
+	}
+	for _, tc := range cases {
+		if got := publishedMessage(cfg, tc.r); !strings.Contains(got, tc.want) {
+			t.Errorf("%s: got %q, want it to contain %q", tc.name, got, tc.want)
+		}
+	}
+}
