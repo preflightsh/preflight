@@ -7,6 +7,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -66,7 +67,7 @@ func (c OGTwitterCheck) Run(ctx Context) (CheckResult, error) {
 	}
 
 	layoutPath := filepath.Join(ctx.RootDir, layoutFile)
-	content, err := readSourceFile(layoutPath)
+	content, err := readProjectFile(ctx.RootDir, layoutFile)
 	if err != nil {
 		return CheckResult{
 			ID:       c.ID(),
@@ -506,17 +507,25 @@ func extractMetaContent(html, attrPattern string) string {
 }
 
 // resolveImageURL resolves a potentially relative image URL to an absolute URL
+//
+// Resolution follows the URL rules a browser applies, so a protocol-relative
+// value (//cdn.example.com/og.png) takes the page's scheme and the CDN's
+// host instead of being appended to the site as a path, and whitespace
+// around the value is ignored.
 func resolveImageURL(imageURL, baseURL string) string {
+	imageURL = strings.TrimSpace(imageURL)
 	if imageURL == "" {
 		return ""
 	}
 
 	// Already absolute
-	if strings.HasPrefix(imageURL, "http://") || strings.HasPrefix(imageURL, "https://") {
+	lower := strings.ToLower(imageURL)
+	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
 		return imageURL
 	}
 
 	// Relative URL - need base URL
+	baseURL = strings.TrimSpace(baseURL)
 	if baseURL == "" {
 		return ""
 	}
@@ -526,16 +535,20 @@ func resolveImageURL(imageURL, baseURL string) string {
 		baseURL = "https://" + baseURL
 	}
 
-	// Remove trailing slash from base
-	baseURL = strings.TrimSuffix(baseURL, "/")
-
-	// Handle absolute path
-	if strings.HasPrefix(imageURL, "/") {
-		return baseURL + imageURL
+	base, err := url.Parse(strings.TrimSuffix(baseURL, "/") + "/")
+	if err != nil {
+		return ""
 	}
-
-	// Handle relative path
-	return baseURL + "/" + imageURL
+	ref, err := url.Parse(imageURL)
+	if err != nil {
+		return ""
+	}
+	resolved := base.ResolveReference(ref)
+	if resolved.Scheme != "http" && resolved.Scheme != "https" {
+		// data:, javascript:, and the like are not images to fetch.
+		return ""
+	}
+	return resolved.String()
 }
 
 // imageFetchable reports whether an image URL is worth requesting: an image

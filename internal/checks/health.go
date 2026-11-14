@@ -1,9 +1,7 @@
 package checks
 
 import (
-	"bytes"
 	"fmt"
-	"net/http"
 	"strings"
 )
 
@@ -41,7 +39,7 @@ func (c HealthCheck) Run(ctx Context) (CheckResult, error) {
 	// report that now rather than waiting out the timeout on each health
 	// path and then the root.
 	baseURLs := ctx.probeBaseURLs()
-	if len(baseURLs) == 0 {
+	if len(baseURLs) == 0 || ctx.Client == nil {
 		return c.unreachable(configured), nil
 	}
 	baseURL := baseURLs[0]
@@ -51,15 +49,19 @@ func (c HealthCheck) Run(ctx Context) (CheckResult, error) {
 	// enabled key is tried first, ahead of the common defaults.
 	var pathsToTry []string
 	strict := false
+	configuredPath := ""
+	if cfg != nil {
+		configuredPath = healthPath(cfg.Path)
+	}
 	defaults := []string{"/health", "/healthz", "/api/health", "/_health", "/status"}
 	switch {
-	case cfg != nil && cfg.Enabled && cfg.Path != "":
-		pathsToTry = []string{cfg.Path}
+	case cfg != nil && cfg.Enabled && configuredPath != "":
+		pathsToTry = []string{configuredPath}
 		strict = true
-	case cfg != nil && cfg.Path != "":
-		pathsToTry = []string{cfg.Path}
+	case configuredPath != "":
+		pathsToTry = []string{configuredPath}
 		for _, p := range defaults {
-			if p != cfg.Path {
+			if p != configuredPath {
 				pathsToTry = append(pathsToTry, p)
 			}
 		}
@@ -67,24 +69,20 @@ func (c HealthCheck) Run(ctx Context) (CheckResult, error) {
 		pathsToTry = defaults
 	}
 
-	// A catch-all host (SPA rewrite) answers 200 with its shell for every
-	// path, which is not a health endpoint. Learn each host's shell once.
-	shells := map[string][]byte{}
-	for _, base := range baseURLs {
-		shells[base] = catchAllDigest(ctx, ctx.Client, base)
-	}
-
+	// refusals collects the answers that could not say whether the site is
+	// up: a WAF's 403, a 5xx, a login redirect.
+	var refusals []string
 	for _, path := range pathsToTry {
-		if result, ok := c.probePath(ctx, baseURLs, path, shells); ok {
+		if result, ok := c.probePath(ctx, baseURLs, path, strict); ok {
 			return result, nil
 		}
 	}
 
-	// Fallback: the configured/expected health path didn't return 200, so
-	// just check whether the site itself is up. Many sites don't expose a
-	// health endpoint at all, and a reachable homepage is good enough to
-	// confirm the site is live.
-	if result, ok := c.probeRoot(ctx, baseURLs); ok {
+	// Fallback: the configured/expected health path didn't answer, so just
+	// check whether the site itself is up. Many sites don't expose a health
+	// endpoint at all, and a reachable homepage is good enough to confirm
+	// the site is live.
+	if result, ok := c.probeRoot(ctx, baseURLs, &refusals); ok {
 		if strict {
 			// The user named a health path and it isn't there: that is a
 			// finding, not a pass. A reachable homepage only stands in when
@@ -92,7 +90,7 @@ func (c HealthCheck) Run(ctx Context) (CheckResult, error) {
 			result.Passed = false
 			result.Severity = SeverityWarn
 			result.Message = "Site reachable, but no health endpoint at " +
-				strings.TrimSuffix(baseURL, "/") + cfg.Path
+				strings.TrimSuffix(baseURL, "/") + configuredPath
 			result.Suggestions = []string{
 				"Check that the health path is correct in preflight.yml",
 				"Or remove the healthEndpoint block to rely on root URL reachability",
@@ -101,63 +99,108 @@ func (c HealthCheck) Run(ctx Context) (CheckResult, error) {
 		return result, nil
 	}
 
+	// The site answered, but not in a way that says whether it is up.
+	if len(refusals) > 0 {
+		return inconclusiveResult(c, "the site is up", strings.Join(refusals, "; ")), nil
+	}
+
 	// Site itself isn't reachable.
 	return c.unreachable(baseURL), nil
 }
 
+// healthPath normalizes a configured path so "healthz" and "/healthz" name
+// the same endpoint. Joining a path without its slash onto the base URL
+// requested http://host:3000healthz.
+func healthPath(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" || strings.HasPrefix(p, "/") {
+		return p
+	}
+	return "/" + p
+}
+
+// unreachable is the result when nothing answered at all. That is not proof
+// the site is down (a local dev server that is not running during the scan
+// looks the same), so it is flagged inconclusive.
 func (c HealthCheck) unreachable(baseURL string) CheckResult {
 	return CheckResult{
-		ID:       c.ID(),
-		Title:    c.Title(),
-		Severity: SeverityWarn,
-		Passed:   false,
-		Message:  fmt.Sprintf("Site unreachable: %s", strings.TrimSuffix(baseURL, "/")),
+		ID:           c.ID(),
+		Title:        c.Title(),
+		Severity:     SeverityWarn,
+		Passed:       false,
+		Inconclusive: true,
+		Message:      fmt.Sprintf("Site unreachable: %s", strings.TrimSuffix(baseURL, "/")),
 		Suggestions: []string{
 			"Ensure your site is accessible",
 		},
 	}
 }
 
-// probePath tries a path and returns (result, true) on a 200 response that
-// is not the host's catch-all shell (shells, keyed by base URL). Returns
-// (_, false) on any error or other response so the caller can keep trying.
-func (c HealthCheck) probePath(ctx Context, baseURLs []string, path string, shells map[string][]byte) (CheckResult, bool) {
+// probePath tries a path on each base and returns (result, true) when one
+// answers 2xx with something other than the host's catch-all page. For a
+// path the user configured (strict), an answer that demands credentials is
+// also the endpoint existing. Returns (_, false) otherwise so the caller
+// can keep trying.
+func (c HealthCheck) probePath(ctx Context, baseURLs []string, path string, strict bool) (CheckResult, bool) {
 	for _, base := range baseURLs {
 		baseURL := strings.TrimSuffix(base, "/")
-		resp, actualURL, err := tryURL(ctx.reqContext(), ctx.Client, baseURL+path)
-		if err != nil {
+		answer := fetchOnSite(ctx, baseURL+path)
+		if answer.err != nil {
 			continue
 		}
-		status := resp.StatusCode
-		var digest []byte
-		if status == http.StatusOK && shells[base] != nil {
-			digest = bodyDigest(resp.Body)
-		}
-		resp.Body.Close()
-		if status == http.StatusOK && (shells[base] == nil || !bytes.Equal(digest, shells[base])) {
+		if strict && !answer.redirected && (answer.status == 401 || answer.status == 403) {
 			return CheckResult{
 				ID:       c.ID(),
 				Title:    c.Title(),
 				Severity: SeverityInfo,
 				Passed:   true,
-				Message:  fmt.Sprintf("Health endpoint at %s returned %d", actualURL, status),
+				Message:  fmt.Sprintf("Health endpoint at %s exists but requires authentication (HTTP %d)", answer.url, answer.status),
 			}, true
 		}
+		if !answer.ok() {
+			continue
+		}
+		// A catch-all host (SPA rewrite) answers 200 with its shell for
+		// every path, which is not a health endpoint. Where the shell
+		// differs between requests the digest cannot rule it out, so only
+		// a non-HTML answer (JSON, plain "ok") counts there.
+		if shell := ctx.catchAllFor(base); shell.answers {
+			if shell.unstable && answer.isHTML() {
+				continue
+			}
+			if !shell.unstable && shell.serves(answer.digest(path)) {
+				continue
+			}
+		}
+		return CheckResult{
+			ID:       c.ID(),
+			Title:    c.Title(),
+			Severity: SeverityInfo,
+			Passed:   true,
+			Message:  fmt.Sprintf("Health endpoint at %s returned %d", answer.url, answer.status),
+		}, true
 	}
 	return CheckResult{}, false
 }
 
 // probeRoot returns (result, true) if the root URL responds with any 2xx or
-// 3xx, treating that as a sign the site is up.
-func (c HealthCheck) probeRoot(ctx Context, baseURLs []string) (CheckResult, bool) {
-	for _, baseURL := range baseURLs {
-		baseURL = strings.TrimSuffix(baseURL, "/")
-		resp, actualURL, err := tryURL(ctx.reqContext(), ctx.Client, baseURL+"/")
-		if err != nil {
-			continue
+// 3xx, treating that as a sign the site is up. The scan's own homepage
+// request is reused when there is one. Answers that are neither (blocked,
+// a server error) are added to refusals.
+func (c HealthCheck) probeRoot(ctx Context, baseURLs []string, refusals *[]string) (CheckResult, bool) {
+	for _, base := range baseURLs {
+		baseURL := strings.TrimSuffix(base, "/")
+		status, actualURL := 0, ""
+		if fetch, ok := ctx.prefetched(baseURL); ok {
+			status, actualURL = fetch.Status, fetch.URL
+		} else {
+			resp, requested, err := tryURL(ctx.reqContext(), ctx.Client, baseURL+"/")
+			if err != nil {
+				continue
+			}
+			status, actualURL = resp.StatusCode, requested
+			resp.Body.Close()
 		}
-		status := resp.StatusCode
-		resp.Body.Close()
 		if status >= 200 && status < 400 {
 			return CheckResult{
 				ID:       c.ID(),
@@ -166,6 +209,9 @@ func (c HealthCheck) probeRoot(ctx Context, baseURLs []string) (CheckResult, boo
 				Passed:   true,
 				Message:  fmt.Sprintf("Site reachable at %s (%d)", actualURL, status),
 			}, true
+		}
+		if status != 0 {
+			*refusals = append(*refusals, ctx.envName(baseURL)+": "+fetchFailure(status))
 		}
 	}
 	return CheckResult{}, false

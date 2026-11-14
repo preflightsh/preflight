@@ -55,8 +55,7 @@ func (c ViewportCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	layoutPath := filepath.Join(ctx.RootDir, layoutFile)
-	content, err := readSourceFile(layoutPath)
+	content, err := readProjectFile(ctx.RootDir, layoutFile)
 	if err != nil {
 		return CheckResult{
 			ID:       c.ID(),

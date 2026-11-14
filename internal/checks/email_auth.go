@@ -41,6 +41,12 @@ func (c EmailAuthCheck) Run(ctx Context) (CheckResult, error) {
 		if host == "" {
 			return CheckResult{ID: c.ID(), Title: c.Title(), Skipped: true, Severity: SeverityInfo, Message: "Skipped: set checks.emailAuth.domain to the email sending domain (there is no production URL to take it from)"}, nil
 		}
+		// A name on a hosting platform's shared suffix (myapp.vercel.app)
+		// cannot hold the site's mail records, and its "organizational
+		// domain" is the platform's, not the user's.
+		if platformHost(host) {
+			return CheckResult{ID: c.ID(), Title: c.Title(), Skipped: true, Severity: SeverityInfo, Message: "Skipped: " + host + " is a hosting platform subdomain; set checks.emailAuth.domain to the email sending domain"}, nil
+		}
 		spfDomains = mailDomainCandidates(host)
 		dmarcDomains = spfDomains
 		// The domain to name in advice is the organizational one, since
@@ -50,6 +56,41 @@ func (c EmailAuthCheck) Run(ctx Context) (CheckResult, error) {
 	}
 	hasSPF, spfRecord, spfDomain, spfErr := lookupFirst(spfDomains, func(d string) (bool, string, error) { return checkSPFContext(ctx.reqContext(), d) })
 	hasDMARC, dmarcRecord, dmarcDomain, dmarcErr := lookupFirst(dmarcDomains, func(d string) (bool, string, error) { return checkDMARCContext(ctx.reqContext(), d) })
+
+	// A record that exists but is malformed is a definite finding, not a
+	// lookup problem: mail receivers treat two SPF records or a DMARC record
+	// with no policy as no record at all. Reporting it as a DNS error told
+	// the user to check their network connection.
+	var spfBad, dmarcBad *invalidRecordError
+	errors.As(spfErr, &spfBad)
+	errors.As(dmarcErr, &dmarcBad)
+	if spfBad != nil || dmarcBad != nil {
+		var problems, suggestions []string
+		switch {
+		case spfBad != nil:
+			problems = append(problems, fmt.Sprintf("SPF for %s: %s", spfDomain, spfBad.describe()))
+			suggestions = append(suggestions, "Publish exactly one SPF record, for example: v=spf1 include:... ~all")
+		case spfErr == nil && !hasSPF:
+			problems = append(problems, "SPF missing")
+			suggestions = append(suggestions, "Add SPF record: v=spf1 include:... ~all")
+		}
+		switch {
+		case dmarcBad != nil:
+			problems = append(problems, fmt.Sprintf("DMARC for %s: %s", dmarcDomain, dmarcBad.describe()))
+			suggestions = append(suggestions, "Publish exactly one DMARC record at _dmarc."+domain+" with a p= policy of none, quarantine, or reject")
+		case dmarcErr == nil && !hasDMARC:
+			problems = append(problems, "DMARC missing")
+			suggestions = append(suggestions, "Add DMARC record at _dmarc."+domain)
+		}
+		return CheckResult{
+			ID:          c.ID(),
+			Title:       c.Title(),
+			Severity:    SeverityWarn,
+			Passed:      false,
+			Message:     "Invalid record: " + strings.Join(problems, "; ") + note,
+			Suggestions: suggestions,
+		}, nil
+	}
 
 	// If DNS lookups failed, report the error instead of claiming records are missing
 	if spfErr != nil || dmarcErr != nil {
@@ -225,44 +266,73 @@ func evaluateSPF(records []string, err error) (bool, string, error) {
 			continue
 		}
 		if found != "" {
-			return false, "", fmt.Errorf("multiple SPF records")
+			return false, "", &invalidRecordError{problem: "multiple SPF records", record: found}
 		}
 		found = record
 	}
 	if found == "" {
 		return false, "", nil
 	}
+	invalid := func(problem string) (bool, string, error) {
+		return false, "", &invalidRecordError{problem: problem, record: found}
+	}
 	fields := strings.Fields(found)
 	if len(fields) < 2 {
-		return false, "", fmt.Errorf("SPF record has no mechanisms")
+		return invalid("SPF record has no mechanisms")
 	}
 	for _, field := range fields[1:] {
-		field = strings.TrimLeft(strings.ToLower(field), "+-~?")
+		qualified := strings.ToLower(field)
+		field = strings.TrimLeft(qualified, "+-~?")
 		name, argument, hasArg := strings.Cut(field, ":")
 		if strings.Contains(name, "=") {
 			k, v, _ := strings.Cut(name, "=")
 			if v == "" || k == "" {
-				return false, "", fmt.Errorf("invalid SPF modifier")
+				return invalid("invalid SPF modifier " + field)
 			}
 			continue
 		}
 		switch name {
 		case "all":
 			if hasArg {
-				return false, "", fmt.Errorf("invalid SPF all mechanism")
+				return invalid("invalid SPF all mechanism")
+			}
+			// A bare "all" has the default "+" qualifier. Either way the
+			// record authorizes every server on the internet to send as
+			// this domain, which is the opposite of having SPF.
+			if qualified == "all" || qualified == "+all" {
+				return invalid("SPF record ends in " + qualified + ", which lets any server send as this domain")
 			}
 		case "include", "exists", "ip4", "ip6":
 			if !hasArg || argument == "" {
-				return false, "", fmt.Errorf("SPF mechanism missing argument")
+				return invalid("SPF mechanism " + name + " is missing its argument")
 			}
 		case "a", "mx", "ptr":
 		default:
 			if !strings.HasPrefix(name, "a/") && !strings.HasPrefix(name, "mx/") {
-				return false, "", fmt.Errorf("unknown SPF mechanism")
+				return invalid("unknown SPF mechanism " + name)
 			}
 		}
 	}
 	return true, found, nil
+}
+
+// invalidRecordError is a record that exists and is wrong, as opposed to a
+// lookup that failed. The two need different results: this one is a finding.
+type invalidRecordError struct {
+	problem string
+	record  string
+}
+
+func (e *invalidRecordError) Error() string { return e.problem }
+
+// describe is the problem followed by the record, shortened and kept to one
+// line for the result message.
+func (e *invalidRecordError) describe() string {
+	record := strings.Join(strings.Fields(e.record), " ")
+	if record == "" {
+		return e.problem
+	}
+	return fmt.Sprintf("%s (%s)", e.problem, truncate(record, 80))
 }
 func checkDMARCContext(ctx context.Context, domain string) (bool, string, error) {
 	records, err := txtLookup(ctx, "_dmarc."+domain)
@@ -279,11 +349,13 @@ func evaluateDMARC(records []string, err error) (bool, string, error) {
 	found := ""
 	for _, record := range records {
 		tags := strings.Split(record, ";")
-		if len(tags) == 0 || !strings.EqualFold(strings.TrimSpace(tags[0]), "v=DMARC1") {
+		// The version tag may be written with spaces around "=", and tag
+		// names and policy values are case-insensitive (RFC 7489).
+		if len(tags) == 0 || !strings.EqualFold(strings.Join(strings.Fields(tags[0]), ""), "v=DMARC1") {
 			continue
 		}
 		if found != "" {
-			return false, "", fmt.Errorf("multiple DMARC records")
+			return false, "", &invalidRecordError{problem: "multiple DMARC records", record: found}
 		}
 		policy := ""
 		seen := map[string]bool{}
@@ -293,18 +365,18 @@ func evaluateDMARC(records []string, err error) (bool, string, error) {
 				continue
 			}
 			k, v, ok := strings.Cut(tag, "=")
-			k = strings.TrimSpace(k)
+			k = strings.ToLower(strings.TrimSpace(k))
 			v = strings.TrimSpace(v)
 			if !ok || seen[k] {
-				return false, "", fmt.Errorf("invalid or duplicate DMARC tag")
+				return false, "", &invalidRecordError{problem: "invalid or duplicate DMARC tag " + k, record: record}
 			}
 			seen[k] = true
 			if k == "p" {
-				policy = v
+				policy = strings.ToLower(v)
 			}
 		}
 		if policy != "none" && policy != "quarantine" && policy != "reject" {
-			return false, "", fmt.Errorf("DMARC record missing valid p policy")
+			return false, "", &invalidRecordError{problem: "DMARC record has no valid p= policy", record: record}
 		}
 		found = record
 	}

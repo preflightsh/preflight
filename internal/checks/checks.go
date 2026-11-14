@@ -82,6 +82,9 @@ type Context struct {
 	// preferred). Convenience for env-agnostic checks like favicon
 	// detection that don't care which environment the markup came from.
 	PageHTML string
+	// Probes shares per-host probe results between checks. Optional: when
+	// nil, each check makes its own requests.
+	Probes *ProbeCache
 }
 
 // reqContext returns ctx.Ctx if set, otherwise context.Background(). Lets
@@ -288,6 +291,9 @@ func (c Context) HostUnreachable(rawURL string) bool {
 // all of them. Falling through to production answers the question the
 // user actually asked: does the site have this.
 func (c Context) probeBaseURLs() []string {
+	if c.Config == nil {
+		return nil
+	}
 	var bases []string
 	seen := map[string]bool{}
 	for _, raw := range []string{c.Config.URLs.Staging, c.Config.URLs.Production} {
@@ -324,8 +330,14 @@ func fetchFailure(status int) string {
 		return "unreachable"
 	case blockedStatus(status):
 		return fmt.Sprintf("blocked (HTTP %d)", status)
+	case status >= 500:
+		return fmt.Sprintf("server error (HTTP %d)", status)
+	case status >= 200 && status < 300:
+		// The host answered, with nothing to measure.
+		return fmt.Sprintf("empty response (HTTP %d)", status)
 	default:
-		return fmt.Sprintf("unreachable (HTTP %d)", status)
+		// A 404 or a redirect that went nowhere is an answer, not an outage.
+		return fmt.Sprintf("answered HTTP %d", status)
 	}
 }
 
@@ -345,6 +357,12 @@ type PerEnvResult struct {
 // when production isn't configured. unreachable envs are surfaced
 // verbatim but never flip authoritativePassed to true.
 func RunPerEnv(ctx Context, scanRenderedHTML func(html string) []string) (summary string, authoritativePassed bool) {
+	return runPerEnv(ctx, func(_, html string) []string { return scanRenderedHTML(html) })
+}
+
+// runPerEnv is RunPerEnv for a scan that needs to know which environment
+// ("prod" or "staging") it is looking at.
+func runPerEnv(ctx Context, scanRenderedHTML func(env, html string) []string) (summary string, authoritativePassed bool) {
 	type envR struct {
 		name   string
 		html   string
@@ -366,7 +384,7 @@ func RunPerEnv(ctx Context, scanRenderedHTML func(html string) []string) (summar
 			lines = append(lines, fmt.Sprintf("%s: %s", e.name, fetchFailure(e.status)))
 			continue
 		}
-		missing := scanRenderedHTML(e.html)
+		missing := scanRenderedHTML(e.name, e.html)
 		if len(missing) == 0 {
 			lines = append(lines, fmt.Sprintf("%s: ✓", e.name))
 			if i == 0 {

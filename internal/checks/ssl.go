@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/url"
 	"strings"
@@ -74,6 +75,12 @@ func (c SSLCheck) Run(ctx Context) (CheckResult, error) {
 	}
 
 	if parsedURL.Scheme != "https" {
+		// A production URL written with http:// usually belongs to a site
+		// that redirects to HTTPS. Failing it without a request told those
+		// users to go and get a certificate they already had.
+		if upgraded := sslHTTPSUpgrade(ctx, parsedURL); upgraded != nil {
+			return c.plainHTTPResult(ctx, upgraded), nil
+		}
 		return CheckResult{
 			ID:       c.ID(),
 			Title:    c.Title(),
@@ -87,8 +94,22 @@ func (c SSLCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	host := parsedURL.Host
-	if parsedURL.Port() == "" {
+	return sslGradeHost(c, ctx, parsedURL), nil
+}
+
+// sslGradeHost and sslHTTPSUpgrade are variables so tests can stand in for
+// the network: SafeTLSDial refuses loopback, so no test listener can serve
+// either of them.
+var (
+	sslGradeHost    = SSLCheck.gradeHost
+	sslHTTPSUpgrade = httpsUpgradeTarget
+)
+
+// gradeHost handshakes with the host of an https URL and grades the
+// certificate it presents.
+func (c SSLCheck) gradeHost(ctx Context, u *url.URL) CheckResult {
+	host := u.Host
+	if u.Port() == "" {
 		host += ":443"
 	}
 
@@ -96,7 +117,7 @@ func (c SSLCheck) Run(ctx Context) (CheckResult, error) {
 		MinVersion: tls.VersionTLS12,
 	}, 10*time.Second)
 	if err != nil {
-		return c.classifyDialErrorContext(ctx.reqContext(), host, err), nil
+		return c.classifyDialErrorContext(ctx.reqContext(), host, err)
 	}
 	defer func() { _ = conn.Close() }()
 
@@ -108,24 +129,110 @@ func (c SSLCheck) Run(ctx Context) (CheckResult, error) {
 			Severity: SeverityError,
 			Passed:   false,
 			Message:  "No SSL certificate found",
-		}, nil
+		}
 	}
 
-	return c.expiryResult(certs[0]), nil
+	return c.expiryResult(certs[0])
 }
 
-// expiryResult grades a certificate that verified: failing hard inside a
-// week of expiry, warning inside a month.
-func (c SSLCheck) expiryResult(cert *x509.Certificate) CheckResult {
-	daysUntilExpiry := int(time.Until(cert.NotAfter).Hours() / 24)
+// httpsUpgradeTarget requests an http:// production URL and returns where it
+// ended up when that is an https URL on the same site. It returns nil when
+// the site does not redirect to HTTPS, redirects somewhere else, or could
+// not be reached.
+func httpsUpgradeTarget(ctx Context, u *url.URL) *url.URL {
+	if ctx.Client == nil {
+		return nil
+	}
+	resp, err := doGet(ctx.reqContext(), ctx.Client, u.String())
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	final := resp.Request.URL
+	if final == nil || final.Scheme != "https" || !sameSite(u.Hostname(), final.Hostname()) {
+		return nil
+	}
+	return final
+}
 
-	if daysUntilExpiry <= 7 {
+// plainHTTPResult grades the certificate behind an http:// production URL
+// that redirects to HTTPS. A good certificate is still a warning, because
+// the configured URL is the one every other check requests.
+func (c SSLCheck) plainHTTPResult(ctx Context, upgraded *url.URL) CheckResult {
+	res := sslGradeHost(c, ctx, upgraded)
+	fix := "Write the production URL in preflight.yml with https://"
+	if !res.Passed {
+		res.Message += " (production URL is written with http:// and redirects to HTTPS)"
+		res.Suggestions = append(res.Suggestions, fix)
+		return res
+	}
+	return CheckResult{
+		ID:          c.ID(),
+		Title:       c.Title(),
+		Severity:    SeverityWarn,
+		Passed:      false,
+		Message:     "Production URL is written with http:// but redirects to HTTPS (" + lowerFirst(res.Message) + ")",
+		Suggestions: []string{fix},
+	}
+}
+
+func lowerFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToLower(s[:1]) + s[1:]
+}
+
+// Certificates used to live for a year or more, so "a week left" and "a
+// month left" meant renewal had failed. Lifetimes are now as short as six
+// days, and a certificate that is renewed on schedule spends its whole life
+// inside those windows. The thresholds scale with the lifetime instead, and
+// the old absolute windows stay as the ceiling for long-lived certificates.
+const (
+	sslErrorWindow = 7 * 24 * time.Hour
+	sslWarnWindow  = 30 * 24 * time.Hour
+)
+
+// expiryThresholds returns how much remaining validity is an error and how
+// much is a warning for a certificate with the given lifetime: under a tenth
+// of the lifetime is an error and under a third is a warning.
+func expiryThresholds(lifetime time.Duration) (errorBelow, warnBelow time.Duration) {
+	errorBelow, warnBelow = sslErrorWindow, sslWarnWindow
+	if lifetime <= 0 {
+		return errorBelow, warnBelow
+	}
+	if scaled := lifetime / 10; scaled < errorBelow {
+		errorBelow = scaled
+	}
+	if scaled := lifetime / 3; scaled < warnBelow {
+		warnBelow = scaled
+	}
+	return errorBelow, warnBelow
+}
+
+// expiresIn words the time left, in hours once it is under two days so a
+// short-lived certificate does not read as "expires in 0 days".
+func expiresIn(remaining time.Duration) string {
+	if remaining < 48*time.Hour {
+		return fmt.Sprintf("%d hours", int(remaining.Hours()))
+	}
+	return fmt.Sprintf("%d days", int(math.Round(remaining.Hours()/24)))
+}
+
+// expiryResult grades a certificate that verified: an error when it is
+// close enough to expiry that renewal has clearly failed, a warning when
+// renewal is overdue.
+func (c SSLCheck) expiryResult(cert *x509.Certificate) CheckResult {
+	remaining := time.Until(cert.NotAfter)
+	errorBelow, warnBelow := expiryThresholds(cert.NotAfter.Sub(cert.NotBefore))
+
+	if remaining <= errorBelow {
 		return CheckResult{
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityError,
 			Passed:   false,
-			Message:  fmt.Sprintf("SSL certificate expires in %d days", daysUntilExpiry),
+			Message:  "SSL certificate expires in " + expiresIn(remaining),
 			Suggestions: []string{
 				"Renew your SSL certificate soon",
 				"Consider enabling auto-renewal",
@@ -133,13 +240,13 @@ func (c SSLCheck) expiryResult(cert *x509.Certificate) CheckResult {
 		}
 	}
 
-	if daysUntilExpiry <= 30 {
+	if remaining <= warnBelow {
 		return CheckResult{
 			ID:       c.ID(),
 			Title:    c.Title(),
 			Severity: SeverityWarn,
 			Passed:   false,
-			Message:  fmt.Sprintf("SSL certificate expires in %d days", daysUntilExpiry),
+			Message:  "SSL certificate expires in " + expiresIn(remaining),
 			Suggestions: []string{
 				"Plan to renew your SSL certificate",
 			},
@@ -151,7 +258,7 @@ func (c SSLCheck) expiryResult(cert *x509.Certificate) CheckResult {
 		Title:    c.Title(),
 		Severity: SeverityInfo,
 		Passed:   true,
-		Message:  fmt.Sprintf("Valid, expires in %d days", daysUntilExpiry),
+		Message:  "Valid, expires in " + expiresIn(remaining),
 	}
 }
 

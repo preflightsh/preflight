@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/preflightsh/preflight/internal/netutil"
@@ -76,6 +77,21 @@ func (c WWWRedirectCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
+	// A name directly under a hosting platform's shared suffix
+	// (myapp.vercel.app, user.github.io) is the whole site. The public
+	// suffix list counts it as a registrable domain, so the test above lets
+	// it through, but www.myapp.vercel.app is not a name the owner can
+	// create a record for.
+	if platformHost(host) {
+		return CheckResult{
+			ID:       c.ID(),
+			Title:    c.Title(),
+			Severity: SeverityInfo,
+			Skipped:  true,
+			Message:  "Skipped for platform subdomain " + host,
+		}, nil
+	}
+
 	// Determine www and non-www versions
 	var wwwHost, nonWwwHost string
 	if strings.HasPrefix(host, "www.") {
@@ -90,13 +106,25 @@ func (c WWWRedirectCheck) Run(ctx Context) (CheckResult, error) {
 	if scheme == "" {
 		scheme = "https"
 	}
+	// Keep a port from the production URL: without it the check asked a
+	// different server than the one configured.
+	port := ""
+	if p := parsedURL.Port(); p != "" {
+		port = ":" + p
+	}
 
-	wwwURL := scheme + "://" + wwwHost
-	nonWwwURL := scheme + "://" + nonWwwHost
+	wwwURL := scheme + "://" + wwwHost + port
+	nonWwwURL := scheme + "://" + nonWwwHost + port
 
-	// Check both URLs
-	wwwFinal, wwwErr := getFinalURL(ctx.reqContext(), wwwURL)
-	nonWwwFinal, nonWwwErr := getFinalURL(ctx.reqContext(), nonWwwURL)
+	// Check both URLs at once: in series a slow pair cost two timeouts.
+	var wwwAnswer, nonWwwAnswer finalAnswer
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); wwwAnswer = wwwFinalURL(ctx.reqContext(), wwwURL) }()
+	go func() { defer wg.Done(); nonWwwAnswer = wwwFinalURL(ctx.reqContext(), nonWwwURL) }()
+	wg.Wait()
+	wwwFinal, wwwErr := wwwAnswer.url, wwwAnswer.err
+	nonWwwFinal, nonWwwErr := nonWwwAnswer.url, nonWwwAnswer.err
 
 	// Both fail to resolve
 	if wwwErr != nil && nonWwwErr != nil {
@@ -165,7 +193,34 @@ func (c WWWRedirectCheck) Run(ctx Context) (CheckResult, error) {
 				Message:  fmt.Sprintf("Both redirect to %s (%s)", canonical, wwwFinalHost),
 			}, nil
 		}
-		// Both work but serve on their respective domains (no redirect)
+		// Each name answers on its own host, with no redirect between
+		// them. Resolving is not the same as serving: an unconfigured
+		// vhost answers 404 or 5xx on a name that resolves fine.
+		for _, side := range []struct {
+			host   string
+			answer finalAnswer
+		}{{wwwHost, wwwAnswer}, {nonWwwHost, nonWwwAnswer}} {
+			if blockedStatus(side.answer.status) {
+				return inconclusiveResult(c, "the www redirect", fmt.Sprintf("%s %s", side.host, fetchFailure(side.answer.status))), nil
+			}
+		}
+		for _, side := range []struct {
+			host   string
+			answer finalAnswer
+		}{{wwwHost, wwwAnswer}, {nonWwwHost, nonWwwAnswer}} {
+			if side.answer.status >= 400 {
+				return CheckResult{
+					ID:       c.ID(),
+					Title:    c.Title(),
+					Severity: SeverityWarn,
+					Passed:   false,
+					Message:  fmt.Sprintf("%s resolves but answers HTTP %d instead of serving or redirecting", side.host, side.answer.status),
+					Suggestions: []string{
+						"Configure the web server or CDN to redirect this name to your canonical URL",
+					},
+				}, nil
+			}
+		}
 		return CheckResult{
 			ID:       c.ID(),
 			Title:    c.Title(),
@@ -189,25 +244,49 @@ func (c WWWRedirectCheck) Run(ctx Context) (CheckResult, error) {
 	}, nil
 }
 
-func getFinalURL(ctx context.Context, urlStr string) (string, error) {
+// finalAnswer is where a request ended up after redirects, and the status
+// of that last response.
+type finalAnswer struct {
+	url    string
+	status int
+	err    error
+}
+
+// wwwFinalURL is a variable so tests can stand in for the network; the safe
+// client refuses the loopback addresses a test server listens on.
+var wwwFinalURL = getFinalURL
+
+func getFinalURL(ctx context.Context, urlStr string) finalAnswer {
 	// This call starts with a user-configured URL and follows redirects;
 	// SafeHTTPClient guards both the initial dial AND each redirect hop
 	// against private / loopback / link-local addresses.
 	client := netutil.SafeHTTPClient(10 * time.Second)
 
-	req, err := http.NewRequestWithContext(ctx, "HEAD", urlStr, nil)
+	answer := requestFinalURL(ctx, client, http.MethodHead, urlStr)
+	// Some servers reject HEAD (405, 501) or answer it differently from
+	// GET. Ask again with GET before believing an error status.
+	if answer.err == nil && answer.status >= 400 {
+		if retry := requestFinalURL(ctx, client, http.MethodGet, urlStr); retry.err == nil {
+			return retry
+		}
+	}
+	return answer
+}
+
+func requestFinalURL(ctx context.Context, client *http.Client, method, urlStr string) finalAnswer {
+	req, err := http.NewRequestWithContext(ctx, method, urlStr, nil)
 	if err != nil {
-		return "", fmt.Errorf("build request for %s: %w", urlStr, err)
+		return finalAnswer{err: fmt.Errorf("build request for %s: %w", urlStr, err)}
 	}
 	req.Header.Set("User-Agent", "Preflight/1.0")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("HEAD %s: %w", urlStr, err)
+		return finalAnswer{err: fmt.Errorf("%s %s: %w", method, urlStr, err)}
 	}
 	defer resp.Body.Close()
 
-	return resp.Request.URL.String(), nil
+	return finalAnswer{url: resp.Request.URL.String(), status: resp.StatusCode}
 }
 
 // describeFetchError names the class of a failed request, so a certificate

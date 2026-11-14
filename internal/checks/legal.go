@@ -1,11 +1,8 @@
 package checks
 
 import (
-	"bytes"
-	"context"
 	"crypto/sha256"
 	"io"
-	"net/http"
 	"net/url"
 	"os"
 	"path"
@@ -16,21 +13,6 @@ import (
 	"sync/atomic"
 )
 
-// getWithContext is a context-aware GET that, unlike doGet, does not set
-// a User-Agent. Used by legal-page probing where we historically called
-// http.Client.Get directly so as not to identify Preflight to the
-// scanned host.
-func getWithContext(ctx context.Context, client *http.Client, url string) (*http.Response, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	return client.Do(req)
-}
-
 type LegalPagesCheck struct{}
 
 func (c LegalPagesCheck) ID() string {
@@ -40,6 +22,29 @@ func (c LegalPagesCheck) ID() string {
 func (c LegalPagesCheck) Title() string {
 	return "Privacy & Terms pages"
 }
+
+// Candidate paths for the deployed legal pages. The .html variants cover
+// static sites that serve files as written.
+var (
+	legalPrivacyURLs = []string{
+		"/privacy", "/privacy-policy", "/privacypolicy",
+		"/legal/privacy", "/legal/privacy-policy",
+		"/policies/privacy", "/policies/privacy-policy",
+		"/privacy-notice", "/privacy-statement",
+		"/info/privacy", "/about/privacy",
+		"/privacy.html", "/privacy-policy.html",
+	}
+	legalTermsURLs = []string{
+		"/terms", "/terms-of-service", "/termsofservice", "/tos",
+		"/legal/terms", "/legal/terms-of-service", "/legal/tos",
+		"/policies/terms", "/policies/terms-of-service",
+		"/terms-and-conditions", "/terms-conditions",
+		"/info/terms", "/about/terms", "/eula",
+		"/terms.html", "/terms-of-service.html",
+	}
+	legalPrivacyKeywords = []string{"privacy"}
+	legalTermsKeywords   = []string{"terms", "tos", "eula"}
+)
 
 func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 	hasPrivacy := false
@@ -53,90 +58,80 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 	// existing.
 	//
 	// conclusive counts probe answers that say something about the page:
-	// a 403 from a WAF, a 5xx, or a catch-all shell does not. When no
-	// answer was conclusive (or no host could be probed at all) the
-	// source search below decides instead.
+	// a 403 from a WAF, a 5xx, a redirect off the site, or a catch-all
+	// shell does not. When no answer was conclusive (or no host could be
+	// probed at all) the source search below decides instead.
 	var conclusive atomic.Int32
-	bases := ctx.probeBaseURLs()
+	var bases []string
+	if ctx.Client != nil {
+		bases = ctx.probeBaseURLs()
+	}
 	for _, baseURL := range bases {
 		if hasPrivacy && hasTerms {
 			break
 		}
-		// Reuse ctx.Client (which already handles the local-vs-safe choice
-		// based on the configured URLs) but override CheckRedirect so 3xx
-		// is treated as "page exists" rather than followed. Copy the
-		// client by value so we don't mutate the shared one.
-		clientCopy := *ctx.Client
-		clientCopy.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		}
-		client := &clientCopy
-
 		// An SPA rewrite (/* -> /index.html 200) or catch-all route answers
 		// 200 for every path. On such a host a 200 that serves the same
 		// shell as a path that cannot exist proves nothing, so it falls
 		// through to the source-file search below.
-		shell := catchAllDigest(ctx, client, baseURL)
+		shell := ctx.catchAllFor(baseURL)
 
-		// A redirect counts as "found" only if it stays on the same
-		// domain, isn't a login/auth bounce, and actually lands on a
-		// matching URL (not a path-clean or homepage bounce).
-		accepting := func(keywords ...string) func(int, http.Header, []byte) bool {
-			return func(status int, header http.Header, digest []byte) bool {
-				if blockedStatus(status) || status >= 500 {
+		// A candidate counts when the response it finally lands on, after
+		// any redirect that stays on the site, is a real page at a URL that
+		// still names the page. Judging the redirect itself got both
+		// directions wrong: an apex-to-www redirect read as "missing", and
+		// a site that adds a trailing slash to every path before answering
+		// 404 read as "found".
+		accepting := func(keywords ...string) func(string, probeAnswer) bool {
+			return func(reqPath string, answer probeAnswer) bool {
+				if !answer.conclusive() {
 					return false
 				}
-				if status >= 200 && status < 300 {
-					if shell != nil && bytes.Equal(digest, shell) {
-						return false
-					}
+				if answer.status < 200 || answer.status >= 300 {
 					conclusive.Add(1)
-					return true
+					return false
 				}
-				if status >= 300 && status < 400 {
-					loc := header.Get("Location")
-					// An auth wall bounces every path to its login page.
-					if isAuthRedirect(loc) {
-						return false
-					}
-					conclusive.Add(1)
-					return isSameDomainRedirect(baseURL, loc) && redirectMentions(loc, keywords...)
+				if shell.serves(answer.digest(reqPath)) {
+					return false
 				}
 				conclusive.Add(1)
-				return false
+				return !answer.redirected || redirectMentions(answer.url, keywords...)
 			}
 		}
 
 		if !hasPrivacy {
-			privacyURLs := []string{
-				"/privacy", "/privacy-policy", "/privacypolicy",
-				"/legal/privacy", "/legal/privacy-policy",
-				"/policies/privacy", "/policies/privacy-policy",
-				"/privacy-notice", "/privacy-statement",
-				"/info/privacy", "/about/privacy",
-			}
-			if path, ok := probeFirstHit(ctx, client, baseURL, privacyURLs, accepting("privacy")); ok {
+			if path, ok := probeFirstHit(ctx, baseURL, legalPrivacyURLs, accepting(legalPrivacyKeywords...)); ok {
 				hasPrivacy = true
 				privacyPath = path + " (via HTTP)"
 			}
 		}
 
 		if !hasTerms {
-			termsURLs := []string{
-				"/terms", "/terms-of-service", "/termsofservice", "/tos",
-				"/legal/terms", "/legal/terms-of-service", "/legal/tos",
-				"/policies/terms", "/policies/terms-of-service",
-				"/terms-and-conditions", "/terms-conditions",
-				"/info/terms", "/about/terms", "/eula",
-			}
-			if path, ok := probeFirstHit(ctx, client, baseURL, termsURLs, accepting("terms", "tos", "eula")); ok {
+			if path, ok := probeFirstHit(ctx, baseURL, legalTermsURLs, accepting(legalTermsKeywords...)); ok {
 				hasTerms = true
 				termsPath = path + " (via HTTP)"
 			}
 		}
 	}
 
-	// If we found both via HTTP, return early
+	// The homepage the scan already fetched usually links both pages from
+	// its footer. That covers what no path list can: a policy hosted
+	// elsewhere, a localized slug, a page under a prefix.
+	if !hasPrivacy || !hasTerms {
+		for _, page := range []string{ctx.PageHTMLStaging, ctx.PageHTMLProduction} {
+			privacyLink, termsLink := legalLinksIn(page)
+			if !hasPrivacy && privacyLink != "" {
+				hasPrivacy = true
+				privacyPath = privacyLink + " (linked from the homepage)"
+			}
+			if !hasTerms && termsLink != "" {
+				hasTerms = true
+				termsPath = termsLink + " (linked from the homepage)"
+			}
+		}
+	}
+
+	// If we found both on the deployed site, return early
 	if hasPrivacy && hasTerms {
 		return CheckResult{
 			ID:       c.ID(),
@@ -149,24 +144,22 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 	// unverified is the reason the deployed site could not answer, when a
 	// URL is configured but no probe was conclusive.
 	unverified := ""
-	if ctx.Config.URLs.Production != "" || ctx.Config.URLs.Staging != "" {
+	if ctx.urlConfigured() {
 		switch {
 		case len(bases) == 0:
 			unverified = "unreachable"
 		case conclusive.Load() == 0:
 			unverified = "blocked or no conclusive answer"
 		}
-	}
-	if unverified == "" && (ctx.Config.URLs.Production != "" || ctx.Config.URLs.Staging != "") {
-		var missing []string
-		if !hasPrivacy {
-			missing = append(missing, "privacy policy")
+		// The scan's homepage request names what actually happened.
+		if reason := ctx.siteUnverified(); unverified != "" && reason != "" {
+			unverified = reason
 		}
-		if !hasTerms {
-			missing = append(missing, "terms of service")
-		}
-		return CheckResult{ID: c.ID(), Title: c.Title(), Severity: SeverityWarn, Passed: false, Message: "Could not verify deployed " + strings.Join(missing, ", ")}, nil
 	}
+	// deployedMiss is true when the deployed site answered and the pages
+	// were not at any probed URL. The source search still runs: a page in
+	// the repo under a URL the list does not cover is not a missing page.
+	deployedMiss := ctx.urlConfigured() && unverified == ""
 
 	// Common privacy policy paths/filenames
 	privacyPatterns := []string{
@@ -427,8 +420,11 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 		} else {
 			msg += ", terms at " + termsPath
 		}
-		if unverified != "" {
+		switch {
+		case unverified != "":
 			msg += " (not verified on the deployed site: " + unverified + ")"
+		case deployedMiss:
+			msg += " (from source; not at the URLs probed on the deployed site)"
 		}
 		return CheckResult{
 			ID:       c.ID(),
@@ -456,7 +452,7 @@ func (c LegalPagesCheck) Run(ctx Context) (CheckResult, error) {
 			Severity:     SeverityWarn,
 			Passed:       false,
 			Inconclusive: true,
-			Message:      "Could not verify " + strings.Join(missing, ", ") + ": deployed site " + unverified + ", and not found in source",
+			Message:      "Could not verify " + strings.Join(missing, ", ") + " on the deployed site (" + unverified + "), and not found in source",
 		}, nil
 	}
 
@@ -648,27 +644,39 @@ func redirectMentions(location string, keywords ...string) bool {
 	return false
 }
 
-// catchAllProbePath is a path no real site serves.
-const catchAllProbePath = "/preflight-404-probe-please-do-not-exist"
+// legalAnchorRE matches an anchor with its href and its text.
+var legalAnchorRE = regexp.MustCompile(`(?is)<a\b[^>]*?\bhref\s*=\s*["']?([^"'\s>]+)[^>]*>(.*?)</a>`)
 
-// catchAllDigest returns the body digest a host serves for a path that
-// cannot exist when it answers that with 2xx (an SPA rewrite or a catch-all
-// route), and nil for a host that 404s or redirects unknown paths.
-func catchAllDigest(ctx Context, client *http.Client, baseURL string) []byte {
-	resp, err := getWithContext(ctx.reqContext(), client, strings.TrimSuffix(baseURL, "/")+catchAllProbePath)
-	if err != nil {
-		return nil
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil
-	}
-	return pageDigest(resp.Body, catchAllProbePath)
-}
+var legalTagRE = regexp.MustCompile(`(?s)<[^>]*>`)
 
-// bodyDigest is pageDigest for callers that don't know the request path.
-func bodyDigest(r io.Reader) []byte {
-	return pageDigest(r, "")
+// legalLinksIn returns the hrefs of the privacy and terms links on a
+// rendered page, "" for each that is not linked. A link counts when its
+// href or its visible text names the page. Comments are removed first, so
+// a commented-out footer link is not evidence.
+func legalLinksIn(page string) (privacy, terms string) {
+	if strings.TrimSpace(page) == "" {
+		return "", ""
+	}
+	page = reHTMLComment.ReplaceAllString(page, "")
+	for _, m := range legalAnchorRE.FindAllStringSubmatch(page, 2000) {
+		href := strings.TrimSpace(m[1])
+		lowerHref := strings.ToLower(href)
+		if href == "" || strings.HasPrefix(lowerHref, "#") || strings.HasPrefix(lowerHref, "javascript:") || strings.HasPrefix(lowerHref, "mailto:") {
+			continue
+		}
+		text := strings.ToLower(strings.Join(strings.Fields(legalTagRE.ReplaceAllString(m[2], " ")), " "))
+		if privacy == "" && (redirectMentions(href, legalPrivacyKeywords...) || strings.Contains(text, "privacy")) {
+			privacy = href
+		}
+		if terms == "" && (redirectMentions(href, "terms", "/tos", "eula") ||
+			strings.Contains(text, "terms of") || strings.Contains(text, "terms and") || strings.Contains(text, "terms &") || text == "terms") {
+			terms = href
+		}
+		if privacy != "" && terms != "" {
+			break
+		}
+	}
+	return privacy, terms
 }
 
 // pageDigest is the sha256 of the first MiB of a response body after
@@ -701,15 +709,16 @@ var (
 const legalProbeBatch = 5
 
 // probeFirstHit requests candidate paths in batches, concurrently within a
-// batch, and returns the first path in list order whose response status
-// and headers accept approves. Batching keeps the common case (an early candidate exists) to
+// batch, and returns the first path in list order whose final answer accept
+// approves. Batching keeps the common case (an early candidate exists) to
 // one round of requests, while a miss no longer costs one timeout per
 // candidate in series: on a slow host, 14 sequential probes at the scan
 // timeout was over two minutes for one check.
 //
-// accept also gets the digest of a 2xx body (nil otherwise), so a catch-all
-// host's shell page can be told apart from a real page.
-func probeFirstHit(ctx Context, client *http.Client, baseURL string, paths []string, accept func(status int, header http.Header, digest []byte) bool) (string, bool) {
+// accept gets the request path and the answer the host finally gave after
+// any redirect that stayed on the site, so a catch-all host's shell page
+// can be told apart from a real page.
+func probeFirstHit(ctx Context, baseURL string, paths []string, accept func(reqPath string, answer probeAnswer) bool) (string, bool) {
 	for start := 0; start < len(paths); start += legalProbeBatch {
 		end := min(start+legalProbeBatch, len(paths))
 		hits := make([]bool, end-start)
@@ -718,16 +727,7 @@ func probeFirstHit(ctx Context, client *http.Client, baseURL string, paths []str
 			wg.Add(1)
 			go func(i int, path string) {
 				defer wg.Done()
-				resp, err := getWithContext(ctx.reqContext(), client, baseURL+path)
-				if err != nil {
-					return
-				}
-				defer resp.Body.Close()
-				var digest []byte
-				if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-					digest = pageDigest(resp.Body, path)
-				}
-				hits[i] = accept(resp.StatusCode, resp.Header, digest)
+				hits[i] = accept(path, fetchOnSite(ctx, baseURL+path))
 			}(i, path)
 		}
 		wg.Wait()

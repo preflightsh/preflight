@@ -45,36 +45,6 @@ func findProjectPath(rootDir, pattern string) (string, bool) {
 	return "", false
 }
 
-// probeStaticFileOverHTTP probes path against each configured environment
-// (see probeBaseURLs) and reports the URL that served it. Used as a
-// fallback for files commonly generated dynamically by CMS plugins
-// (robots.txt, sitemap.xml) so they aren't reported missing just because
-// they don't exist on disk.
-func probeStaticFileOverHTTP(ctx Context, path string) (string, bool) {
-	for _, base := range ctx.probeBaseURLs() {
-		if servedAt, ok := probeFileAtBase(ctx, base, path); ok {
-			return servedAt, true
-		}
-	}
-	return "", false
-}
-
-// probeStaticFileWithParents is probeStaticFileOverHTTP plus a walk up to
-// production's registrable parent domain(s) (app.example.com ->
-// example.com), so a file that legitimately lives on the org's main site
-// (sitemap.xml, llms.txt) still counts for a subdomain app.
-func probeStaticFileWithParents(ctx Context, path string) (string, bool) {
-	if servedAt, ok := probeStaticFileOverHTTP(ctx, path); ok {
-		return servedAt, true
-	}
-	for _, base := range parentBaseURLs(ctx.Config.URLs.Production) {
-		if servedAt, ok := probeFileAtBase(ctx, base, path); ok {
-			return servedAt, true
-		}
-	}
-	return "", false
-}
-
 // parentBaseURLs walks up from a production URL's host to its parent domain(s):
 // app.example.com -> [https://example.com]. It strips one subdomain label at a
 // time and stops at the registrable domain, so it never probes a host the user
@@ -124,40 +94,6 @@ func parentBaseURLs(rawURL string) []string {
 	return out
 }
 
-// probeFileAtBase fetches baseURL+path and reports success only for a 200 with
-// non-empty, non-HTML content (robots.txt is plain text, sitemap.xml is XML —
-// an HTML body means we got a page, e.g. a login/SPA shell, not the file).
-func probeFileAtBase(ctx Context, baseURL, path string) (string, bool) {
-	if ctx.Client == nil || baseURL == "" || ctx.HostUnreachable(baseURL) {
-		return "", false
-	}
-	baseURL = strings.TrimSuffix(baseURL, "/")
-	resp, actualURL, err := tryURL(ctx.reqContext(), ctx.Client, baseURL+path)
-	if err != nil {
-		return "", false
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", false
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, netutil.MaxResponseBody))
-	if err != nil {
-		return "", false
-	}
-	trimmed := strings.TrimSpace(string(body))
-	if trimmed == "" {
-		return "", false
-	}
-	ct := strings.ToLower(resp.Header.Get("Content-Type"))
-	lower := strings.ToLower(trimmed)
-	if strings.Contains(ct, "text/html") ||
-		strings.HasPrefix(lower, "<!doctype html") ||
-		strings.HasPrefix(lower, "<html") {
-		return "", false
-	}
-	return actualURL, true
-}
-
 // indexNowProbe is the outcome of fetching /{key}.txt from the deployed site.
 type indexNowProbe int
 
@@ -186,7 +122,9 @@ func probeIndexNowKeyOverHTTP(ctx Context, key string) (string, indexNowProbe) {
 	if ctx.Client == nil || key == "" {
 		return "", indexNowUnknown
 	}
-	path := "/" + key + ".txt"
+	// The key comes from preflight.yml. Escaping it keeps a stray "?", "#",
+	// or space from changing which path is requested.
+	path := "/" + url.PathEscape(key) + ".txt"
 
 	configured := ctx.probeBaseURLs()
 	authoritative := make(map[string]bool, len(configured))
@@ -213,7 +151,7 @@ func probeIndexNowKeyOverHTTP(ctx Context, key string) (string, indexNowProbe) {
 		if readErr != nil {
 			continue
 		}
-		if resp.StatusCode == http.StatusOK && strings.TrimSpace(string(body)) == key {
+		if resp.StatusCode == http.StatusOK && strings.TrimSpace(trimBOM(body)) == key {
 			return actualURL, indexNowServed
 		}
 		if miss == "" && authoritative[base] && !blockedStatus(resp.StatusCode) && resp.StatusCode < 500 {
@@ -298,61 +236,7 @@ func (c RobotsTxtCheck) Title() string {
 	return "robots.txt"
 }
 
-func (c RobotsTxtCheck) Run(ctx Context) (CheckResult, error) {
-	// Common web root directories across frameworks
-	webRoots := []string{
-		"public", // Laravel, Rails, many Node.js
-		"static", // Hugo, some SSGs
-		"web",    // Craft CMS, Symfony
-		"www",    // Some PHP apps
-		"dist",   // Built static sites
-		"build",  // Build outputs
-		"_site",  // Jekyll
-		"out",    // Next.js static export
-		"",       // Root directory
-	}
-
-	for _, root := range webRoots {
-		var path string
-		if root == "" {
-			path = "robots.txt"
-		} else {
-			path = root + "/robots.txt"
-		}
-		fullPath := filepath.Join(ctx.RootDir, path)
-		if content, err := readSourceFile(fullPath); err == nil {
-			// Check if it has meaningful content
-			contentStr := strings.TrimSpace(string(content))
-			if len(contentStr) > 0 {
-				return CheckResult{
-					ID:       c.ID(),
-					Title:    c.Title(),
-					Severity: SeverityInfo,
-					Passed:   true,
-					Message:  "robots.txt found at " + path,
-				}, nil
-			}
-		}
-	}
-
-	// Check monorepo public directories for static robots.txt
-	monorepoStaticPaths := findMonorepoPublicFiles(ctx.RootDir, "robots.txt")
-	for _, path := range monorepoStaticPaths {
-		if content, err := readSourceFile(path); err == nil {
-			contentStr := strings.TrimSpace(string(content))
-			if len(contentStr) > 0 {
-				relPath := relPath(ctx.RootDir, path)
-				return CheckResult{
-					ID:       c.ID(),
-					Title:    c.Title(),
-					Severity: SeverityInfo,
-					Passed:   true,
-					Message:  "robots.txt found at " + relPath,
-				}, nil
-			}
-		}
-	}
-
+func (c RobotsTxtCheck) fromSource(ctx Context) CheckResult {
 	// Check for dynamic robots.txt generation across JS/TS frameworks
 	jsRobotsPaths := []string{
 		// Next.js App Router
@@ -381,7 +265,7 @@ func (c RobotsTxtCheck) Run(ctx Context) (CheckResult, error) {
 				Severity: SeverityInfo,
 				Passed:   true,
 				Message:  "robots.txt generated via " + path,
-			}, nil
+			}
 		}
 	}
 
@@ -396,7 +280,7 @@ func (c RobotsTxtCheck) Run(ctx Context) (CheckResult, error) {
 				Severity: SeverityInfo,
 				Passed:   true,
 				Message:  "robots.txt generated via " + relPath,
-			}, nil
+			}
 		}
 	}
 
@@ -448,19 +332,7 @@ func (c RobotsTxtCheck) Run(ctx Context) (CheckResult, error) {
 			Severity: SeverityInfo,
 			Passed:   true,
 			Message:  "robots.txt generated via " + robotsFoundPath,
-		}, nil
-	}
-
-	// HTTP fallback: file isn't on disk but might be served dynamically
-	// (Craft+SEOmatic, WordPress, etc.).
-	if servedAt, ok := probeStaticFileOverHTTP(ctx, "/robots.txt"); ok {
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityInfo,
-			Passed:   true,
-			Message:  "robots.txt served at " + servedAt,
-		}, nil
+		}
 	}
 
 	return CheckResult{
@@ -473,7 +345,7 @@ func (c RobotsTxtCheck) Run(ctx Context) (CheckResult, error) {
 			"Add robots.txt to public/ directory",
 			"Include Sitemap directive pointing to sitemap.xml",
 		},
-	}, nil
+	}
 }
 
 // SitemapCheck verifies sitemap.xml exists
@@ -487,61 +359,7 @@ func (c SitemapCheck) Title() string {
 	return "sitemap.xml"
 }
 
-func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
-	// Common web root directories across frameworks
-	webRoots := []string{
-		"public", // Laravel, Rails, many Node.js
-		"static", // Hugo, some SSGs
-		"web",    // Craft CMS, Symfony
-		"www",    // Some PHP apps
-		"dist",   // Built static sites
-		"build",  // Build outputs
-		"_site",  // Jekyll
-		"out",    // Next.js static export
-		"",       // Root directory
-	}
-
-	for _, root := range webRoots {
-		var path string
-		if root == "" {
-			path = "sitemap.xml"
-		} else {
-			path = root + "/sitemap.xml"
-		}
-		fullPath := filepath.Join(ctx.RootDir, path)
-		if content, err := readSourceFile(fullPath); err == nil {
-			// Check if it has meaningful content
-			contentStr := strings.TrimSpace(string(content))
-			if len(contentStr) > 0 {
-				return CheckResult{
-					ID:       c.ID(),
-					Title:    c.Title(),
-					Severity: SeverityInfo,
-					Passed:   true,
-					Message:  "sitemap.xml found at " + path,
-				}, nil
-			}
-		}
-	}
-
-	// Check monorepo public directories for static sitemap.xml
-	monorepoStaticPaths := findMonorepoPublicFiles(ctx.RootDir, "sitemap.xml")
-	for _, path := range monorepoStaticPaths {
-		if content, err := readSourceFile(path); err == nil {
-			contentStr := strings.TrimSpace(string(content))
-			if len(contentStr) > 0 {
-				relPath := relPath(ctx.RootDir, path)
-				return CheckResult{
-					ID:       c.ID(),
-					Title:    c.Title(),
-					Severity: SeverityInfo,
-					Passed:   true,
-					Message:  "sitemap.xml found at " + relPath,
-				}, nil
-			}
-		}
-	}
-
+func (c SitemapCheck) fromSource(ctx Context) CheckResult {
 	// Check for dynamic sitemap generation across JS/TS frameworks
 	jsSitemapPaths := []string{
 		// Next.js App Router
@@ -573,7 +391,7 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 				Severity: SeverityInfo,
 				Passed:   true,
 				Message:  "sitemap.xml generated via " + path,
-			}, nil
+			}
 		}
 	}
 
@@ -588,7 +406,7 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 				Severity: SeverityInfo,
 				Passed:   true,
 				Message:  "sitemap.xml generated via " + relPath,
-			}, nil
+			}
 		}
 	}
 
@@ -651,7 +469,7 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 			Severity: SeverityInfo,
 			Passed:   true,
 			Message:  "sitemap.xml generated via " + sitemapFoundPath,
-		}, nil
+		}
 	}
 
 	// Check for dynamic sitemap generation across backend frameworks
@@ -663,7 +481,7 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 		// Laravel
 		"app/Http/Controllers/SitemapController.php",
 		"routes/sitemap.php",
-		// PHP — direct sitemap.php file in common web root directories
+		// PHP: a direct sitemap.php file in common web root directories
 		"sitemap.php",
 		"web/sitemap.php",
 		"public/sitemap.php",
@@ -697,7 +515,7 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 				Severity: SeverityInfo,
 				Passed:   true,
 				Message:  "sitemap.xml generated via " + found,
-			}, nil
+			}
 		}
 	}
 
@@ -719,7 +537,7 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 				Severity: SeverityInfo,
 				Passed:   true,
 				Message:  "sitemap.xml generated via view templates",
-			}, nil
+			}
 		}
 	}
 
@@ -737,7 +555,7 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 				Severity: SeverityInfo,
 				Passed:   true,
 				Message:  "sitemap.xml configured in Django urls",
-			}, nil
+			}
 		}
 	}
 
@@ -757,7 +575,7 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 				Severity: SeverityInfo,
 				Passed:   true,
 				Message:  dep.message,
-			}, nil
+			}
 		}
 	}
 
@@ -779,7 +597,7 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 				Severity: SeverityInfo,
 				Passed:   true,
 				Message:  "sitemap.xml generated via WordPress SEO plugin",
-			}, nil
+			}
 		}
 	}
 
@@ -800,7 +618,7 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 					Severity: SeverityInfo,
 					Passed:   true,
 					Message:  "sitemap.xml generated via Craft CMS SEO plugin",
-				}, nil
+				}
 			}
 		}
 	}
@@ -819,7 +637,7 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 				Severity: SeverityInfo,
 				Passed:   true,
 				Message:  "sitemap.xml configured via Craft CMS",
-			}, nil
+			}
 		}
 	}
 
@@ -840,7 +658,7 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 				Severity: SeverityInfo,
 				Passed:   true,
 				Message:  "sitemap.xml generated by Hugo (built-in)",
-			}, nil
+			}
 		}
 	}
 
@@ -852,7 +670,7 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 			Severity: SeverityInfo,
 			Passed:   true,
 			Message:  "sitemap.xml generated via jekyll-sitemap plugin",
-		}, nil
+		}
 	}
 
 	// Gatsby: Check for gatsby-plugin-sitemap
@@ -863,7 +681,7 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 			Severity: SeverityInfo,
 			Passed:   true,
 			Message:  "sitemap.xml generated via gatsby-plugin-sitemap",
-		}, nil
+		}
 	}
 
 	// Astro: Check for @astrojs/sitemap
@@ -876,7 +694,7 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 				Severity: SeverityInfo,
 				Passed:   true,
 				Message:  "sitemap.xml generated via Astro sitemap integration",
-			}, nil
+			}
 		}
 	}
 
@@ -890,7 +708,7 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 				Severity: SeverityInfo,
 				Passed:   true,
 				Message:  "sitemap.xml generated via Nuxt sitemap module",
-			}, nil
+			}
 		}
 	}
 
@@ -902,7 +720,7 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 			Severity: SeverityInfo,
 			Passed:   true,
 			Message:  "sitemap.xml configured via SvelteKit",
-		}, nil
+		}
 	}
 
 	// Eleventy: Check for sitemap in .eleventy.js or eleventy.config.js
@@ -915,7 +733,7 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 				Severity: SeverityInfo,
 				Passed:   true,
 				Message:  "sitemap.xml configured via Eleventy",
-			}, nil
+			}
 		}
 	}
 
@@ -928,7 +746,7 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 			Severity: SeverityInfo,
 			Passed:   true,
 			Message:  "sitemap.xml generated by Ghost (built-in)",
-		}, nil
+		}
 	}
 
 	// Drupal: Check for sitemap module
@@ -940,21 +758,6 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 			Severity: SeverityInfo,
 			Passed:   true,
 			Message:  "sitemap.xml generated via Drupal Simple Sitemap module",
-		}, nil
-	}
-
-	// HTTP fallback: try common sitemap paths in case it's served
-	// dynamically (Craft+SEOmatic, WordPress, etc.), and walk up to the parent
-	// domain so a sitemap on the org's main site counts for a subdomain app.
-	for _, path := range []string{"/sitemap.xml", "/sitemap_index.xml", "/sitemap.xml.gz"} {
-		if servedAt, ok := probeStaticFileWithParents(ctx, path); ok {
-			return CheckResult{
-				ID:       c.ID(),
-				Title:    c.Title(),
-				Severity: SeverityInfo,
-				Passed:   true,
-				Message:  "sitemap.xml served at " + servedAt,
-			}, nil
 		}
 	}
 
@@ -968,7 +771,7 @@ func (c SitemapCheck) Run(ctx Context) (CheckResult, error) {
 			"Add sitemap.xml to public/ directory",
 			"Consider using next-sitemap or similar generator",
 		},
-	}, nil
+	}
 }
 
 // LLMsTxtCheck verifies llms.txt exists for AI crawlers
@@ -982,64 +785,7 @@ func (c LLMsTxtCheck) Title() string {
 	return "llms.txt"
 }
 
-func (c LLMsTxtCheck) Run(ctx Context) (CheckResult, error) {
-	// Common web root directories across frameworks
-	webRoots := []string{
-		"public", // Laravel, Rails, many Node.js
-		"static", // Hugo, some SSGs
-		"web",    // Craft CMS, Symfony
-		"www",    // Some PHP apps
-		"dist",   // Built static sites
-		"build",  // Build outputs
-		"_site",  // Jekyll
-		"out",    // Next.js static export
-		"",       // Root directory
-	}
-
-	// Check both root and .well-known locations
-	for _, root := range webRoots {
-		var paths []string
-		if root == "" {
-			paths = []string{"llms.txt", ".well-known/llms.txt"}
-		} else {
-			paths = []string{root + "/llms.txt", root + "/.well-known/llms.txt"}
-		}
-		for _, path := range paths {
-			fullPath := filepath.Join(ctx.RootDir, path)
-			if content, err := readSourceFile(fullPath); err == nil {
-				// Check if it has meaningful content
-				contentStr := strings.TrimSpace(string(content))
-				if len(contentStr) > 0 {
-					return CheckResult{
-						ID:       c.ID(),
-						Title:    c.Title(),
-						Severity: SeverityInfo,
-						Passed:   true,
-						Message:  "llms.txt found at " + path,
-					}, nil
-				}
-			}
-		}
-	}
-
-	// Check monorepo public directories
-	monorepoPublicPaths := findMonorepoPublicFiles(ctx.RootDir, "llms.txt")
-	for _, path := range monorepoPublicPaths {
-		if content, err := readSourceFile(path); err == nil {
-			contentStr := strings.TrimSpace(string(content))
-			if len(contentStr) > 0 {
-				relPath := relPath(ctx.RootDir, path)
-				return CheckResult{
-					ID:       c.ID(),
-					Title:    c.Title(),
-					Severity: SeverityInfo,
-					Passed:   true,
-					Message:  "llms.txt found at " + relPath,
-				}, nil
-			}
-		}
-	}
-
+func (c LLMsTxtCheck) fromSource(ctx Context) CheckResult {
 	// Check for dynamic llms.txt generation across JS/TS frameworks
 	jsLLMsPaths := []string{
 		// Next.js App Router
@@ -1071,7 +817,7 @@ func (c LLMsTxtCheck) Run(ctx Context) (CheckResult, error) {
 				Severity: SeverityInfo,
 				Passed:   true,
 				Message:  "llms.txt generated via " + path,
-			}, nil
+			}
 		}
 	}
 
@@ -1088,7 +834,7 @@ func (c LLMsTxtCheck) Run(ctx Context) (CheckResult, error) {
 				Severity: SeverityInfo,
 				Passed:   true,
 				Message:  "llms.txt generated via " + relPath,
-			}, nil
+			}
 		}
 	}
 
@@ -1117,7 +863,7 @@ func (c LLMsTxtCheck) Run(ctx Context) (CheckResult, error) {
 				Severity: SeverityInfo,
 				Passed:   true,
 				Message:  "llms.txt generated via " + path,
-			}, nil
+			}
 		}
 	}
 
@@ -1168,20 +914,6 @@ func (c LLMsTxtCheck) Run(ctx Context) (CheckResult, error) {
 			Severity: SeverityInfo,
 			Passed:   true,
 			Message:  "llms.txt generated via " + llmsFoundPath,
-		}, nil
-	}
-
-	// HTTP fallback: served dynamically, or hosted on the org's main site
-	// (walk up to the parent domain of the production URL).
-	for _, path := range []string{"/llms.txt", "/.well-known/llms.txt"} {
-		if servedAt, ok := probeStaticFileWithParents(ctx, path); ok {
-			return CheckResult{
-				ID:       c.ID(),
-				Title:    c.Title(),
-				Severity: SeverityInfo,
-				Passed:   true,
-				Message:  "llms.txt served at " + servedAt,
-			}, nil
 		}
 	}
 
@@ -1195,7 +927,7 @@ func (c LLMsTxtCheck) Run(ctx Context) (CheckResult, error) {
 			"Add llms.txt to help AI understand your site",
 			"See https://llmstxt.org for specification",
 		},
-	}, nil
+	}
 }
 
 // AdsTxtCheck verifies ads.txt exists (optional, for ad-supported sites)
@@ -1222,42 +954,10 @@ func (c AdsTxtCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	// Common web root directories across frameworks
-	webRoots := []string{
-		"public", // Laravel, Rails, many Node.js
-		"static", // Hugo, some SSGs
-		"web",    // Craft CMS, Symfony
-		"www",    // Some PHP apps
-		"dist",   // Built static sites
-		"build",  // Build outputs
-		"_site",  // Jekyll
-		"out",    // Next.js static export
-		"",       // Root directory
-	}
+	return wellKnownResult(ctx, c, adsTxtFile, c.fromSource), nil
+}
 
-	for _, root := range webRoots {
-		var path string
-		if root == "" {
-			path = "ads.txt"
-		} else {
-			path = root + "/ads.txt"
-		}
-		fullPath := filepath.Join(ctx.RootDir, path)
-		if content, err := readSourceFile(fullPath); err == nil {
-			// Check if it has meaningful content
-			contentStr := strings.TrimSpace(string(content))
-			if len(contentStr) > 0 {
-				return CheckResult{
-					ID:       c.ID(),
-					Title:    c.Title(),
-					Severity: SeverityInfo,
-					Passed:   true,
-					Message:  "ads.txt found at " + path,
-				}, nil
-			}
-		}
-	}
-
+func (c AdsTxtCheck) fromSource(Context) CheckResult {
 	return CheckResult{
 		ID:       c.ID(),
 		Title:    c.Title(),
@@ -1268,7 +968,7 @@ func (c AdsTxtCheck) Run(ctx Context) (CheckResult, error) {
 			"Add ads.txt for authorized digital sellers",
 			"Required if running programmatic ads",
 		},
-	}, nil
+	}
 }
 
 // IndexNowCheck verifies IndexNow key file exists with correct content
@@ -1593,6 +1293,18 @@ func (c IndexNowCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
+	// Reaching this point with a deployed site to ask means the probe at
+	// the top got no conclusive answer (the host was down, blocked the
+	// scan, or failed), and the source does not show the key either. That
+	// is not the same as the key file being absent.
+	if ctx.urlConfigured() && ctx.Client != nil {
+		reason := ctx.siteUnverified()
+		if reason == "" {
+			reason = "the deployed site gave no conclusive answer"
+		}
+		return inconclusiveResult(c, "the IndexNow key file", reason+", and not found in source"), nil
+	}
+
 	return CheckResult{
 		ID:       c.ID(),
 		Title:    c.Title(),
@@ -1629,30 +1341,10 @@ func (c HumansTxtCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	webRoots := []string{"public", "static", "web", "www", "dist", "build", "_site", "out", ""}
+	return wellKnownResult(ctx, c, humansTxtFile, c.fromSource), nil
+}
 
-	for _, root := range webRoots {
-		var path string
-		if root == "" {
-			path = "humans.txt"
-		} else {
-			path = root + "/humans.txt"
-		}
-		fullPath := filepath.Join(ctx.RootDir, path)
-		if content, err := readSourceFile(fullPath); err == nil {
-			contentStr := strings.TrimSpace(string(content))
-			if len(contentStr) > 0 {
-				return CheckResult{
-					ID:       c.ID(),
-					Title:    c.Title(),
-					Severity: SeverityInfo,
-					Passed:   true,
-					Message:  "humans.txt found at " + path,
-				}, nil
-			}
-		}
-	}
-
+func (c HumansTxtCheck) fromSource(Context) CheckResult {
 	return CheckResult{
 		ID:       c.ID(),
 		Title:    c.Title(),
@@ -1663,7 +1355,7 @@ func (c HumansTxtCheck) Run(ctx Context) (CheckResult, error) {
 			"Add humans.txt to credit the team behind the site",
 			"See https://humanstxt.org for format",
 		},
-	}, nil
+	}
 }
 
 // findMonorepoNextFiles searches for files in monorepo structures with Next.js App Router

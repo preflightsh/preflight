@@ -29,8 +29,7 @@ func (c StructuredDataCheck) Run(ctx Context) (CheckResult, error) {
 
 	// Check main layout if configured
 	if cfg != nil && cfg.MainLayout != "" {
-		layoutPath := filepath.Join(ctx.RootDir, cfg.MainLayout)
-		content, err := readSourceFile(layoutPath)
+		content, err := readProjectFile(ctx.RootDir, cfg.MainLayout)
 		if err == nil {
 			if hasStructuredData(string(content), ctx.Config.Stack) {
 				if ctx.Verbose {
@@ -135,14 +134,16 @@ func hasStructuredData(content, stack string) bool {
 	}
 
 	// Rails structured_data helper or schema.org gem
-	railsSchema := regexp.MustCompile(`(?i)structured_data\s*do|json_ld_tag|render.*schema`)
+	railsSchema := regexp.MustCompile(`(?i)structured_data\s*do|json_ld_tag`)
 	if railsSchema.MatchString(content) {
 		return true
 	}
 
-	// Hugo schema partial (file include patterns)
-	hugoSchema := regexp.MustCompile(`(?i)partial\s+["'].*schema|include\s+["'].*schema`)
-	if hugoSchema.MatchString(content) {
+	// A partial or include named for the schema markup (Rails render,
+	// Hugo partial, Jekyll and Twig include). The template's own name has
+	// to be the schema one: render "admin/schema_browser" is an unrelated
+	// page that happens to have the word in it.
+	if schemaPartialRE.MatchString(content) {
 		return true
 	}
 
@@ -268,3 +269,8 @@ func getStructuredDataSuggestions(stack string) []string {
 		}
 	}
 }
+
+// schemaPartialRE matches a render, partial, or include of a template whose
+// file name is schema, schema_org, structured_data, or json_ld (with either
+// separator, an optional leading underscore, and any extension).
+var schemaPartialRE = regexp.MustCompile(`(?i)\b(?:render|partial|include)\b\s*\(?\s*(?:partial:\s*)?["'](?:[^"']*/)?_?(?:schema|structured[_-]?data|json[_-]?ld)(?:[_.-]?(?:org|organization|markup|data|website|article|product|person|breadcrumbs?|faq|local[_-]?business))?(?:\.[\w.]+)?["']`)

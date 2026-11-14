@@ -43,8 +43,7 @@ func (c LangAttributeCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	layoutPath := filepath.Join(ctx.RootDir, layoutFile)
-	content, err := readSourceFile(layoutPath)
+	content, err := readProjectFile(ctx.RootDir, layoutFile)
 	if err != nil {
 		return CheckResult{
 			ID:       c.ID(),
@@ -110,55 +109,25 @@ func hasLangAttribute(content, stack string) bool {
 	// Strip comments to avoid false positives on commented-out code
 	content = stripCodeComments(content)
 
-	// Standard HTML lang attribute: <html lang="en">
-	htmlLang := regexp.MustCompile(`(?i)<html[^>]+lang=["'][a-z]{2}(-[A-Za-z]{2,})?["']`)
-	if htmlLang.MatchString(content) {
+	// A lang attribute on the <html> tag itself, static (lang="en") or
+	// dynamic (lang="{{ ... }}", lang="<%= ... %>", lang={...}).
+	if htmlLangAttrRE.MatchString(content) {
 		return true
 	}
 
-	// Dynamic lang attribute with template variable
-	dynamicLang := regexp.MustCompile(`(?i)<html[^>]+lang=["']\{`)
-	if dynamicLang.MatchString(content) {
-		return true
-	}
-
-	// JSX/TSX: <html lang={...}>
-	jsxLang := regexp.MustCompile(`(?i)<html[^>]+lang=\{`)
-	if jsxLang.MatchString(content) {
-		return true
-	}
-
-	// ERB: <html lang="<%= ... %>">
-	erbLang := regexp.MustCompile(`(?i)<html[^>]+lang=["']<%=`)
-	if erbLang.MatchString(content) {
-		return true
-	}
-
-	// Blade: <html lang="{{ ... }}">
-	bladeLang := regexp.MustCompile(`(?i)<html[^>]+lang=["']\{\{`)
-	if bladeLang.MatchString(content) {
-		return true
-	}
-
-	// Twig/Jinja: <html lang="{{ ... }}">
-	twigLang := regexp.MustCompile(`(?i)<html[^>]+lang=["']\{\{`)
-	if twigLang.MatchString(content) {
-		return true
-	}
-
-	// Hugo: {{ with .Site.Language.Lang }}
-	hugoLang := regexp.MustCompile(`(?i)<html[^>]+lang=["']\{\{.*\.Language`)
-	if hugoLang.MatchString(content) {
-		return true
-	}
-
-	// Next.js App Router - lang is set in RootLayout
-	// Check for lang prop or hardcoded lang
-	// A whole-word lang, so hreflang="en" on an alternate link or a
-	// data-lang attribute doesn't count as the document language.
-	nextjsLang := regexp.MustCompile(`(?i)(?:^|[^\w-])lang\s*[:=]\s*["'][a-z]{2}`)
-	return nextjsLang.MatchString(content)
+	// The document language set as an object key rather than an attribute:
+	// Nuxt's htmlAttrs: { lang: 'en' }, a head() config, an i18n default.
+	// Only the key form counts. An attribute form anywhere but <html> is a
+	// different element's language: <style lang="scss">, <script lang="ts">.
+	return langKeyRE.MatchString(content)
 }
+
+var (
+	// The lang must be its own attribute: hreflang="en" and data-lang="en"
+	// are something else.
+	htmlLangAttrRE = regexp.MustCompile(`(?i)<html\b[^>]*[\s"']lang\s*=\s*(?:["'][^"'\s]|\{)`)
+	langKeyRE      = regexp.MustCompile(`(?im)(?:^|[\s{,(])lang\s*:\s*["'][a-z]{2}`)
+)
 
 func checkLangPartials(rootDir, stack string) bool {
 	// Common locations for layout files that contain <html> tag

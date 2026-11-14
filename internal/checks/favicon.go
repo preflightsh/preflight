@@ -270,9 +270,8 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 		// Check configured layout first
 		cfg := ctx.Config.Checks.SEOMeta
 		if cfg != nil && cfg.MainLayout != "" {
-			layoutPath := filepath.Join(ctx.RootDir, cfg.MainLayout)
-			if content, err := readSourceFile(layoutPath); err == nil {
-				if appleTouchIconRe.Match(content) {
+			if content, err := readProjectFile(ctx.RootDir, cfg.MainLayout); err == nil {
+				if appleTouchIconRe.MatchString(stripCodeComments(string(content))) {
 					hasAppleIcon = true
 					found = append(found, "apple-touch-icon (in HTML)")
 				}
@@ -284,7 +283,7 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 			for _, tplPath := range iconLayoutTemplates {
 				fullPath := filepath.Join(ctx.RootDir, tplPath)
 				if content, err := readSourceFile(fullPath); err == nil {
-					if appleTouchIconRe.Match(content) {
+					if appleTouchIconRe.MatchString(stripCodeComments(string(content))) {
 						hasAppleIcon = true
 						found = append(found, "apple-touch-icon (in HTML)")
 						break
@@ -315,7 +314,7 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 				fullPath := filepath.Join(ctx.RootDir, layoutPath)
 				if content, err := readSourceFile(fullPath); err == nil {
 					// Check for Next.js metadata icons with apple property
-					if nextAppleIconRe.Match(content) {
+					if nextAppleIconRe.MatchString(stripCodeComments(string(content))) {
 						hasAppleIcon = true
 						found = append(found, "apple-touch-icon (in Next.js metadata)")
 						break
@@ -508,32 +507,37 @@ func (c FaviconCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	if hasFavicon && len(missing) <= 2 {
-		// Has favicon but missing apple icon or manifest - just warn
-		return CheckResult{
-			ID:       c.ID(),
-			Title:    c.Title(),
-			Severity: SeverityWarn,
-			Passed:   false,
-			Message:  "Missing: " + strings.Join(missing, ", "),
-			Suggestions: []string{
-				"Add apple-touch-icon.png (180x180px) for iOS",
-				"Add manifest.json for PWA support",
-			},
-		}, nil
+	// The rendered homepage is the last word for CMS and plugin-driven
+	// sites, whose icons never appear in the repo. When a URL is configured
+	// and the scan could not get that page (the host was down, blocked the
+	// scan, or failed), "missing" would be a guess.
+	if ctx.urlConfigured() && strings.TrimSpace(ctx.PageHTML) == "" {
+		if reason := ctx.siteUnverified(); reason != "" {
+			return inconclusiveResult(c, strings.Join(missing, ", "), reason+", and not found in source"), nil
+		}
 	}
 
-	// A missing favicon is a polish issue, not a launch blocker.
-	return CheckResult{
-		ID:       c.ID(),
-		Title:    c.Title(),
-		Severity: SeverityWarn,
-		Passed:   false,
-		Message:  "Missing: " + strings.Join(missing, ", "),
-		Suggestions: []string{
+	// A missing favicon is a polish issue, not a launch blocker. Each
+	// suggestion is for something actually missing.
+	var suggestions []string
+	if !hasFavicon {
+		suggestions = append(suggestions,
 			"Add favicon.ico or favicon.png to public/",
-			"Use https://realfavicongenerator.net for complete icon set",
-		},
+			"Use https://realfavicongenerator.net for complete icon set")
+	}
+	if !hasAppleIcon {
+		suggestions = append(suggestions, "Add apple-touch-icon.png (180x180px) for iOS")
+	}
+	if !hasManifest {
+		suggestions = append(suggestions, "Add manifest.json for PWA support")
+	}
+	return CheckResult{
+		ID:          c.ID(),
+		Title:       c.Title(),
+		Severity:    SeverityWarn,
+		Passed:      false,
+		Message:     "Missing: " + strings.Join(missing, ", "),
+		Suggestions: suggestions,
 	}, nil
 }
 

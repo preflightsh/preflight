@@ -3,6 +3,7 @@ package checks
 import (
 	"path/filepath"
 	"regexp"
+	"strings"
 )
 
 type CanonicalURLCheck struct{}
@@ -16,11 +17,26 @@ func (c CanonicalURLCheck) Title() string {
 }
 
 func (c CanonicalURLCheck) Run(ctx Context) (CheckResult, error) {
-	if r, ok := renderedResult(ctx, c, func(doc renderedDoc) []string {
-		if doc.hasLinkRel("canonical") {
+	if r, ok := renderedResultEnv(ctx, c, func(env string, doc renderedDoc) []string {
+		href := doc.linkHref("canonical")
+		if href == "" {
+			return []string{"canonical"}
+		}
+		// On production the canonical is what search engines index under,
+		// so it has to be a full URL on a real host. A relative one, or a
+		// dev server's address left in, points them at nothing. Staging is
+		// left alone, and so is a production URL that is itself local.
+		if env != "prod" || IsLocalURL(ctx.Config.URLs.Production) {
 			return nil
 		}
-		return []string{"canonical"}
+		lower := strings.ToLower(href)
+		switch {
+		case !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://"):
+			return []string{"canonical with an absolute URL (found " + truncate(href, 60) + ")"}
+		case IsLocalURL(href):
+			return []string{"canonical that points at the live site (found " + truncate(href, 60) + ")"}
+		}
+		return nil
 	}); ok {
 		return r, nil
 	}
@@ -43,8 +59,7 @@ func (c CanonicalURLCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
-	layoutPath := filepath.Join(ctx.RootDir, layoutFile)
-	content, err := readSourceFile(layoutPath)
+	content, err := readProjectFile(ctx.RootDir, layoutFile)
 	if err != nil {
 		return CheckResult{
 			ID:       c.ID(),
@@ -105,18 +120,13 @@ var canonicalPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)link\s*:\s*\[[^\]]*rel:\s*["']canonical["']`),
 	// Nuxt/Vue useHead
 	regexp.MustCompile(`(?i)useHead\s*\([^)]*canonical`),
-	// Rails canonical helper
-	regexp.MustCompile(`(?i)<%=.*canonical.*%>`),
-	// Django/Jinja canonical
-	regexp.MustCompile(`(?i)\{%.*canonical.*%\}|\{\{.*canonical.*\}\}`),
-	// Twig canonical (Craft CMS, Symfony)
-	regexp.MustCompile(`(?i)\{\{.*canonical.*\}\}|\{%.*canonical.*%\}`),
-	// PHP canonical
-	regexp.MustCompile(`(?i)<\?.*canonical.*\?>`),
-	// Blade canonical (Laravel)
-	regexp.MustCompile(`(?i)\{\{.*canonical.*\}\}|@.*canonical`),
+	// Blade directive naming a canonical section, stack, or partial
+	// (@yield('canonical'), @include('partials.canonical')). Only the
+	// directive's first argument counts: @section('title', 'Our canonical
+	// guide') is a page title.
+	regexp.MustCompile(`(?i)@(?:include\w*|yield|stack|section|push|prepend|component)\s*\(\s*["'][^"'\s]*canonical[^"'\s]*["']|@canonical\b`),
 	// Hugo canonical
-	regexp.MustCompile(`(?i)\{\{.*\.Permalink.*\}\}.*rel=["']canonical["']|\.Site\.BaseURL`),
+	regexp.MustCompile(`(?i)\{\{.*\.Permalink.*\}\}.*rel=["']canonical["']`),
 	// Astro canonical. Astro.url alone is everywhere (nav highlighting);
 	// it only counts in the same statement as a canonical. Next.js
 	// metadataBase is not here either: it resolves relative URLs and emits
@@ -130,6 +140,37 @@ func hasCanonicalURL(content, stack string) bool {
 	for _, re := range canonicalPatterns {
 		if re.MatchString(content) {
 			return true
+		}
+	}
+	return templateExpressionMentions(content, "canonical")
+}
+
+var (
+	// templateExpressionRE matches one template expression or statement on
+	// a single line: Twig, Jinja, Blade, Liquid, and Hugo ({{ }} and {% %}),
+	// ERB (<%= %>), and PHP (<? ?>).
+	templateExpressionRE = regexp.MustCompile(`\{\{.*?\}\}|\{%.*?%\}|<%.*?%>|<\?.*?\?>`)
+	quotedStringRE       = regexp.MustCompile(`"[^"\n]*"|'[^'\n]*'`)
+)
+
+// templateExpressionMentions reports whether a template expression refers
+// to word as code: an identifier ({{ seo.canonical }}, canonical_url()), or
+// a quoted name with no spaces in it ("canonical", "partials/_canonical").
+// A sentence that merely contains the word ({{ "Our canonical guide" }}) is
+// text, and text must not satisfy a check.
+func templateExpressionMentions(content, word string) bool {
+	for _, expr := range templateExpressionRE.FindAllString(content, -1) {
+		lower := strings.ToLower(expr)
+		if !strings.Contains(lower, word) {
+			continue
+		}
+		if strings.Contains(quotedStringRE.ReplaceAllString(lower, ""), word) {
+			return true
+		}
+		for _, quoted := range quotedStringRE.FindAllString(lower, -1) {
+			if strings.Contains(quoted, word) && !strings.ContainsAny(quoted, " \t") {
+				return true
+			}
 		}
 	}
 	return false

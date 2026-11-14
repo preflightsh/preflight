@@ -36,48 +36,53 @@ func (c SecurityHeadersCheck) Run(ctx Context) (CheckResult, error) {
 	var weakNotes []string
 	var suggestions []string
 	hasFailure := false
+	// unverified is true when the authoritative environment could not be
+	// measured: it was down, blocked the scan, or failed with a 5xx. That
+	// is not a header finding, so the result is flagged inconclusive.
+	unverified := false
 	// Production is authoritative once it answered, the same rule RunPerEnv
 	// applies: a staging host that is down (a local dev server not running
-	// during the scan) is noted in the message but is not a header failure.
+	// during the scan) or missing headers that only the production edge
+	// adds is noted in the message but is not a header failure.
 	prodAnswered := false
+	prodPassed := false
 
 	// Check production if configured
 	if prodURL != "" {
-		missing, weak, status, err := c.checkURL(ctx, prodURL, ctx.PageFetchProduction)
-		if err != nil {
-			results = append(results, "prod: unreachable")
-			hasFailure = true
-		} else if blockedStatus(status) {
+		missing, weak, status, err := c.checkURL(ctx, prodURL, ctx.PageFetchProduction, ctx.PageHTMLProduction)
+		switch {
+		case err != nil:
 			// The headers on a bot-protection or auth-wall response are the
 			// edge's, not the site's. Reporting them would invent missing
 			// headers for a site we never actually reached.
-			results = append(results, fmt.Sprintf("prod: %s", fetchFailure(status)))
-			hasFailure = true
-		} else if len(missing) > 0 {
+			results = append(results, "prod: "+fetchFailure(status))
+			unverified = true
+		case len(missing) > 0:
 			results = append(results, fmt.Sprintf("prod missing: %s", strings.Join(missing, ", "))+weakSuffix(weak))
 			allMissing = append(allMissing, missing...)
 			hasFailure = true
-		} else {
+		default:
 			results = append(results, "prod: ✓"+weakSuffix(weak))
+			prodPassed = true
 		}
 		weakNotes = append(weakNotes, weak...)
-		prodAnswered = err == nil && !blockedStatus(status)
+		prodAnswered = err == nil
 	}
 
 	// Check staging if configured
 	if stagingURL != "" {
-		missing, weak, status, err := c.checkURL(ctx, stagingURL, ctx.PageFetchStaging)
-		if err != nil {
-			results = append(results, "staging: unreachable")
-			hasFailure = hasFailure || !prodAnswered
-		} else if blockedStatus(status) {
-			results = append(results, fmt.Sprintf("staging: %s", fetchFailure(status)))
-			hasFailure = hasFailure || !prodAnswered
-		} else if len(missing) > 0 {
+		missing, weak, status, err := c.checkURL(ctx, stagingURL, ctx.PageFetchStaging, ctx.PageHTMLStaging)
+		switch {
+		case err != nil:
+			results = append(results, "staging: "+fetchFailure(status))
+			unverified = unverified || !prodAnswered
+		case len(missing) > 0 && prodPassed:
+			results = append(results, fmt.Sprintf("staging missing: %s", strings.Join(missing, ", "))+weakSuffix(weak)+" (not a failure: production sends them)")
+		case len(missing) > 0:
 			results = append(results, fmt.Sprintf("staging missing: %s", strings.Join(missing, ", "))+weakSuffix(weak))
 			allMissing = append(allMissing, missing...)
 			hasFailure = true
-		} else {
+		default:
 			results = append(results, "staging: ✓"+weakSuffix(weak))
 		}
 		weakNotes = append(weakNotes, weak...)
@@ -88,6 +93,12 @@ func (c SecurityHeadersCheck) Run(ctx Context) (CheckResult, error) {
 	var cspSuggestions []string
 	if len(weakNotes) > 0 {
 		cspSuggestions = append(cspSuggestions, "Tighten script-src: replace 'unsafe-inline' with nonces or hashes, drop 'unsafe-eval' and wildcard sources")
+	}
+
+	if !hasFailure && unverified {
+		res := inconclusiveResult(c, "security headers", strings.Join(results, "; "))
+		res.Suggestions = append(res.Suggestions, cspSuggestions...)
+		return res, nil
 	}
 
 	if !hasFailure {
@@ -154,9 +165,21 @@ func weakSuffix(weak []string) string {
 // answered, which it otherwise would whenever a slow host beat the timeout
 // on one request but not the other. Only a check invoked outside a scan
 // (no prefetch) makes its own request.
-func (c SecurityHeadersCheck) checkURL(ctx Context, url string, prefetched PageFetch) ([]string, []string, int, error) {
+//
+// pageHTML is that environment's homepage markup, consulted for a policy
+// delivered by <meta http-equiv>, which is the only way to send one from a
+// static host that cannot set headers.
+//
+// A non-nil error means the environment could not be measured (nothing
+// answered, the host blocked the scan, or it failed with a 5xx); the status
+// says which. Any other answer is measured, a 404 included: an API whose
+// root is a 404 sends its headers on that 404.
+func (c SecurityHeadersCheck) checkURL(ctx Context, url string, prefetched PageFetch, pageHTML string) ([]string, []string, int, error) {
 	headers, status, actualURL := prefetched.Headers, prefetched.Status, prefetched.URL
 	if !prefetched.Attempted() {
+		if ctx.Client == nil {
+			return nil, nil, 0, fmt.Errorf("fetch %s: no HTTP client", url)
+		}
 		resp, requested, err := tryURL(ctx.reqContext(), ctx.Client, url)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("fetch %s: %w", url, err)
@@ -168,7 +191,7 @@ func (c SecurityHeadersCheck) checkURL(ctx Context, url string, prefetched PageF
 		// The scan tried this environment and nothing answered.
 		return nil, nil, 0, fmt.Errorf("fetch %s: no response", url)
 	}
-	if (status < 200 || status >= 400) && !blockedStatus(status) {
+	if blockedStatus(status) || status >= 500 {
 		return nil, nil, status, fmt.Errorf("fetch %s: HTTP %d", url, status)
 	}
 
@@ -190,6 +213,9 @@ func (c SecurityHeadersCheck) checkURL(ctx Context, url string, prefetched PageF
 	var missing, weak []string
 	for _, header := range requiredHeaders {
 		value := headers.Get(header)
+		if header == "Content-Security-Policy" && strings.TrimSpace(value) == "" && pageHTML != "" {
+			value = parseRenderedHTML(pageHTML).httpEquiv["content-security-policy"]
+		}
 		switch {
 		case strings.TrimSpace(value) == "":
 			missing = append(missing, header)
@@ -230,14 +256,27 @@ func cspWeakness(value string) string {
 	}
 	// A nonce or hash makes browsers ignore 'unsafe-inline' (it is only
 	// there as a fallback for old ones).
-	nonce := false
+	nonce, strictDynamic := false, false
 	for _, v := range sources {
 		if strings.HasPrefix(v, "'nonce-") || strings.HasPrefix(v, "'sha256-") || strings.HasPrefix(v, "'sha384-") || strings.HasPrefix(v, "'sha512-") {
 			nonce = true
 		}
+		if v == "'strict-dynamic'" {
+			strictDynamic = true
+		}
 	}
+	// With 'strict-dynamic' next to a nonce or hash, browsers ignore host
+	// and scheme sources entirely. The recommended strict policy lists
+	// https: and 'unsafe-inline' only as fallbacks for browsers that do not
+	// know 'strict-dynamic', so they are not a weakness there.
+	ignoresHosts := strictDynamic && nonce
 	for _, v := range sources {
-		if v == "*" || v == "http:" || v == "https:" || v == "'unsafe-eval'" || (v == "'unsafe-inline'" && !nonce) {
+		switch {
+		case v == "'unsafe-eval'":
+			return name + " allows " + v
+		case v == "'unsafe-inline'" && !nonce:
+			return name + " allows " + v
+		case (v == "*" || v == "http:" || v == "https:") && !ignoresHosts:
 			return name + " allows " + v
 		}
 	}

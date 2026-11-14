@@ -59,7 +59,7 @@ func TestSSLExpiryGrading(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			res := SSLCheck{}.expiryResult(selfSignedCert(t, now.Add(-time.Hour), tc.notAfter, "example.com"))
+			res := SSLCheck{}.expiryResult(selfSignedCert(t, now.Add(-300*24*time.Hour), tc.notAfter, "example.com"))
 			if res.Severity != tc.severity || res.Passed != tc.passed {
 				t.Errorf("got severity=%s passed=%v, want %s/%v (%s)", res.Severity, res.Passed, tc.severity, tc.passed, res.Message)
 			}

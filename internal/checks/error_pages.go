@@ -110,8 +110,11 @@ func (c ErrorPagesCheck) Run(ctx Context) (CheckResult, error) {
 	// Server-rendered apps return 404s dynamically (no file on disk), which the
 	// filesystem checks above can't see. If a URL is configured, probe a path
 	// that shouldn't exist and accept a real HTML 404 response as a custom page.
+	unverified := ""
 	if !has404 {
-		if probeCustom404OverHTTP(ctx) {
+		var served bool
+		served, unverified = probeCustom404OverHTTP(ctx)
+		if served {
 			has404 = true
 			found404 = "served dynamically (HTTP 404)"
 		}
@@ -139,6 +142,13 @@ func (c ErrorPagesCheck) Run(ctx Context) (CheckResult, error) {
 		}, nil
 	}
 
+	// A deployed site that could not be asked (down, blocked, failing) has
+	// not shown that it lacks a 404 page. Server-rendered apps have no file
+	// on disk to find, so the source search alone cannot say so either.
+	if unverified != "" {
+		return inconclusiveResult(c, "a custom 404 page", unverified+", and none found in source"), nil
+	}
+
 	// Missing 404 page - this is a warning
 	suggestions := getErrorPageSuggestions(stack)
 
@@ -157,39 +167,70 @@ func (c ErrorPagesCheck) Run(ctx Context) (CheckResult, error) {
 // real (HTML) 404 page. This detects custom error pages rendered dynamically by
 // a server framework, which the filesystem checks can't see. A bare plain-text
 // default (e.g. Go's "404 page not found") is not counted.
-func probeCustom404OverHTTP(ctx Context) bool {
-	if ctx.Client == nil {
-		return false
+//
+// unverified is set when a URL is configured and no host gave an answer
+// that says anything: it names why ("prod: blocked (HTTP 403)").
+func probeCustom404OverHTTP(ctx Context) (served bool, unverified string) {
+	if ctx.Client == nil || !ctx.urlConfigured() {
+		return false, ""
 	}
+	var reasons []string
+	conclusive := false
 	for _, baseURL := range ctx.probeBaseURLs() {
-		if servesHTML404(ctx, baseURL) {
-			return true
+		found, failure := probeHTML404(ctx, baseURL)
+		if found {
+			return true, ""
 		}
+		if failure == "" {
+			conclusive = true
+			continue
+		}
+		reasons = append(reasons, ctx.envName(baseURL)+": "+failure)
 	}
-	return false
+	if conclusive {
+		return false, ""
+	}
+	if len(reasons) == 0 {
+		// Every configured host was already found down by the scan.
+		if reason := ctx.siteUnverified(); reason != "" {
+			return false, reason
+		}
+		return false, "site unreachable"
+	}
+	return false, strings.Join(reasons, "; ")
 }
 
 // servesHTML404 requests a path that should not exist on baseURL and reports
 // whether the answer is an HTML 404 page.
 func servesHTML404(ctx Context, baseURL string) bool {
-	resp, _, err := tryURL(ctx.reqContext(), ctx.Client, baseURL+"/preflight-404-probe-please-do-not-exist")
+	found, _ := probeHTML404(ctx, baseURL)
+	return found
+}
+
+// probeHTML404 is servesHTML404 that also says why the host could not
+// answer the question (failure is "" when it did).
+func probeHTML404(ctx Context, baseURL string) (found bool, failure string) {
+	resp, _, err := tryURL(ctx.reqContext(), ctx.Client, strings.TrimSuffix(baseURL, "/")+catchAllProbePath)
 	if err != nil {
-		return false
+		return false, "unreachable"
 	}
 	defer resp.Body.Close()
+	if blockedStatus(resp.StatusCode) || resp.StatusCode >= 500 {
+		return false, fetchFailure(resp.StatusCode)
+	}
 	if resp.StatusCode != http.StatusNotFound {
-		return false
+		return false, ""
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, netutil.MaxResponseBody))
 	if err != nil {
-		return false
+		return false, "unreachable"
 	}
 	lower := strings.ToLower(strings.TrimSpace(string(body)))
 	ct := strings.ToLower(resp.Header.Get("Content-Type"))
 	isHTML := strings.Contains(ct, "text/html") ||
 		strings.Contains(lower, "<html") ||
 		strings.Contains(lower, "<!doctype html")
-	return isHTML && !isStockErrorPage(lower)
+	return isHTML && !isStockErrorPage(lower), ""
 }
 
 // stockErrorPageMarkers identify the default 404 pages web servers and
@@ -204,6 +245,7 @@ var stockErrorPageMarkers = []string{
 	"404: not_found",                              // Vercel
 	"code: <code>not_found</code>",                // Vercel
 	"looks like you've followed a broken link",    // Netlify
+	"next-error-h1",                               // Next.js built-in 404
 }
 
 // reHTMLTag matches one HTML tag, for reducing a page to its text.

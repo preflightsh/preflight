@@ -49,7 +49,7 @@ func (c SEOMetadataCheck) Run(ctx Context) (CheckResult, error) {
 	}
 
 	layoutPath := filepath.Join(ctx.RootDir, layoutFile)
-	content, err := readSourceFile(layoutPath)
+	content, err := readProjectFile(ctx.RootDir, layoutFile)
 	if err != nil {
 		return CheckResult{
 			ID:       c.ID(),
@@ -257,8 +257,8 @@ func checkAlternatePatterns(content, name string) bool {
 			// or a title key in a JS object. A bare title= attribute on an
 			// HTML element (<a title="Home">) is a tooltip, not the page title.
 			regexp.MustCompile(`<[A-Z][\w.]*\b[^>]*\btitle\s*=`),
-			regexp.MustCompile(`\btitle\s*:`),
-			regexp.MustCompile(`<Title>`), // Next.js Head
+			regexp.MustCompile(`["']title["']\s*:`), // quoted object key
+			regexp.MustCompile(`<Title>`),           // Next.js Head
 		},
 		"description": {
 			regexp.MustCompile(`name:\s*["']description["']`),
@@ -275,6 +275,18 @@ func checkAlternatePatterns(content, name string) bool {
 	if patterns, ok := alternates[name]; ok {
 		for _, pattern := range patterns {
 			if pattern.MatchString(content) {
+				return true
+			}
+		}
+	}
+	// A bare title key in a JS object. Quoted text is blanked first, so a
+	// string that happens to contain "title:" ("The title: a story") is
+	// not taken for one.
+	// Masking goes line by line so a stray apostrophe in prose can only
+	// hide the rest of its own line.
+	if name == "title" {
+		for _, line := range strings.Split(content, "\n") {
+			if titleKeyRE.MatchString(maskCodeStrings(line)) {
 				return true
 			}
 		}
@@ -518,3 +530,6 @@ func extractIncludePaths(content string) []string {
 
 	return paths
 }
+
+// titleKeyRE matches an unquoted title key in an object literal.
+var titleKeyRE = regexp.MustCompile(`\btitle\s*:`)

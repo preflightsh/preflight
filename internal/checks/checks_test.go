@@ -18,7 +18,7 @@ func TestIsLocalURL(t *testing.T) {
 		want bool
 		why  string
 	}{
-		// Real local URLs — must still be detected.
+		// Real local URLs: must still be detected.
 		{"http://localhost", true, "bare localhost"},
 		{"http://localhost:3000", true, "localhost with port"},
 		{"localhost:3000", true, "no scheme + port"},
@@ -31,11 +31,11 @@ func TestIsLocalURL(t *testing.T) {
 		{"https://yow.lndo.site", true, "lando"},
 		{"https://app.localhost", true, ".localhost TLD"},
 
-		// SSRF-bypass attempts via the new local TLDs — must NOT match.
+		// SSRF-bypass attempts via the new local TLDs: must NOT match.
 		{"https://attacker.com/?h=yow.lndo.site", false, ".lndo.site in query"},
 		{"https://example.lndo.site.evil.com", false, "'.lndo.site' is not the suffix"},
 
-		// SSRF-bypass attempts via substring — must NOT match.
+		// SSRF-bypass attempts via substring: must NOT match.
 		{"https://localhost.attacker.com/", false, "substring 'localhost' in hostname"},
 		{"https://attacker.com/?h=localhost", false, "substring in query"},
 		{"https://attacker.com#127.0.0.1", false, "substring in fragment"},
@@ -252,8 +252,9 @@ func TestFetchFailure(t *testing.T) {
 		{http.StatusUnauthorized, "blocked (HTTP 401)"},
 		{http.StatusForbidden, "blocked (HTTP 403)"},
 		{http.StatusTooManyRequests, "blocked (HTTP 429)"},
-		{http.StatusNotFound, "unreachable (HTTP 404)"},
-		{http.StatusInternalServerError, "unreachable (HTTP 500)"},
+		{http.StatusNotFound, "answered HTTP 404"},
+		{http.StatusInternalServerError, "server error (HTTP 500)"},
+		{http.StatusOK, "empty response (HTTP 200)"},
 	}
 	for _, tc := range cases {
 		if got := fetchFailure(tc.status); got != tc.want {
