@@ -31,7 +31,7 @@ func TestEnvExampleDocumentsDeclaredServices(t *testing.T) {
 }
 
 // TestEnvVariantFilesAreRead: framework env variants hold real keys
-// (autochangelog keeps its keys in .env.development.local).
+// (a Rails project keeps its keys in .env.development.local).
 func TestEnvVariantFilesAreRead(t *testing.T) {
 	for _, name := range []string{".env.development.local", ".env.production.local", ".env.local", ".env.test", ".env.staging"} {
 		t.Run(name, func(t *testing.T) {

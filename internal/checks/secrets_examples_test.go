@@ -11,7 +11,7 @@ const fakeKeyBody = "MIIEpAIBAAKCAQEAx3k9Q2b7Zr1Lw8YpV0nTq5HcJmU4aFgDsE6iKoP2lB9
 
 // TestSecretsExampleKeyPlaceholders: an example file that shows the shape of
 // a private key setting is documentation. a2745c9 reported these as
-// error-severity secrets (autochangelog went from exit 1 to 2). A real key
+// error-severity secrets (one real project went from exit 1 to 2). A real key
 // pasted into an example file is still caught.
 func TestSecretsExampleKeyPlaceholders(t *testing.T) {
 	cases := []struct {
