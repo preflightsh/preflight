@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -55,6 +57,28 @@ func fixedTok(expr, description string) secretPattern {
 	return secretPattern{pattern: regexp.MustCompile(expr), description: description, fixed: true}
 }
 
+// isSupabaseServiceRoleJWT reports whether token is a JWT whose payload
+// carries role "service_role". The key every `supabase start` prints for
+// local development (issuer "supabase-demo") is public and is not one.
+func isSupabaseServiceRoleJWT(token string) bool {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(parts[1], "="))
+	if err != nil {
+		return false
+	}
+	var claims struct {
+		Role string `json:"role"`
+		Iss  string `json:"iss"`
+	}
+	if json.Unmarshal(payload, &claims) != nil {
+		return false
+	}
+	return claims.Role == "service_role" && claims.Iss != "supabase-demo"
+}
+
 func freePattern(expr, description string) secretPattern {
 	return secretPattern{pattern: regexp.MustCompile(expr), description: description, free: true}
 }
@@ -95,6 +119,10 @@ var secretPatterns = []secretPattern{
 
 	// Auth Providers
 	tok(`sbp_[a-zA-Z0-9]{40,}`, "Supabase service key"),
+	// A JWT is only a finding when its payload says it is a Supabase
+	// service-role key, which bypasses row level security. Anon keys are
+	// public by design and other JWTs are not ours to judge.
+	{pattern: regexp.MustCompile(`eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{20,}`), description: "Supabase service-role key", class: tokenChars + ".", accept: isSupabaseServiceRoleJWT},
 
 	// Communication
 	tok(`xox[baprs]-[a-zA-Z0-9-]{10,}`, "Slack token"),
