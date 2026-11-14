@@ -17,46 +17,36 @@ func (c LicenseCheck) Title() string {
 }
 
 func (c LicenseCheck) Run(ctx Context) (CheckResult, error) {
-	licenseNames := []string{
-		"LICENSE",
-		"LICENSE.md",
-		"LICENSE.txt",
-		"LICENCE",
-		"LICENCE.md",
-		"license",
-		"license.md",
-		"license.txt",
-	}
-
-	// Check current directory and parent directories up to git root or filesystem root
-	dirsToCheck := getDirectoriesToCheck(ctx.RootDir)
-
-	for _, dir := range dirsToCheck {
-		for _, name := range licenseNames {
+	// The project directory first, then its parents up to the root of the
+	// repository it belongs to.
+	for _, dir := range getDirectoriesToCheck(ctx.RootDir) {
+		for _, name := range licenseFilesIn(dir) {
 			fullPath := filepath.Join(dir, name)
-			if content, err := readSourceFile(fullPath); err == nil {
-				contentStr := strings.TrimSpace(string(content))
-				if len(contentStr) > 0 {
-					// Try to detect license type
-					licenseType := detectLicenseType(contentStr)
-					message := "LICENSE file found"
-					if licenseType != "" {
-						message = licenseType + " license found"
-					}
-					// Show location if not in root dir
-					if dir != ctx.RootDir {
-						relPath := relPath(ctx.RootDir, fullPath)
-						message += " (at " + relPath + ")"
-					}
-					return CheckResult{
-						ID:       c.ID(),
-						Title:    c.Title(),
-						Severity: SeverityInfo,
-						Passed:   true,
-						Message:  message,
-					}, nil
-				}
+			content, err := readSourceFile(fullPath)
+			if err != nil {
+				continue
 			}
+			contentStr := strings.TrimSpace(string(content))
+			if len(contentStr) == 0 {
+				continue
+			}
+			// Try to detect license type
+			licenseType := detectLicenseType(contentStr)
+			message := "LICENSE file found"
+			if licenseType != "" {
+				message = licenseType + " license found"
+			}
+			// Show location if not in root dir
+			if dir != ctx.RootDir {
+				message += " (at " + relPath(ctx.RootDir, fullPath) + ")"
+			}
+			return CheckResult{
+				ID:       c.ID(),
+				Title:    c.Title(),
+				Severity: SeverityInfo,
+				Passed:   true,
+				Message:  message,
+			}, nil
 		}
 	}
 
@@ -73,60 +63,71 @@ func (c LicenseCheck) Run(ctx Context) (CheckResult, error) {
 	}, nil
 }
 
-// getDirectoriesToCheck returns the current directory and parent directories
-// up to the git root (if in a git repo) or up to 3 levels up
-func getDirectoriesToCheck(rootDir string) []string {
-	dirs := []string{rootDir}
+// licenseStems are the names a license file goes by, before any extension
+// or suffix: LICENSE, LICENCE.md, COPYING.LESSER, LICENSE-MIT, UNLICENSE.
+var licenseStems = []string{"license", "licence", "copying", "unlicense"}
 
-	current := rootDir
-	maxLevels := 5 // Safety limit
-
-	for i := 0; i < maxLevels; i++ {
-		parent := filepath.Dir(current)
-		if parent == current {
-			// Reached filesystem root
-			break
-		}
-
-		// Check if we've found a git root (parent has .git)
-		gitPath := filepath.Join(parent, ".git")
-		if _, err := os.Stat(gitPath); err == nil {
-			// Found git root, add it and stop
-			dirs = append(dirs, parent)
-			break
-		}
-
-		// Check if parent itself is a reasonable root (has common project files)
-		if hasProjectMarker(parent) {
-			dirs = append(dirs, parent)
-		}
-
-		current = parent
-	}
-
-	return dirs
-}
-
-// hasProjectMarker checks if a directory looks like a project root
-func hasProjectMarker(dir string) bool {
-	markers := []string{
-		".git",
-		"package.json",
-		"go.mod",
-		"Cargo.toml",
-		"pyproject.toml",
-		"Gemfile",
-		"composer.json",
-		"pom.xml",
-		"build.gradle",
-	}
-
-	for _, marker := range markers {
-		if _, err := os.Stat(filepath.Join(dir, marker)); err == nil {
+// isLicenseFileName reports whether a file name is one of the conventional
+// license names, in any letter case.
+func isLicenseFileName(name string) bool {
+	lower := strings.ToLower(name)
+	for _, stem := range licenseStems {
+		rest, ok := strings.CutPrefix(lower, stem)
+		if ok && (rest == "" || rest[0] == '.' || rest[0] == '-') {
 			return true
 		}
 	}
 	return false
+}
+
+// licenseFilesIn lists the license files in dir, in directory order (which
+// is sorted by name, so LICENSE comes before LICENSE-APACHE).
+func licenseFilesIn(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() && isLicenseFileName(e.Name()) {
+			names = append(names, e.Name())
+		}
+	}
+	return names
+}
+
+// getDirectoriesToCheck returns the project directory and, when it is a
+// subdirectory of a repository (an app in a monorepo), its parents up to the
+// repository root. A project that is its own repository, or is in no
+// repository at all, is checked on its own: a LICENSE in some unrelated
+// parent directory says nothing about it.
+func getDirectoriesToCheck(rootDir string) []string {
+	dirs := []string{rootDir}
+	if isRepoRoot(rootDir) {
+		return dirs
+	}
+
+	var parents []string
+	current := rootDir
+	for i := 0; i < 5; i++ {
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+		parents = append(parents, parent)
+		if isRepoRoot(parent) {
+			return append(dirs, parents...)
+		}
+		current = parent
+	}
+	return dirs
+}
+
+// isRepoRoot reports whether dir holds a .git entry: a directory, or the
+// file a worktree or submodule uses.
+func isRepoRoot(dir string) bool {
+	_, err := os.Lstat(filepath.Join(dir, ".git"))
+	return err == nil
 }
 
 func detectLicenseType(content string) string {
@@ -147,6 +148,10 @@ func detectLicenseType(content string) string {
 			return "AGPL-3.0"
 		}
 		return "AGPL"
+	}
+
+	if strings.Contains(contentLower, "gnu lesser general public license") {
+		return "LGPL"
 	}
 
 	if strings.Contains(contentLower, "gnu general public license") {

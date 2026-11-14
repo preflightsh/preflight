@@ -55,23 +55,64 @@ type largeImage struct {
 	size int64
 }
 
+// imageSourceRoots hold the images a project ships.
+var imageSourceRoots = []string{"public", "static", "web", "www", "assets"}
+
+// imageBuildRoots are build output. They repeat what a source root already
+// holds (public/hero.png and dist/hero.png are one image), so they are only
+// looked at when the project has no source root of its own.
+var imageBuildRoots = []string{"dist", "build", "_site", "out"}
+
+// imageSkipDirs are never walked: dependencies, and Craft's published
+// asset copies.
+var imageSkipDirs = map[string]bool{
+	"node_modules": true,
+	"vendor":       true,
+	".git":         true,
+	"cpresources":  true,
+}
+
+// isUploadsDir reports a directory of files uploaded through a CMS: WordPress
+// wp-content/uploads, Drupal sites/<site>/files, Laravel storage. Editors put
+// those there; they are content, not something the project's build can
+// optimize, and they rarely exist on the machine running the scan.
+func isUploadsDir(rel string) bool {
+	parent, name := pathSplit(rel)
+	switch name {
+	case "uploads", "storage":
+		return true
+	case "files":
+		grandparent, _ := pathSplit(parent)
+		_, sites := pathSplit(grandparent)
+		return sites == "sites"
+	}
+	return false
+}
+
 func findLargeImages(rootDir string, threshold int64) []largeImage {
 	var images []largeImage
 
-	webRoots := []string{"public", "static", "web", "www", "dist", "build", "_site", "out", "assets"}
 	imageExts := map[string]bool{
 		".jpg": true, ".jpeg": true, ".png": true, ".gif": true,
 		".webp": true, ".svg": true, ".bmp": true, ".tiff": true,
 	}
 
-	skipDirs := map[string]bool{
-		"node_modules": true,
-		"vendor":       true,
-		".git":         true,
-		"cpresources":  true,
+	var roots []string
+	for _, r := range imageSourceRoots {
+		if info, err := os.Stat(filepath.Join(rootDir, r)); err == nil && info.IsDir() {
+			roots = append(roots, r)
+		}
+	}
+	if len(roots) == 0 {
+		roots = imageBuildRoots
 	}
 
-	for _, webRoot := range webRoots {
+	// What git ignores is generated or local: build output inside a source
+	// root, uploads, caches. Outside a repository nothing is known to be
+	// ignored and the name rules above do the work.
+	git := loadGitStatus(rootDir)
+
+	for _, webRoot := range roots {
 		rootPath := filepath.Join(rootDir, webRoot)
 		if _, err := os.Stat(rootPath); os.IsNotExist(err) {
 			continue
@@ -84,9 +125,10 @@ func findLargeImages(rootDir string, threshold int64) []largeImage {
 				}
 				return nil
 			}
+			rel := filepath.ToSlash(relPath(rootDir, path))
 
 			if d.IsDir() {
-				if skipDirs[d.Name()] {
+				if imageSkipDirs[d.Name()] || isUploadsDir(rel) || (git.inRepo && git.ignoredDirs[rel]) {
 					return filepath.SkipDir
 				}
 				return nil
@@ -96,6 +138,9 @@ func findLargeImages(rootDir string, threshold int64) []largeImage {
 			if !imageExts[ext] {
 				return nil
 			}
+			if git.inRepo && git.ignored[rel] {
+				return nil
+			}
 
 			info, err := d.Info()
 			if err != nil {
@@ -103,8 +148,7 @@ func findLargeImages(rootDir string, threshold int64) []largeImage {
 			}
 
 			if info.Size() > threshold {
-				relPath := relPath(rootDir, path)
-				images = append(images, largeImage{path: relPath, size: info.Size()})
+				images = append(images, largeImage{path: relPath(rootDir, path), size: info.Size()})
 			}
 
 			return nil
