@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -93,6 +94,9 @@ func TestCouldNotRunHasNoUsageHint(t *testing.T) {
 }
 
 func TestIgnoreInReadOnlyDirHasNoUsageHint(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a read-only directory on Windows still allows writes to its files")
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores directory permissions")
 	}
