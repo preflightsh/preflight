@@ -27,7 +27,7 @@ import (
 func publishScanResults(ctx context.Context, cfg *config.PreflightConfig, projectDir string, results []checks.CheckResult) error {
 	creds, err := dashboard.LoadCredentials()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "\nCould not read credentials:", err)
+		fmt.Fprintln(os.Stderr, "\nCould not read credentials:", output.Sanitize(err.Error()))
 		return nil
 	}
 	if creds == nil || creds.Token == "" {
@@ -51,20 +51,20 @@ func publishScanResults(ctx context.Context, cfg *config.PreflightConfig, projec
 	client, warning := dashboard.ClientForCredentials(creds)
 	client.Ctx = ctx
 	if warning != "" {
-		fmt.Fprintln(os.Stderr, "\n"+warning)
+		fmt.Fprintln(os.Stderr, "\n"+output.SanitizeLines(warning))
 	}
 	resp, err := client.PublishRun(creds.Token, req)
 	if err != nil {
 		if errors.Is(err, dashboard.ErrQuotaExceeded) {
-			fmt.Fprintln(os.Stderr, "\n"+strings.TrimPrefix(err.Error(), "free run quota exceeded: "))
-			fmt.Fprintf(os.Stderr, "Upgrade or add your own API key at %s/billing\n", client.BaseURL)
+			fmt.Fprintln(os.Stderr, "\n"+output.Sanitize(strings.TrimPrefix(err.Error(), "free run quota exceeded: ")))
+			fmt.Fprintf(os.Stderr, "Upgrade or add your own API key at %s/billing\n", output.Sanitize(client.BaseURL))
 			return nil
 		}
-		fmt.Fprintln(os.Stderr, "\nCould not publish run:", err)
+		fmt.Fprintln(os.Stderr, "\nCould not publish run:", output.Sanitize(err.Error()))
 		return nil
 	}
 
-	fmt.Fprintf(os.Stderr, "\n📡 View this run: %s\n", resp.URL)
+	fmt.Fprintf(os.Stderr, "\n📡 View this run: %s\n", output.Sanitize(resp.URL))
 	return nil
 }
 

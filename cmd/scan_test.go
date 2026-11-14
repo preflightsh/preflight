@@ -5,14 +5,19 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/preflightsh/preflight/internal/checks"
+	"github.com/preflightsh/preflight/internal/config"
 )
 
 func TestDetermineExitCode(t *testing.T) {
@@ -22,9 +27,11 @@ func TestDetermineExitCode(t *testing.T) {
 		want    int
 	}{
 		{
+			// Nothing ran (every check ignored or skipped by flag), so
+			// nothing was verified: that is a warning, not a pass.
 			name:    "no results",
 			results: nil,
-			want:    ExitOK,
+			want:    ExitWarn,
 		},
 		{
 			name: "all passed",
@@ -186,6 +193,86 @@ func TestExecuteScanExitCodes(t *testing.T) {
 			t.Errorf("code=%d err=%v, want %d and an error", code, err, ExitUsage)
 		}
 	})
+}
+
+// A space after the comma in --only used to fail as an unknown ID.
+func TestFlagIDsAreTrimmed(t *testing.T) {
+	enabled := []checks.Check{checks.RobotsTxtCheck{}, checks.SitemapCheck{}, checks.LLMsTxtCheck{}}
+	got, err := filterChecksByFlags(enabled, []string{"sitemap", " robots_txt "}, []string{"", " llms_txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d checks, want robots_txt and sitemap", len(got))
+	}
+}
+
+// A bad --only ID is reported before the homepage is fetched. The stub
+// counts requests; a typo used to cost a full fetch first.
+func TestFlagIDsValidatedBeforePrefetch(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		_, _ = w.Write([]byte("<html></html>"))
+	}))
+	defer srv.Close()
+	dir := scanProject(t, "projectName: demo\nstack: unknown\nurls:\n  staging: "+srv.URL+"\n")
+	var out bytes.Buffer
+	code, err := executeScan(context.Background(), scanOptions{ProjectDir: dir, Only: []string{"bogus"}, Quiet: true}, &out, &out)
+	if code != ExitUsage || err == nil {
+		t.Fatalf("code=%d err=%v, want %d and an error", code, err, ExitUsage)
+	}
+	if n := hits.Load(); n != 0 {
+		t.Errorf("made %d request(s) before rejecting the ID", n)
+	}
+}
+
+// Skipping every enabled check leaves nothing verified, which exits 1.
+func TestScanWithNoChecksExitsWarn(t *testing.T) {
+	dir := scanProject(t, "projectName: demo\nstack: unknown\n")
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var skip []string
+	for _, c := range buildEnabledChecks(cfg, dir) {
+		skip = append(skip, c.ID())
+	}
+	var out bytes.Buffer
+	code, err := executeScan(context.Background(), scanOptions{ProjectDir: dir, Skip: skip, Quiet: true}, &out, io.Discard)
+	if err != nil || code != ExitWarn {
+		t.Fatalf("code=%d err=%v, want %d and nil", code, err, ExitWarn)
+	}
+	if !strings.Contains(out.String(), "No checks were verified.") {
+		t.Errorf("report does not say nothing was verified:\n%s", out.String())
+	}
+}
+
+// The ignore list removes checks and services from the enabled set.
+func TestBuildEnabledChecksAppliesIgnoreList(t *testing.T) {
+	dir := scanProject(t, "projectName: demo\nstack: unknown\nservices:\n  sentry:\n    declared: true\nignore: [sitemap, sentry]\n")
+	ids := enabledIDs(t, dir)
+	if ids["sitemap"] || ids["sentry"] {
+		t.Errorf("ignored IDs still enabled: %v", ids)
+	}
+	if !ids["robots_txt"] {
+		t.Error("robots_txt should still run")
+	}
+}
+
+// The star message is for a person at a terminal, never CI or a pipe.
+func TestStarMessageOnlyForPeople(t *testing.T) {
+	if !showStarAfterScan("human", false, true) {
+		t.Error("a first interactive scan should show it")
+	}
+	for _, tc := range []struct {
+		format   string
+		ci, term bool
+	}{{"json", false, true}, {"human", true, true}, {"human", false, false}} {
+		if showStarAfterScan(tc.format, tc.ci, tc.term) {
+			t.Errorf("shown for %+v", tc)
+		}
+	}
 }
 
 type fakeCheck struct {

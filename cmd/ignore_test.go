@@ -49,7 +49,8 @@ func readFile(t *testing.T, path string) string {
 
 // normalizedConfig is commentedConfig as yaml.v3 re-emits it: identical
 // apart from the run of spaces before each inline comment, which the
-// encoder collapses to one. Comments, key order and indentation survive.
+// encoder collapses to one. It is what an edit falls back to when the
+// change cannot be made on the ignore list's own lines.
 const normalizedConfig = `# Preflight config for Example
 projectName: example
 stack: rails
@@ -68,14 +69,15 @@ checks:
 
 // `preflight ignore` used to decode the file into a map and re-encode it,
 // which deleted every comment, alphabetized the keys and re-indented the
-// whole file. The edit must be the one line the user asked for.
+// whole file. The edit must be the one line the user asked for, with the
+// rest of the file left byte for byte as it was.
 func TestIgnorePreservesCommentsAndOrder(t *testing.T) {
 	path := inTempProject(t, commentedConfig)
 	if err := runIgnore(nil, []string{"sitemap"}); err != nil {
 		t.Fatal(err)
 	}
 	got := readFile(t, path)
-	want := normalizedConfig + "ignore:\n  - sitemap\n"
+	want := commentedConfig + "ignore:\n  - sitemap\n"
 	if got != want {
 		t.Errorf("config was rewritten beyond the ignore entry.\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
@@ -83,21 +85,107 @@ func TestIgnorePreservesCommentsAndOrder(t *testing.T) {
 	if err := runIgnore(nil, []string{"llms_txt"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := readFile(t, path); !strings.HasSuffix(got, "ignore:\n  - sitemap\n  - llms_txt\n") {
+	if got := readFile(t, path); got != commentedConfig+"ignore:\n  - sitemap\n  - llms_txt\n" {
 		t.Errorf("second ignore should append to the list:\n%s", got)
 	}
 
 	if err := runUnignore(nil, []string{"sitemap"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := readFile(t, path); !strings.HasSuffix(got, "ignore:\n  - llms_txt\n") || !strings.Contains(got, "# we bill through Stripe") {
-		t.Errorf("unignore should remove one entry and keep comments:\n%s", got)
+	if got := readFile(t, path); got != commentedConfig+"ignore:\n  - llms_txt\n" {
+		t.Errorf("unignore should remove one entry and nothing else:\n%s", got)
 	}
 	if err := runUnignore(nil, []string{"llms_txt"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := readFile(t, path); got != normalizedConfig {
+	if got := readFile(t, path); got != commentedConfig {
 		t.Errorf("removing the last entry should drop the ignore key and restore the file.\n--- got ---\n%s", got)
+	}
+}
+
+// The layout the user chose survives an ignore-list edit: 4-space indent,
+// blank lines between sections, CRLF line endings, and a list that is not
+// the last key in the file.
+func TestIgnoreKeepsLayout(t *testing.T) {
+	const config = "projectName: example\r\n\r\n# skipped on purpose\r\nignore:\r\n    - sitemap\r\n    - seoMeta\r\n\r\nservices:\r\n    stripe: { declared: true }\r\n"
+	path := inTempProject(t, config)
+	if err := runIgnore(nil, []string{"llms_txt"}); err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Replace(config, "    - seoMeta\r\n", "    - seoMeta\r\n    - llms_txt\r\n", 1)
+	if got := readFile(t, path); got != want {
+		t.Fatalf("append reflowed the file.\n--- got ---\n%q\n--- want ---\n%q", got, want)
+	}
+	// Respelling a pre-1.0 entry touches only its own line.
+	if err := runIgnore(nil, []string{"seo_meta"}); err != nil {
+		t.Fatal(err)
+	}
+	want = strings.Replace(want, "- seoMeta", "- seo_meta", 1)
+	if got := readFile(t, path); got != want {
+		t.Fatalf("rename reflowed the file.\n--- got ---\n%q\n--- want ---\n%q", got, want)
+	}
+	if err := runUnignore(nil, []string{"sitemap"}); err != nil {
+		t.Fatal(err)
+	}
+	want = strings.Replace(want, "    - sitemap\r\n", "", 1)
+	if got := readFile(t, path); got != want {
+		t.Fatalf("removal reflowed the file.\n--- got ---\n%q\n--- want ---\n%q", got, want)
+	}
+}
+
+// What cannot be edited line by line is re-encoded, and still correct: a
+// flow-style list, a quoted entry, an entry that needs quoting.
+func TestIgnoreFallsBackToReencoding(t *testing.T) {
+	path := inTempProject(t, "projectName: example\nignore: [sitemap, 'llms_txt']\n")
+	if err := runIgnore(nil, []string{"robots_txt"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, path); got != "projectName: example\nignore: [sitemap, 'llms_txt', robots_txt]\n" {
+		t.Errorf("flow list:\n%s", got)
+	}
+	if err := runUnignore(nil, []string{"llms_txt"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, path); got != "projectName: example\nignore: [sitemap, robots_txt]\n" {
+		t.Errorf("flow list after removal:\n%s", got)
+	}
+
+	// A glob starting with * is not a plain scalar; a naive line append
+	// would write an alias and corrupt the file.
+	path = inTempProject(t, commentedConfig+"ignore:\n  - sitemap\n")
+	if err := runIgnore(nil, []string{"*.min.js"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, path); got != normalizedConfig+"ignore:\n  - sitemap\n  - '*.min.js'\n" {
+		t.Errorf("glob entry:\n%s", got)
+	}
+}
+
+// Preflight reads only the first YAML document, so rewriting a file that
+// holds two would delete the second without a word.
+func TestIgnoreRefusesMultiDocumentFile(t *testing.T) {
+	const config = "projectName: one\n---\nprojectName: two\n"
+	path := inTempProject(t, config)
+	for _, run := range []func() error{
+		func() error { return runIgnore(nil, []string{"sitemap"}) },
+		func() error { return runUnignore(nil, []string{"sitemap"}) },
+	} {
+		err := run()
+		var exitErr *ExitError
+		if !errors.As(err, &exitErr) || exitErr.Code != ExitUsage || !strings.Contains(err.Error(), "more than one YAML document") {
+			t.Fatalf("err=%v, want a usage error about multiple documents", err)
+		}
+	}
+	if got := readFile(t, path); got != config {
+		t.Errorf("file was modified:\n%s", got)
+	}
+	// A leading document marker is still one document.
+	path = inTempProject(t, "---\nprojectName: one\n")
+	if err := runIgnore(nil, []string{"sitemap"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, path); got != "---\nprojectName: one\nignore:\n  - sitemap\n" {
+		t.Errorf("single document with a marker:\n%s", got)
 	}
 }
 

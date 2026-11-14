@@ -9,6 +9,7 @@ import (
 	"runtime/debug"
 	"strings"
 
+	"github.com/preflightsh/preflight/internal/output"
 	"github.com/spf13/cobra"
 	"golang.org/x/mod/semver"
 )
@@ -33,8 +34,12 @@ func Execute() error {
 // ExitCode turns the error from Execute into the process exit code, printing
 // the message to stderr. An *ExitError carries its own code. Any other error
 // comes from cobra (unknown command or flag, wrong argument count, bad flag
-// value) or from a command that could not do its job, so it is a usage error:
-// exiting 1 would tell CI "warnings only" for a scan that never ran.
+// value), so it is a usage error and gets the usage hint: exiting 1 would
+// tell CI "warnings only" for a scan that never ran.
+//
+// Messages are sanitized here, the one place errors reach the terminal:
+// they quote config values, file names and dashboard response bodies, none
+// of which may carry escape sequences to the user's screen.
 func ExitCode(err error, stderr io.Writer) int {
 	if err == nil {
 		return ExitOK
@@ -42,12 +47,31 @@ func ExitCode(err error, stderr io.Writer) int {
 	var exitErr *ExitError
 	if errors.As(err, &exitErr) {
 		if exitErr.Err != nil {
-			fmt.Fprintln(stderr, exitErr.Err)
+			fmt.Fprintln(stderr, output.SanitizeLines(exitErr.Err.Error()))
 		}
 		return exitErr.Code
 	}
-	fmt.Fprintf(stderr, "Error: %v\nRun 'preflight --help' for usage.\n", err)
+	fmt.Fprintf(stderr, "Error: %s\nRun 'preflight --help' for usage.\n", output.SanitizeLines(err.Error()))
 	return ExitUsage
+}
+
+// couldNotRun wraps a failure that is not the user's command line: a file
+// that could not be written, a directory that could not be read. It keeps
+// the "preflight could not run" exit code but, unlike a bare error, does
+// not send the user to --help for a permission problem.
+func couldNotRun(err error) error {
+	return &ExitError{Code: ExitUsage, Err: fmt.Errorf("Error: %w", err)}
+}
+
+// unknownSubcommand is the RunE of a command that only groups subcommands.
+// Cobra runs the parent when the subcommand name is not recognized, and
+// without a RunE it printed help and exited 0, so `preflight auth logn`
+// looked like it worked.
+func unknownSubcommand(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return cmd.Help()
+	}
+	return fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())
 }
 
 // resolveVersion falls back to the module version stamped by

@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -47,7 +47,8 @@ var scanCmd = &cobra.Command{
 	Short: "Scan your project for launch readiness",
 	Long: `Run all enabled checks against your project and report results.
 If path is provided, scans that directory. Otherwise scans current directory.
-Exits 0 on success, 1 for warnings only, 2 when checks find errors,
+Exits 0 on success, 1 for warnings only (or when no check verified
+anything), 2 when checks find errors,
 64 when preflight could not run (bad path, unreadable config, unknown
 check ID, or a bad flag), and 130 when the scan is cancelled (Ctrl-C).`,
 	Args: cobra.MaximumNArgs(1),
@@ -80,17 +81,12 @@ func completeCheckIDs(cmd *cobra.Command, args []string, toComplete string) ([]s
 // the config-driven enablement and ignore list. Unknown IDs are an error so a
 // typo doesn't silently scan nothing (or everything).
 func filterChecksByFlags(enabled []checks.Check, only, skip []string) ([]checks.Check, error) {
+	only, skip = trimIDs(only), trimIDs(skip)
 	if len(only) == 0 && len(skip) == 0 {
 		return enabled, nil
 	}
-
-	if renamed := renamedFlagIDs(only, skip); len(renamed) > 0 {
-		return nil, &catalog.RenamedIDsError{IDs: renamed}
-	}
-	for _, id := range append(append([]string(nil), only...), skip...) {
-		if !checks.KnownID(id) {
-			return nil, fmt.Errorf("unknown check ID %q (run 'preflight checks' to list IDs)", id)
-		}
+	if err := validateFlagIDs(only, skip); err != nil {
+		return nil, err
 	}
 
 	onlySet := make(map[string]bool, len(only))
@@ -116,6 +112,35 @@ func filterChecksByFlags(enabled []checks.Check, only, skip []string) ([]checks.
 		return nil, fmt.Errorf("no enabled checks match --only (the checks may not apply to this project's config)")
 	}
 	return filtered, nil
+}
+
+// trimIDs strips the whitespace around each ID and drops empty ones, so
+// --only "sitemap, robots_txt" (a space after the comma) selects both
+// instead of failing on an ID named " robots_txt".
+func trimIDs(ids []string) []string {
+	var out []string
+	for _, id := range ids {
+		if id = strings.TrimSpace(id); id != "" {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// validateFlagIDs rejects a pre-1.0 or unknown ID in --only or --skip. It
+// needs nothing but the flags, so the scan runs it before any network
+// request: a typo used to wait out the homepage fetch (up to the full
+// timeout) and send real traffic before it was reported.
+func validateFlagIDs(only, skip []string) error {
+	if renamed := renamedFlagIDs(only, skip); len(renamed) > 0 {
+		return &catalog.RenamedIDsError{IDs: renamed}
+	}
+	for _, id := range append(append([]string(nil), only...), skip...) {
+		if !checks.KnownID(id) {
+			return fmt.Errorf("unknown check ID %q (run 'preflight checks' to list IDs)", id)
+		}
+	}
+	return nil
 }
 
 // renamedFlagIDs returns the pre-1.0 IDs passed to --only and --skip.
@@ -145,16 +170,18 @@ func runScan(cmd *cobra.Command, args []string) error {
 		return &ExitError{Code: ExitUsage, Err: fmt.Errorf("invalid --format %q (want human or json)", formatFlag)}
 	}
 
-	// The update notice is interactive output. It is skipped for JSON so
-	// nothing can land in front of the document, and for CI, which has
-	// nobody to prompt.
-	if !ciMode && formatFlag != "json" {
-		CheckForUpdates()
-	}
-
 	projectDir, err := resolveProjectDir(args)
 	if err != nil {
 		return err
+	}
+
+	// The update notice is interactive output. It is skipped for JSON so
+	// nothing can land in front of the document, and for CI, which has
+	// nobody to prompt. It runs once the arguments are known to be usable,
+	// so a mistyped path fails at once instead of after a network round
+	// trip.
+	if !ciMode && formatFlag != "json" {
+		CheckForUpdates()
 	}
 
 	// Scan-wide cancellation context. SIGINT (Ctrl-C) or SIGTERM cancels
@@ -184,8 +211,10 @@ func runScan(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Show star message on first scan (only in human format, not JSON)
-	if formatFlag != "json" && isFirstRun("scan_done") {
+	// Show the star message after the first scan, to a person only: never
+	// in JSON, never in CI (a fresh runner is always a "first run", so it
+	// printed on every job), and never into a pipe or a file.
+	if showStarAfterScan(formatFlag, ciMode, isTerminal(os.Stdout)) && isFirstRun("scan_done") {
 		fmt.Println()
 		showStarMessage()
 		markFirstRunComplete("scan_done")
@@ -197,13 +226,18 @@ func runScan(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// showStarAfterScan reports whether the first-scan star message may print.
+func showStarAfterScan(format string, ci, stdoutIsTerminal bool) bool {
+	return format != "json" && !ci && stdoutIsTerminal
+}
+
 // resolveProjectDir validates the optional path argument, defaulting to the
 // current directory. A bad path is a usage error, not a failed scan.
 func resolveProjectDir(args []string) (string, error) {
 	if len(args) == 0 {
 		dir, err := os.Getwd()
 		if err != nil {
-			return "", fmt.Errorf("failed to get current directory: %w", err)
+			return "", couldNotRun(fmt.Errorf("failed to get current directory: %w", err))
 		}
 		return dir, nil
 	}
@@ -225,6 +259,7 @@ func resolveProjectDir(args []string) (string, error) {
 func executeScan(ctx context.Context, opts scanOptions, stdout, stderr io.Writer) (int, error) {
 	// Old IDs in the flags are gathered before the config loads so one
 	// error can name them together with any in the ignore list.
+	opts.Only, opts.Skip = trimIDs(opts.Only), trimIDs(opts.Skip)
 	flagRenamed := renamedFlagIDs(opts.Only, opts.Skip)
 	cfg, err := config.Load(opts.ProjectDir)
 	if err != nil {
@@ -243,7 +278,15 @@ func executeScan(ctx context.Context, opts scanOptions, stdout, stderr io.Writer
 		return ExitUsage, &ExitError{Code: ExitUsage, Err: fmt.Errorf("Error: %w", &catalog.RenamedIDsError{IDs: flagRenamed})}
 	}
 	for _, note := range cfg.Notes {
-		fmt.Fprintf(stderr, "Note: %s\n", note)
+		fmt.Fprintf(stderr, "Note: %s\n", output.Sanitize(note))
+	}
+
+	// Which checks run is decided from the config and the flags alone, so
+	// it is settled (and a bad ID reported) before anything touches the
+	// network.
+	enabledChecks, err := filterChecksByFlags(buildEnabledChecks(cfg, opts.ProjectDir), opts.Only, opts.Skip)
+	if err != nil {
+		return ExitUsage, &ExitError{Code: ExitUsage, Err: err}
 	}
 
 	// SafeHTTPClient refuses to dial private/loopback/metadata IPs for
@@ -286,31 +329,9 @@ func executeScan(ctx context.Context, opts scanOptions, stdout, stderr io.Writer
 		Config:  cfg,
 		Client:  httpClient,
 		Verbose: opts.Verbose,
+		Probes:  checks.NewProbeCache(),
 	}
 	prefetchHomepages(ctx, &cctx, httpClient, spinner)
-
-	enabledChecks := buildEnabledChecks(cfg, opts.ProjectDir)
-
-	// Filter out ignored checks
-	if len(cfg.Ignore) > 0 {
-		ignoreMap := make(map[string]bool)
-		for _, id := range cfg.Ignore {
-			ignoreMap[catalog.Canonical(id)] = true
-		}
-		var filtered []checks.Check
-		for _, check := range enabledChecks {
-			if !ignoreMap[check.ID()] {
-				filtered = append(filtered, check)
-			}
-		}
-		enabledChecks = filtered
-	}
-
-	// One-off narrowing via --only / --skip.
-	enabledChecks, err = filterChecksByFlags(enabledChecks, opts.Only, opts.Skip)
-	if err != nil {
-		return ExitUsage, &ExitError{Code: ExitUsage, Err: err}
-	}
 
 	total := len(enabledChecks)
 	results, cancelled := runChecks(ctx, cctx, enabledChecks, scanWorkers, func(done int, title string) {
@@ -462,14 +483,30 @@ func runOneCheck(cctx checks.Context, check checks.Check) (result checks.CheckRe
 	return result
 }
 
+// buildEnabledChecks returns the checks the config turns on, in report
+// order, with everything in the ignore list (check IDs and service IDs)
+// already removed.
 func buildEnabledChecks(cfg *config.PreflightConfig, rootDir string) []checks.Check {
-	var enabledChecks []checks.Check
-
-	// Build ignore map for quick lookup (includes both check IDs and service IDs)
+	// The ignore list holds both check IDs and service IDs. It is built
+	// once here: configuredChecks consults it for services, and the
+	// finished list is filtered against it below.
 	ignoreMap := make(map[string]bool)
 	for _, id := range cfg.Ignore {
 		ignoreMap[catalog.Canonical(id)] = true
 	}
+	var kept []checks.Check
+	for _, check := range configuredChecks(cfg, rootDir, ignoreMap) {
+		if !ignoreMap[check.ID()] {
+			kept = append(kept, check)
+		}
+	}
+	return kept
+}
+
+// configuredChecks lists the checks the config turns on, before the ignore
+// list is applied to check IDs.
+func configuredChecks(cfg *config.PreflightConfig, rootDir string, ignoreMap map[string]bool) []checks.Check {
+	var enabledChecks []checks.Check
 
 	// Helper to check if a service should be skipped
 	serviceIgnored := func(serviceID string) bool {
@@ -593,79 +630,14 @@ func determineExitCode(results []checks.CheckResult) int {
 	if hasWarning {
 		return ExitWarn
 	}
-	if len(results) > 0 {
-		verified := false
-		for _, r := range results {
-			if !r.Skipped {
-				verified = true
-			}
-		}
-		if !verified {
-			return ExitWarn
+	// A scan that verified nothing is not a pass. That covers checks that
+	// all skipped themselves and a scan with no checks at all (every one
+	// ignored or passed to --skip): exiting 0 there let
+	// `preflight scan --skip ... && deploy` deploy on an empty report.
+	for _, r := range results {
+		if !r.Skipped {
+			return ExitOK
 		}
 	}
-	return ExitOK
-}
-
-// canAutoDetectLayout checks if a layout file can be auto-detected for SEO checks
-func canAutoDetectLayout(rootDir, stack string) bool {
-	// Common layout files by stack
-	layoutsByStack := map[string][]string{
-		"next": {
-			"app/layout.tsx", "app/layout.js", "app/layout.jsx",
-			"src/app/layout.tsx", "src/app/layout.js", "src/app/layout.jsx",
-			"pages/_app.tsx", "pages/_app.js", "pages/_document.tsx", "pages/_document.js",
-		},
-		"react":   {"index.html", "public/index.html", "src/index.html"},
-		"vite":    {"index.html", "src/index.html"},
-		"vue":     {"index.html", "public/index.html", "src/App.vue"},
-		"svelte":  {"src/app.html", "index.html"},
-		"angular": {"src/index.html"},
-		"remix":   {"app/root.tsx", "app/root.jsx"},
-		"nuxt":    {"app.vue", "app/app.vue", "layouts/default.vue", "nuxt.config.ts", "nuxt.config.js"},
-		"rails": {
-			"app/views/layouts/application.html.erb",
-			"app/views/layouts/base.html.erb",
-		},
-		"laravel": {
-			"resources/views/layouts/app.blade.php",
-			"resources/views/layouts/main.blade.php",
-		},
-		"django": {"templates/base.html", "templates/layout.html"},
-		"craft": {
-			"templates/_layout.twig",
-			"templates/_layouts/main.twig",
-			"templates/_layouts/base.twig",
-		},
-		"hugo":     {"layouts/_default/baseof.html"},
-		"jekyll":   {"_layouts/default.html", "_layouts/base.html"},
-		"gatsby":   {"src/components/layout.js", "src/components/Layout.js"},
-		"astro":    {"src/layouts/Layout.astro", "src/layouts/Base.astro"},
-		"eleventy": {"_includes/base.njk", "_includes/layout.njk"},
-	}
-
-	// Check stack-specific layouts
-	if layouts, ok := layoutsByStack[stack]; ok {
-		for _, layout := range layouts {
-			if _, err := os.Stat(filepath.Join(rootDir, layout)); err == nil {
-				return true
-			}
-		}
-	}
-
-	// Fallback: try common layouts
-	commonLayouts := []string{
-		"app/layout.tsx", "app/layout.js",
-		"src/app/layout.tsx", "src/app/layout.js",
-		"index.html", "public/index.html",
-		// SvelteKit and Remix; configs saved before 0.25 may say stack: vite.
-		"src/app.html", "app/root.tsx", "app/root.jsx",
-	}
-	for _, layout := range commonLayouts {
-		if _, err := os.Stat(filepath.Join(rootDir, layout)); err == nil {
-			return true
-		}
-	}
-
-	return false
+	return ExitWarn
 }

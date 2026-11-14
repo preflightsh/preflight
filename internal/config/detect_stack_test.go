@@ -74,6 +74,125 @@ func TestDetectStackDependencyMatching(t *testing.T) {
 	}
 }
 
+// A requirements.txt beside a frontend app used to make the project
+// "python", and a Next app with no next.config.* was "react".
+func TestDetectStackOrdering(t *testing.T) {
+	cases := []struct {
+		name  string
+		files map[string]string
+		want  string
+	}{
+		{"vite react app with python scripts", map[string]string{
+			"package.json":     `{"dependencies":{"react":"^18"},"devDependencies":{"vite":"^5"}}`,
+			"vite.config.ts":   "export default {}",
+			"requirements.txt": "requests\n",
+		}, "vite"},
+		{"flask app that bundles assets with vite", map[string]string{
+			"package.json":     `{"devDependencies":{"vite":"^5"}}`,
+			"vite.config.ts":   "export default {}",
+			"requirements.txt": "flask\n",
+		}, "python"},
+		{"django with a react frontend stays django", map[string]string{
+			"package.json":     `{"dependencies":{"react":"^18"}}`,
+			"requirements.txt": "django\n",
+			"manage.py":        "#!/usr/bin/env python\n",
+		}, "django"},
+		{"plain python project", map[string]string{
+			"requirements.txt": "flask\n",
+		}, "python"},
+		{"next without a config file", map[string]string{
+			"package.json": `{"dependencies":{"next":"^15","react":"^19"}}`,
+		}, "next"},
+		{"next with python scripts", map[string]string{
+			"package.json":     `{"dependencies":{"next":"^15","react":"^19"}}`,
+			"requirements.txt": "requests\n",
+		}, "next"},
+		{"plain react app", map[string]string{
+			"package.json": `{"dependencies":{"react":"^19"}}`,
+		}, "react"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := DetectStack(writeProject(t, tc.files)); got != tc.want {
+				t.Errorf("DetectStack = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// A virtualenv's installed packages are not the project's code, and
+// apps/web is the web app of a monorepo, not a compiled web root.
+func TestDetectServicesSkipDirs(t *testing.T) {
+	dir := writeProject(t, map[string]string{
+		".venv/lib/python3.12/site-packages/foo/a.py": "from openai import OpenAI\nimport redis\nr = 'redis://localhost'\n",
+		"venv/lib/b.py":                  "import sentry_sdk\nsentry_sdk.init(dsn='https://x@sentry.io/1')\n",
+		".svelte-kit/output/server/x.js": "posthog.init('k')\n",
+		"web/assets/bundle.js":           "mixpanel.init('k')\n",
+		"public/build/app.js":            "LogRocket.init('k')\n",
+	})
+	got := DetectServices(dir)
+	for _, svc := range []string{"openai", "redis", "sentry", "posthog", "mixpanel", "logrocket"} {
+		if got[svc] {
+			t.Errorf("%s detected from a skipped directory", svc)
+		}
+	}
+
+	dir = writeProject(t, map[string]string{
+		"apps/web/src/layout.tsx":      "Sentry.init({})\n",
+		"apps/api/public/widget.js":    "mixpanel.init('k')\n",
+		"packages/ui/storage/index.ts": "posthog.init('k')\n",
+	})
+	got = DetectServices(dir)
+	for _, svc := range []string{"sentry", "mixpanel", "posthog"} {
+		if !got[svc] {
+			t.Errorf("%s not detected below the project root", svc)
+		}
+	}
+}
+
+// Only what a manifest depends on counts: not its description, keywords,
+// script names, or a commented-out gem.
+func TestDetectServicesReadsDependenciesOnly(t *testing.T) {
+	dir := writeProject(t, map[string]string{
+		"package.json":  `{"name":"mixpanel-exporter","description":"take payments with stripe, report to bugsnag","keywords":["twilio"],"scripts":{"firebase":"echo"},"dependencies":{"left-pad":"^1"},"devDependencies":{"@sentry/cli":"^2"}}`,
+		"composer.json": `{"description":"a mailgun and cloudinary bridge","require":{"php":"^8.2"},"require-dev":{"algolia/algoliasearch-client-php":"^4"}}`,
+		"Gemfile":       "source 'https://rubygems.org'\n# gem 'rollbar'\ngem 'rails' # replaces honeybadger\ngem 'sidekiq'\n",
+	})
+	got := DetectServices(dir)
+	for _, svc := range []string{"mixpanel", "stripe", "bugsnag", "twilio", "firebase", "mailgun", "cloudinary", "rollbar", "honeybadger"} {
+		if got[svc] {
+			t.Errorf("%s detected from text that is not a dependency", svc)
+		}
+	}
+	for _, svc := range []string{"sentry", "algolia", "sidekiq"} {
+		if !got[svc] {
+			t.Errorf("%s is a dependency and was not detected", svc)
+		}
+	}
+	// A manifest that is not valid JSON is still read, as before.
+	dir = writeProject(t, map[string]string{"package.json": `{"dependencies":{"stripe":"^1",}}`})
+	if !DetectServices(dir)["stripe"] {
+		t.Error("stripe not detected in a malformed package.json")
+	}
+}
+
+func TestScanEnvFileHandlesExportAndIndent(t *testing.T) {
+	dir := writeProject(t, map[string]string{
+		".env": "\xef\xbb\xbfexport STRIPE_SECRET_KEY=x\n  SENTRY_DSN=y\n\texport\tPOSTHOG_KEY=z\n# MAILGUN_API_KEY=commented\nexported_TWILIO_SID=no\n",
+	})
+	got := DetectServices(dir)
+	for _, svc := range []string{"stripe", "sentry", "posthog"} {
+		if !got[svc] {
+			t.Errorf("%s not detected", svc)
+		}
+	}
+	for _, svc := range []string{"mailgun", "twilio"} {
+		if got[svc] {
+			t.Errorf("%s detected from a comment or a different variable", svc)
+		}
+	}
+}
+
 // Every caller lowercases content first, so mixed-case patterns never matched.
 func TestDetectServicesBraintreeAndBunny(t *testing.T) {
 	cases := []struct {

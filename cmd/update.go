@@ -47,26 +47,24 @@ func CheckForUpdates() {
 		return
 	}
 
+	// Record the attempt before making it, whatever the outcome. Recording
+	// only a success meant that behind a firewall that drops packets, or
+	// once GitHub rate-limited the address, every scan and init paid the
+	// full timeout again.
+	markUpdateChecked()
+
 	latest, err := fetchLatestVersion()
 	if err != nil {
 		// Silently fail - don't interrupt user workflow for update check failures
 		return
 	}
 
-	// Record the check time regardless of whether an update is available
-	markUpdateChecked()
-
 	if isNewerVersion(latest, version) {
 		upgradeCmd := getUpgradeCommand()
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintf(os.Stderr, "📦 A new version of Preflight is available: %s → %s\n", version, latest)
 
-		// For the `curl ... | sh` path we refuse to auto-execute. Piping a
-		// network-fetched script into a shell on the user's machine is too
-		// risky for an auto-prompt, even over HTTPS. Just print the command.
-		// The same goes when stdin is not a terminal: there is nobody to
-		// answer the prompt, and reading it would swallow piped input.
-		if strings.Contains(upgradeCmd, "|") || !isTerminal(os.Stdin) {
+		if !canPromptUpgrade(upgradeCmd, isTerminal(os.Stdin), isTerminal(os.Stderr)) {
 			fmt.Fprintf(os.Stderr, "   To upgrade: %s\n", upgradeCmd)
 			fmt.Fprintln(os.Stderr)
 			return
@@ -97,6 +95,23 @@ func CheckForUpdates() {
 		}
 		fmt.Fprintln(os.Stderr)
 	}
+}
+
+// canPromptUpgrade reports whether the "Install now?" prompt may be shown
+// for upgradeCmd. Otherwise the command is only printed.
+//
+// A `curl ... | sh` command is never run for the user: piping a
+// network-fetched script into a shell is too risky for an auto-prompt,
+// even over HTTPS. `docker pull` cannot work from inside the container
+// that is running Preflight. Both streams must be terminals: stdin so
+// someone can answer (and so the read does not swallow piped input), and
+// stderr because that is where the prompt is written, so with
+// `preflight scan 2>log` the scan blocked on a question nobody could see.
+func canPromptUpgrade(upgradeCmd string, stdinIsTerminal, stderrIsTerminal bool) bool {
+	if strings.Contains(upgradeCmd, "|") || strings.HasPrefix(upgradeCmd, "docker ") {
+		return false
+	}
+	return stdinIsTerminal && stderrIsTerminal
 }
 
 // shouldCheckForUpdate returns true if enough time has passed since the last check

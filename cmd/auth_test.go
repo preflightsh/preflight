@@ -55,6 +55,26 @@ func TestPollLoginRecoversFromTransientErrors(t *testing.T) {
 
 // `auth status` printed "Logged in as " with nothing after it when the
 // post-login account lookup had failed.
+// Ctrl-C while waiting for approval ends the wait with the cancelled exit
+// code. The context login used to pass was never cancelled, so this
+// branch could not run.
+func TestPollLoginCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var out bytes.Buffer
+	_, err := pollLogin(ctx, func() (*dashboard.PollStatus, error) {
+		t.Fatal("polled after cancellation")
+		return nil, nil
+	}, time.Hour, time.Now().Add(time.Hour), &out)
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != ExitCanceled {
+		t.Fatalf("err=%v, want exit code %d", err, ExitCanceled)
+	}
+	if !strings.Contains(out.String(), "Login cancelled.") {
+		t.Errorf("output %q does not say the login was cancelled", out.String())
+	}
+}
+
 func TestAuthStatusWithoutEmail(t *testing.T) {
 	got := authStatusText(&dashboard.Credentials{Token: "t", APIURL: "https://app.example"})
 	if strings.Contains(got, "Logged in as \n") || !strings.Contains(got, "Logged in") {

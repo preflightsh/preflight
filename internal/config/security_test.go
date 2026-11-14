@@ -26,6 +26,13 @@ func TestValueValidation(t *testing.T) {
 		{"malformed mail domain", "checks:\n  emailAuth:\n    enabled: true\n    domain: -mail.example.com\n", true},
 		{"mail URL", "checks:\n  emailAuth:\n    enabled: true\n    domain: https://example.com\n", true},
 		{"independent mail domain", "checks:\n  emailAuth:\n    enabled: true\n    domain: MAIL.example.com.\n", false},
+		{"env file in a subdirectory", "checks:\n  envParity:\n    envFile: config/.env\n", false},
+		{"env file above the project", "checks:\n  envParity:\n    envFile: ../.env\n", true},
+		{"example file above the project", "checks:\n  envParity:\n    exampleFile: a/../../x\n", true},
+		{"absolute env file", "checks:\n  envParity:\n    envFile: /etc/passwd\n", true},
+		{"layout above the project", "checks:\n  seoMeta:\n    mainLayout: ../other/layout.html\n", true},
+		{"absolute layout", "checks:\n  seoMeta:\n    mainLayout: /tmp/layout.html\n", true},
+		{"layout inside the project", "checks:\n  seoMeta:\n    mainLayout: app/layout.tsx\n", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/preflightsh/preflight/internal/catalog"
 	"github.com/preflightsh/preflight/internal/checks"
@@ -38,13 +38,19 @@ func init() {
 // shouldUseColor honors the NO_COLOR convention and detects whether
 // stdout is a character device (terminal) vs. a pipe/file.
 func shouldUseColor() bool {
+	return fancyTerminal(os.Stdout)
+}
+
+// fancyTerminal reports whether f is a terminal that should get escape
+// sequences: a character device, with NO_COLOR unset and TERM not dumb.
+func fancyTerminal(f *os.File) bool {
 	if _, noColor := os.LookupEnv("NO_COLOR"); noColor {
 		return false
 	}
 	if os.Getenv("TERM") == "dumb" {
 		return false
 	}
-	fi, err := os.Stdout.Stat()
+	fi, err := f.Stat()
 	if err != nil {
 		return false
 	}
@@ -62,7 +68,7 @@ func (h HumanOutputter) Output(w io.Writer, projectName string, results []checks
 	// Header
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "%s%s ✈  Preflight Scan Results%s\n", colorBold, colorCyan, colorReset)
-	fmt.Fprintf(w, "%s   Project: %s%s\n", colorGray, sanitize(projectName), colorReset)
+	fmt.Fprintf(w, "%s   Project: %s%s\n", colorGray, Sanitize(projectName), colorReset)
 	fmt.Fprintln(w)
 
 	// Separate results into core checks and service checks, and drop
@@ -95,12 +101,12 @@ func (h HumanOutputter) Output(w io.Writer, projectName string, results []checks
 		status := formatStatus(r)
 		categoryLabel := fmt.Sprintf("%s  %-10s", icon, category)
 
-		fmt.Fprintf(w, "  %s %s%-45s%s %s\n", categoryLabel, colorReset, sanitize(r.Title), colorReset, status)
+		fmt.Fprintf(w, "  %s %s%-45s%s %s\n", categoryLabel, colorReset, Sanitize(r.Title), colorReset, status)
 
 		// Show message for failed checks, or for passed checks with useful info
 		if r.Message != "" {
 			if !r.Passed || hasUsefulPassedMessage(r.Message) {
-				fmt.Fprintf(w, "  %s                  └─ %s%s\n", colorGray, sanitize(r.Message), colorReset)
+				fmt.Fprintf(w, "  %s                  └─ %s%s\n", colorGray, Sanitize(r.Message), colorReset)
 			}
 		}
 
@@ -110,14 +116,14 @@ func (h HumanOutputter) Output(w io.Writer, projectName string, results []checks
 		// terminal users with "Found 1 debug statement(s)" and no path.
 		if !r.Passed {
 			for _, s := range r.Suggestions {
-				fmt.Fprintf(w, "  %s                     • %s%s\n", colorGray, sanitize(s), colorReset)
+				fmt.Fprintf(w, "  %s                     • %s%s\n", colorGray, Sanitize(s), colorReset)
 			}
 		}
 
 		// Show verbose details if enabled
 		if h.Verbose && len(r.Details) > 0 {
 			for _, detail := range r.Details {
-				fmt.Fprintf(w, "  %s                  │  %s%s\n", colorGray, sanitize(detail), colorReset)
+				fmt.Fprintf(w, "  %s                  │  %s%s\n", colorGray, Sanitize(detail), colorReset)
 			}
 		}
 
@@ -186,67 +192,34 @@ func (h HumanOutputter) Output(w io.Writer, projectName string, results []checks
 	return ew.err
 }
 
-// sanitize strips the control characters a terminal would interpret. Titles
-// are ours, but messages and suggestions carry file names and content
-// harvested from the scanned project, and a file named with an escape
-// sequence would otherwise reach the terminal verbatim (the JSON output is
-// safe because encoding/json escapes them). Tabs are kept; C0 controls,
-// DEL and the C1 range (U+0080 to U+009F, which some terminals treat as
-// 8-bit escape introducers) are dropped.
-func sanitize(s string) string {
-	clean := true
-	for i := 0; i < len(s); {
-		r, size := utf8.DecodeRuneInString(s[i:])
-		if isTerminalControl(r) || (r == utf8.RuneError && size == 1) {
-			clean = false
-			break
-		}
-		i += size
-	}
-	if clean {
-		return s
-	}
-	var b strings.Builder
-	b.Grow(len(s))
-	for i := 0; i < len(s); {
-		r, size := utf8.DecodeRuneInString(s[i:])
-		// A lone invalid byte is dropped too: 0x9b on its own is not valid
-		// UTF-8, but a terminal in 8-bit mode still reads it as CSI.
-		invalidByte := r == utf8.RuneError && size == 1
-		if !isTerminalControl(r) && !invalidByte {
-			b.WriteString(s[i : i+size])
-		}
-		i += size
-	}
-	return b.String()
+// usefulPassedPhrases mark a passing message that says something worth
+// reading: what was found, where, or that the check did not really run.
+var usefulPassedPhrases = []string{
+	"license found",  // License type detection
+	"(at ",           // Location info for files found in parent dirs
+	"not enabled",    // Check passed because it's disabled/not configured
+	"not configured", // Check passed because it's not configured
+	"skipped",        // Check was skipped
+	"not declared",   // Service not declared
+	"prod:",          // Per-environment summary (security headers, SEO checks)
+	"staging:",
 }
 
-func isTerminalControl(r rune) bool {
-	if r == '\t' {
-		return false
-	}
-	return r < 0x20 || (r >= 0x7f && r <= 0x9f)
-}
+// licenseNameRe matches a license name as a word of its own. The names
+// used to be lowercased and matched as substrings, so "MPL" matched
+// "example" and "template", "MIT" matched "limit" and "commit", and "ISC"
+// matched "misc": nearly every passing message was shown.
+var licenseNameRe = regexp.MustCompile(`\b(MIT|Apache|GPL|LGPL|AGPL|BSD|ISC|MPL)\b`)
 
 // hasUsefulPassedMessage returns true if the message contains info worth showing
 // even when the check passed (e.g., license type, version info)
 func hasUsefulPassedMessage(msg string) bool {
-	// Show messages that identify specific types/versions
-	usefulPatterns := []string{
-		"license found", // License type detection
-		"MIT", "Apache", "GPL", "AGPL", "BSD", "ISC", "MPL",
-		"(at ",           // Location info for files found in parent dirs
-		"not enabled",    // Check passed because it's disabled/not configured
-		"not configured", // Check passed because it's not configured
-		"skipped",        // Check was skipped
-		"not declared",   // Service not declared
-		"prod:",          // Per-environment summary (security headers, SEO checks)
-		"staging:",
+	if licenseNameRe.MatchString(msg) {
+		return true
 	}
-
 	msgLower := strings.ToLower(msg)
-	for _, pattern := range usefulPatterns {
-		if strings.Contains(msgLower, strings.ToLower(pattern)) {
+	for _, phrase := range usefulPassedPhrases {
+		if strings.Contains(msgLower, phrase) {
 			return true
 		}
 	}

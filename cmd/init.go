@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -46,7 +47,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// Get current directory
 	cwd, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf("failed to get current directory: %w", err)
+		return couldNotRun(fmt.Errorf("failed to get current directory: %w", err))
 	}
 
 	// Re-running init used to overwrite preflight.yml without asking,
@@ -134,7 +135,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	checkEmailAuth := promptYesNo(reader, "Check email authentication (SPF/DMARC)?", false)
 	mailDomain := ""
 	if checkEmailAuth {
-		mailDomain = promptOptional(reader, "Email sending domain (e.g. mail.example.com)")
+		mailDomain = promptMailDomain(reader)
 		if mailDomain == "" {
 			checkEmailAuth = false
 			fmt.Println("Email authentication disabled until emailAuth.domain is configured.")
@@ -146,38 +147,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	// Handle IndexNow - user already confirmed/declined in services section
 	var indexNowKey string
-	indexNowConfirmed := confirmedServices["indexnow"].Declared
-
-	if indexNowConfirmed {
-		// Try to extract key from .env files
-		indexNowKey = detectIndexNowKey(cwd)
-		if indexNowKey != "" {
-			fmt.Printf("IndexNow key found: %s\n", indexNowKey)
-		} else {
-			fmt.Println("IndexNow enabled but no key found in .env files or web root")
-			fmt.Println("  1. Paste existing key")
-			fmt.Println("  2. Generate new key")
-			choice := promptWithDefault(reader, "  Choose", "2")
-			if choice == "1" {
-				indexNowKey = promptOptional(reader, "  Paste your IndexNow key")
-			} else {
-				indexNowKey = generateIndexNowKey()
-				fmt.Printf("  Generated key: %s\n", indexNowKey)
-
-				// Create the key file in the web root
-				webRoot := detectWebRoot(cwd, stack)
-				keyFilePath := filepath.Join(cwd, webRoot, indexNowKey+".txt")
-				if err := os.MkdirAll(filepath.Dir(keyFilePath), 0755); err != nil {
-					fmt.Printf("  ⚠️  Could not create directory: %v\n", err)
-					fmt.Printf("     Create %s/%s.txt containing: %s\n", webRoot, indexNowKey, indexNowKey)
-				} else if err := fsutil.WriteFile(keyFilePath, []byte(indexNowKey+"\n"), 0644); err == nil {
-					fmt.Printf("  ✅ Created %s/%s.txt\n", webRoot, indexNowKey)
-				} else {
-					fmt.Printf("  ⚠️  Could not create key file: %v\n", err)
-					fmt.Printf("     Create %s/%s.txt containing: %s\n", webRoot, indexNowKey, indexNowKey)
-				}
-			}
-		}
+	writeKeyFile := false
+	if confirmedServices["indexnow"].Declared {
+		indexNowKey, writeKeyFile = chooseIndexNowKey(reader, cwd)
 		// Remove from confirmedServices since we handle it separately
 		delete(confirmedServices, "indexnow")
 	}
@@ -210,53 +182,27 @@ func runInit(cmd *cobra.Command, args []string) error {
 	if cfg.Checks.EmailAuth != nil {
 		cfg.Checks.EmailAuth.Domain = mailDomain
 	}
+	// Each answer was checked at its prompt, so this should not fail. It
+	// stays as the last gate, and it runs before anything is written:
+	// nothing reaches the disk (the IndexNow key file included) for a
+	// config that would not load.
 	if err := config.Validate(&cfg); err != nil {
-		return fmt.Errorf("configuration: %w", err)
+		return couldNotRun(fmt.Errorf("configuration: %w", err))
 	}
 	// Write config file
 	configPath := "preflight.yml"
 	if err := writeConfig(configPath, &cfg); err != nil {
-		return fmt.Errorf("failed to write config: %w", err)
+		return couldNotRun(fmt.Errorf("failed to write config: %w", err))
 	}
 
 	fmt.Println()
 	fmt.Printf("✅ Created %s\n", configPath)
 
-	// Check and update .gitignore
-	gitignorePath := filepath.Join(cwd, ".gitignore")
-	gitignoreUpdated := false
-	if content, err := fsutil.ReadFile(gitignorePath, 8<<20); err == nil {
-		// .gitignore exists, check if preflight.yml is already covered
-		// by an effective rule (handles globs, leading "/", comments,
-		// and "!preflight.yml" negations).
-		if !gitignoreCoversPreflightYml(content) {
-			if promptYesNo(reader, "Add preflight.yml to .gitignore?", true) {
-				updated := append([]byte{}, content...)
-				if len(updated) > 0 && updated[len(updated)-1] != '\n' {
-					updated = append(updated, '\n')
-				}
-				updated = append(updated, "preflight.yml\n"...)
-				if err := fsutil.WriteFile(gitignorePath, updated, 0644); err != nil {
-					fmt.Fprintln(os.Stderr, "⚠️  Could not update .gitignore:", err)
-				} else {
-					gitignoreUpdated = true
-					fmt.Println("✅ Added preflight.yml to .gitignore")
-				}
-			}
-		}
-	} else if os.IsNotExist(err) {
-		// No .gitignore exists, offer to create one
-		if promptYesNo(reader, "Create .gitignore with preflight.yml?", true) {
-			if err := fsutil.WriteFile(gitignorePath, []byte("preflight.yml\n"), 0644); err != nil {
-				fmt.Fprintf(os.Stderr, "⚠️  Could not create .gitignore: %v\n", err)
-			} else {
-				gitignoreUpdated = true
-				fmt.Println("✅ Created .gitignore with preflight.yml")
-			}
-		}
+	if writeKeyFile {
+		createIndexNowKeyFile(cwd, stack, indexNowKey)
 	}
 
-	if !gitignoreUpdated {
+	if !offerGitignore(reader, cwd) {
 		fmt.Println()
 		fmt.Println("⚠️  Remember: preflight.yml may contain sensitive URLs.")
 		fmt.Println("   Consider adding it to your .gitignore")
@@ -275,6 +221,111 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// promptMailDomain asks for the email sending domain until the answer is
+// a usable DNS name or empty. A bad answer used to be accepted here and
+// rejected only when the finished config was validated, after every other
+// prompt, which threw all the answers away.
+func promptMailDomain(reader *bufio.Reader) string {
+	for {
+		answer, ok := promptLine(reader, "Email sending domain (e.g. mail.example.com)")
+		domain, err := config.NormalizeMailDomain(answer)
+		if err == nil {
+			return domain
+		}
+		fmt.Printf("  %q is not a domain name: enter just the domain, such as mail.example.com, or leave it empty to skip.\n", answer)
+		if !ok {
+			// Input ended; there is nobody to ask again.
+			return ""
+		}
+	}
+}
+
+// chooseIndexNowKey finds the project's IndexNow key or asks for one. It
+// reports whether a newly generated key still needs its key file; the
+// file is written only after preflight.yml has been.
+func chooseIndexNowKey(reader *bufio.Reader, cwd string) (key string, generated bool) {
+	// Try to extract key from .env files
+	if key = detectIndexNowKey(cwd); key != "" {
+		fmt.Printf("IndexNow key found: %s\n", key)
+		return key, false
+	}
+	fmt.Println("IndexNow enabled but no key found in .env files or web root")
+	fmt.Println("  1. Paste existing key")
+	fmt.Println("  2. Generate new key")
+	if promptWithDefault(reader, "  Choose", "2") == "1" {
+		return promptOptional(reader, "  Paste your IndexNow key"), false
+	}
+	key = generateIndexNowKey()
+	if key == "" {
+		return "", false
+	}
+	fmt.Printf("  Generated key: %s\n", key)
+	return key, true
+}
+
+// createIndexNowKeyFile writes <key>.txt where the site will serve it from
+// its root, or says where to put it when it cannot.
+func createIndexNowKeyFile(cwd, stack, key string) {
+	rel := filepath.Join(detectWebRoot(cwd, stack), key+".txt")
+	keyFilePath := filepath.Join(cwd, rel)
+	if err := os.MkdirAll(filepath.Dir(keyFilePath), 0755); err != nil {
+		fmt.Printf("  ⚠️  Could not create directory: %v\n", err)
+		fmt.Printf("     Create %s containing: %s\n", rel, key)
+		return
+	}
+	if err := fsutil.WriteFile(keyFilePath, []byte(key+"\n"), 0644); err != nil {
+		fmt.Printf("  ⚠️  Could not create key file: %v\n", err)
+		fmt.Printf("     Create %s containing: %s\n", rel, key)
+		return
+	}
+	fmt.Printf("✅ Created %s\n", rel)
+	if stack == "eleventy" {
+		fmt.Println("   Eleventy copies only the files it is told to: add it with addPassthroughCopy in your config.")
+	}
+}
+
+// offerGitignore offers to list preflight.yml in .gitignore and reports
+// whether it ended up there.
+func offerGitignore(reader *bufio.Reader, cwd string) bool {
+	gitignorePath := filepath.Join(cwd, ".gitignore")
+	content, err := fsutil.ReadFile(gitignorePath, 8<<20)
+	switch {
+	case err == nil:
+		// .gitignore exists, check if preflight.yml is already covered
+		// by an effective rule (handles globs, leading "/", comments,
+		// and "!preflight.yml" negations).
+		if gitignoreCoversPreflightYml(content) {
+			return true
+		}
+		if !promptYesNo(reader, "Add preflight.yml to .gitignore?", true) {
+			return false
+		}
+		updated := append([]byte{}, content...)
+		if len(updated) > 0 && updated[len(updated)-1] != '\n' {
+			updated = append(updated, '\n')
+		}
+		updated = append(updated, "preflight.yml\n"...)
+		if err := fsutil.WriteFile(gitignorePath, updated, 0644); err != nil {
+			fmt.Fprintln(os.Stderr, "⚠️  Could not update .gitignore:", err)
+			return false
+		}
+		fmt.Println("✅ Added preflight.yml to .gitignore")
+		return true
+	case os.IsNotExist(err):
+		// No .gitignore exists, offer to create one
+		if !promptYesNo(reader, "Create .gitignore with preflight.yml?", true) {
+			return false
+		}
+		if err := fsutil.WriteFile(gitignorePath, []byte("preflight.yml\n"), 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "⚠️  Could not create .gitignore: %v\n", err)
+			return false
+		}
+		fmt.Println("✅ Created .gitignore with preflight.yml")
+		return true
+	}
+	return false
 }
 
 // gitignoreCoversPreflightYml reports whether the given .gitignore
@@ -328,12 +379,19 @@ func promptWithDefault(reader *bufio.Reader, prompt, defaultVal string) string {
 }
 
 func promptOptional(reader *bufio.Reader, prompt string) string {
+	answer, _ := promptLine(reader, prompt)
+	return answer
+}
+
+// promptLine asks for one line. ok is false once input has ended (EOF or
+// a read error), which tells a caller that would ask again to stop.
+func promptLine(reader *bufio.Reader, prompt string) (answer string, ok bool) {
 	fmt.Printf("%s: ", prompt)
 	input, err := reader.ReadString('\n')
 	if err != nil {
-		return ""
+		return "", false
 	}
-	return strings.TrimSpace(input)
+	return strings.TrimSpace(input), true
 }
 
 func promptYesNo(reader *bufio.Reader, prompt string, defaultYes bool) bool {
@@ -421,139 +479,20 @@ func buildDefaultChecks(cwd, stack string, services map[string]config.ServiceCon
 	return checks
 }
 
-func detectMainLayout(cwd, stack string) string {
-	// Stack-specific layouts (checked first)
-	stackLayouts := map[string][]string{
-		// Frameworks
-		"rails":   {"app/views/layouts/application.html.erb"},
-		"next":    {"app/layout.tsx", "app/layout.js", "pages/_document.tsx", "pages/_document.js"},
-		"node":    {"views/layout.ejs", "views/layout.pug", "views/layout.hbs"},
-		"laravel": {"resources/views/layouts/app.blade.php", "resources/views/layout.blade.php"},
-		"django":  {"templates/base.html", "templates/layout.html"},
-		"static":  {"index.html"},
-
-		// Traditional CMS
-		"wordpress": {"wp-content/themes/theme/header.php", "wp-content/themes/theme/functions.php"},
-		"craft":     {"templates/_layout.twig", "templates/_layout.html"},
-		"drupal":    {"themes/custom/theme/templates/html.html.twig"},
-		"ghost":     {"content/themes/casper/default.hbs"},
-
-		// Static Site Generators
-		"hugo":     {"layouts/_default/baseof.html", "themes/theme/layouts/_default/baseof.html"},
-		"jekyll":   {"_layouts/default.html", "_includes/head.html"},
-		"gatsby":   {"src/components/layout.js", "src/components/layout.tsx", "src/templates/page.js"},
-		"eleventy": {"_includes/layout.njk", "_includes/base.njk", "_includes/layout.liquid"},
-		"astro":    {"src/layouts/Layout.astro", "src/layouts/BaseLayout.astro"},
-
-		// Headless CMS (frontend usually in Next.js, etc.)
-		"strapi":     {"src/admin/app.js"},
-		"sanity":     {"schemas/schema.js"},
-		"contentful": {"src/templates/page.js"},
-		"prismic":    {"src/components/Layout.js"},
-	}
-
-	// Check stack-specific paths first
-	if paths, ok := stackLayouts[stack]; ok {
-		for _, path := range paths {
-			if _, err := os.Stat(filepath.Join(cwd, path)); err == nil {
-				return path
-			}
-		}
-	}
-
-	// Universal layout patterns (checked for all stacks)
-	// These cover common conventions across frameworks
-	universalLayouts := []string{
-		// PHP common patterns
-		"partials/header.php",
-		"includes/header.php",
-		"inc/header.php",
-		"templates/header.php",
-		"views/partials/header.php",
-		"views/includes/header.php",
-		"app/views/header.php",
-		"resources/views/partials/header.php",
-		"public/index.php",
-		"index.php",
-
-		// HTML/Static
-		"index.html",
-		"public/index.html",
-		"src/index.html",
-
-		// Node/Express
-		"views/layout.ejs",
-		"views/layout.pug",
-		"views/layout.hbs",
-		"views/layouts/main.hbs",
-		"views/layouts/main.ejs",
-
-		// React/Vue/Svelte
-		"src/App.tsx",
-		"src/App.jsx",
-		"src/App.js",
-		"src/App.vue",
-		"src/App.svelte",
-		"src/main.tsx",
-		"src/main.jsx",
-		"src/main.js",
-		"app/layout.tsx",
-		"app/layout.jsx",
-		"app/layout.js",
-		"pages/_app.tsx",
-		"pages/_app.jsx",
-		"pages/_app.js",
-		"pages/_document.tsx",
-		"pages/_document.jsx",
-		"pages/_document.js",
-
-		// Twig (Symfony, Craft, etc.)
-		"templates/base.twig",
-		"templates/_layout.twig",
-		"templates/layout.twig",
-		"templates/base.html.twig",
-
-		// Blade (Laravel)
-		"resources/views/layouts/app.blade.php",
-		"resources/views/layout.blade.php",
-		"resources/views/layouts/main.blade.php",
-
-		// Ruby/Rails
-		"app/views/layouts/application.html.erb",
-
-		// Python/Django/Flask
-		"templates/base.html",
-		"templates/layout.html",
-
-		// Go
-		"templates/base.html",
-		"templates/layout.html",
-		"views/base.html",
-		"views/layout.html",
-
-		// Static site generators
-		"_layouts/default.html",
-		"_includes/head.html",
-		"layouts/_default/baseof.html",
-		"src/layouts/Layout.astro",
-		"_includes/layout.njk",
-	}
-
-	for _, path := range universalLayouts {
-		if _, err := os.Stat(filepath.Join(cwd, path)); err == nil {
-			return path
-		}
-	}
-
-	return ""
-}
-
+// writeConfig writes cfg with the 2-space indent `preflight ignore` uses
+// when it has to re-encode the file. yaml.Marshal indents by 4, so the
+// first edit after init used to reflow every nested line.
 func writeConfig(path string, cfg *config.PreflightConfig) error {
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(cfg); err != nil {
 		return err
 	}
-	return fsutil.WriteFile(path, data, 0644)
+	if err := enc.Close(); err != nil {
+		return err
+	}
+	return fsutil.WriteFile(path, buf.Bytes(), 0644)
 }
 
 func formatServiceName(svc string) string {
@@ -578,6 +517,7 @@ func formatStackName(stack string) string {
 		"python":  "Python",
 		"go":      "Go",
 		"rust":    "Rust",
+		"php":     "PHP",
 		"static":  "Static Site",
 
 		// Traditional CMS
@@ -807,28 +747,40 @@ func detectIndexNowKey(cwd string) string {
 	return ""
 }
 
+// detectWebRoot returns the directory, relative to the project root, whose
+// files the site serves at its own root. "." is the project root itself.
 func detectWebRoot(cwd, stack string) string {
-	// Stack-specific web roots
+	// Where each stack keeps files it serves verbatim. The entry is the
+	// source directory, never the build output: Jekyll copies files from
+	// the project root into _site and wipes _site on every build, and a
+	// WordPress install serves its own root.
 	stackRoots := map[string]string{
 		"rails":     "public",
 		"laravel":   "public",
 		"next":      "public",
 		"node":      "public",
 		"craft":     "web",
-		"symfony":   "public",
 		"django":    "static",
 		"hugo":      "static",
-		"jekyll":    "_site",
-		"gatsby":    "public",
+		"jekyll":    ".",
+		"gatsby":    "static",
 		"astro":     "public",
-		"eleventy":  "_site",
-		"wordpress": "",
+		"wordpress": ".",
 		"drupal":    "web",
 		"ghost":     "content",
 	}
-
-	if root, ok := stackRoots[stack]; ok && root != "" {
+	if root, ok := stackRoots[stack]; ok {
 		return root
+	}
+	// Eleventy has no fixed static directory. Use the input directory:
+	// src when the project has one, else the project root.
+	if stack == "eleventy" {
+		for _, dir := range []string{"src", "public"} {
+			if info, err := os.Stat(filepath.Join(cwd, dir)); err == nil && info.IsDir() {
+				return dir
+			}
+		}
+		return "."
 	}
 
 	// Check for common web root directories

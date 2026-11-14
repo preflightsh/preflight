@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -58,7 +59,15 @@ func runHistory(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(args) == 1 {
-		return showRun(client, creds.Token, args[0])
+		run, err := client.GetRun(creds.Token, args[0])
+		if err != nil {
+			return &ExitError{Code: ExitFail, Err: err}
+		}
+		if historyFormat == "json" {
+			return printJSON(run)
+		}
+		writeRun(os.Stdout, run)
+		return nil
 	}
 	return listHistory(client, creds.Token)
 }
@@ -67,7 +76,7 @@ func runHistory(cmd *cobra.Command, args []string) error {
 func listHistory(client *dashboard.Client, token string) error {
 	projectKey := ""
 	if historyHere {
-		projectKey = currentProjectKey()
+		projectKey = currentProjectKey(".")
 		if projectKey == "" {
 			return &ExitError{Code: ExitUsage, Err: fmt.Errorf("could not determine the current project; run from a project directory or omit --here")}
 		}
@@ -90,50 +99,64 @@ func listHistory(client *dashboard.Client, token string) error {
 	fmt.Fprintln(tw, "RUN ID\tPROJECT\tWHEN\tOK\tWARN\tFAIL")
 	for _, r := range runs {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%d\n",
-			r.ID, truncate(r.ProjectName, 28), relTime(r.CreatedAt), r.OK, r.Warn, r.Fail)
+			output.Sanitize(r.ID), truncate(output.Sanitize(r.ProjectName), 28), shortDate(r.CreatedAt), r.OK, r.Warn, r.Fail)
 	}
 	_ = tw.Flush()
 	fmt.Printf("\nView a run:  preflight history <run-id>\n")
 	return nil
 }
 
-// showRun prints one run's check results.
-func showRun(client *dashboard.Client, token, runID string) error {
-	run, err := client.GetRun(token, runID)
-	if err != nil {
-		return &ExitError{Code: ExitFail, Err: err}
-	}
-	if historyFormat == "json" {
-		return printJSON(run)
-	}
-
-	fmt.Printf("%s  (%s)\n", run.ProjectName, time.Unix(run.CreatedAt, 0).Format("Jan 2, 2006 3:04 PM"))
-	fmt.Printf("%d passed, %d warnings, %d failed\n\n", run.OK, run.Warn, run.Fail)
+// writeRun prints one run's check results. Every string here came from the
+// dashboard, so each is sanitized before it reaches the terminal.
+func writeRun(w io.Writer, run *dashboard.RunDetail) {
+	fmt.Fprintf(w, "%s  (%s)\n", output.Sanitize(run.ProjectName), time.Unix(run.CreatedAt, 0).Format("Jan 2, 2006 3:04 PM"))
+	fmt.Fprintf(w, "%d passed, %d warnings, %d failed\n\n", run.OK, run.Warn, run.Fail)
 	for _, c := range run.Checks {
-		mark := "✓"
-		if !c.Passed {
-			mark = "✗"
-			// The wire value is "warn" (checks.SeverityWarn), not "warning".
-			if c.Severity == "warn" {
-				mark = "!"
-			}
-		}
-		fmt.Printf("  %s  %s\n", mark, c.Title)
-		if !c.Passed && c.Message != "" {
-			fmt.Printf("       %s\n", c.Message)
+		fmt.Fprintf(w, "  %s  %s\n", runCheckMark(c), output.Sanitize(c.Title))
+		// A skipped or inconclusive check passes or fails on paper, but
+		// its message is the only thing that says it was not verified.
+		if (!c.Passed || c.Skipped || c.Inconclusive) && c.Message != "" {
+			fmt.Fprintf(w, "       %s\n", output.Sanitize(c.Message))
 		}
 	}
-	return nil
 }
 
-// currentProjectKey computes the dashboard project key for the current
-// directory, matching how `preflight scan --publish` groups runs.
-func currentProjectKey() string {
+// runCheckMark is the one-character status of a published check. Skipped
+// and inconclusive come first: a skipped check is stored as passed: false
+// with info severity and used to print as a failure, and an inconclusive
+// one could print as a pass.
+func runCheckMark(c dashboard.PublishCheck) string {
+	switch {
+	case c.Skipped:
+		return "-"
+	case c.Inconclusive:
+		return "?"
+	case c.Passed:
+		return "✓"
+	case c.Severity == "warn": // the wire value (checks.SeverityWarn), not "warning"
+		return "!"
+	default:
+		return "✗"
+	}
+}
+
+// currentProjectKey computes the dashboard project key for dir, matching
+// how `preflight scan --publish` groups runs. It is "" when dir is not a
+// project: no repository remote and no preflight.yml. projectKey always
+// returns at least "name:", so without this check `history --here`
+// outside a project asked the dashboard for a project with no name and
+// reported "No runs found" instead of the usage error.
+func currentProjectKey(dir string) string {
+	cfg, err := config.Load(dir)
 	name := ""
-	if cfg, err := config.Load("."); err == nil {
+	if err == nil {
 		name = cfg.ProjectName
 	}
-	return projectKey(".", name)
+	key := projectKey(dir, name)
+	if err != nil && strings.HasPrefix(key, "name:") {
+		return ""
+	}
+	return key
 }
 
 func printJSON(v any) error {
@@ -159,8 +182,8 @@ func writeHistoryJSON(w io.Writer, v any) error {
 	return enc.Encode(doc)
 }
 
-// relTime renders a unix timestamp as a short absolute date.
-func relTime(unix int64) string {
+// shortDate renders a unix timestamp as a short absolute date.
+func shortDate(unix int64) string {
 	return time.Unix(unix, 0).Format("Jan 2 3:04 PM")
 }
 

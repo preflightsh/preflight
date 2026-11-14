@@ -9,8 +9,10 @@ import (
 
 // Spinner is a lightweight terminal progress indicator. Writes to stderr
 // so it never pollutes stdout (which may be piped or captured). Disabled
-// automatically on non-TTY stdout, NO_COLOR, TERM=dumb, and when Start
-// is never called. All methods are no-ops on a zero-value Spinner, so
+// automatically when stderr is not a terminal, on NO_COLOR, TERM=dumb,
+// and when Start is never called. It used to look at stdout, so
+// `preflight scan 2>scan.log` filled the log with escape frames while
+// `preflight scan >report.txt` showed no progress at all. All methods are no-ops on a zero-value Spinner, so
 // callers can hold a *Spinner without nil checks.
 type Spinner struct {
 	mu       sync.Mutex
@@ -25,7 +27,7 @@ func NewSpinner() *Spinner {
 	return &Spinner{
 		done:    make(chan struct{}),
 		exited:  make(chan struct{}),
-		enabled: shouldUseColor(),
+		enabled: fancyTerminal(os.Stderr),
 	}
 }
 

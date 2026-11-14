@@ -148,6 +148,12 @@ func Load(rootDir string) (*PreflightConfig, error) {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("preflight.yml not found in %s", rootDir)
 		}
+		// A symlinked config is refused on purpose (a cloned repo can
+		// point it anywhere), but "not a regular file" did not say that
+		// or what to do about it.
+		if info, statErr := os.Lstat(configPath); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("preflight.yml is a symlink, which Preflight does not follow; replace it with a real file (copy the target into the project root)")
+		}
 		return nil, fmt.Errorf("failed to read config: %w", err)
 	}
 
@@ -196,7 +202,7 @@ func Validate(cfg *PreflightConfig) error {
 		if check || service {
 			continue
 		}
-		if strings.ContainsAny(id, "/*?[.") {
+		if LooksLikeGlob(id) {
 			if !doublestar.ValidatePattern(filepath.ToSlash(id)) {
 				return fmt.Errorf("invalid glob %q in ignore", id)
 			}
@@ -213,6 +219,9 @@ func Validate(cfg *PreflightConfig) error {
 			note += fmt.Sprintf("; use %q to skip a directory", id+"/**")
 		}
 		cfg.Notes = append(cfg.Notes, note)
+	}
+	if err := validateProjectPaths(cfg); err != nil {
+		return err
 	}
 	if c := cfg.Checks.Secrets; c != nil {
 		for _, entry := range c.Allowlist {
@@ -233,30 +242,72 @@ func Validate(cfg *PreflightConfig) error {
 	return nil
 }
 
+// LooksLikeGlob reports whether an ignore entry is a file pattern rather
+// than a check ID. Check IDs are bare identifiers; anything with a path
+// separator, a glob metacharacter or an extension is a pattern. Loading
+// the config and `preflight ignore` must agree on this, so both use it.
+func LooksLikeGlob(s string) bool {
+	return strings.ContainsAny(s, "/*?[.")
+}
+
+// validateProjectPaths rejects configured file paths that leave the
+// project. The checks read these files and put what they find in their
+// messages, which can be published, so `envFile: ../../other/.env` in a
+// config someone else wrote read a file the scan was never pointed at.
+func validateProjectPaths(cfg *PreflightConfig) error {
+	paths := []struct{ key, value string }{}
+	if c := cfg.Checks.EnvParity; c != nil {
+		paths = append(paths,
+			struct{ key, value string }{"checks.envParity.envFile", c.EnvFile},
+			struct{ key, value string }{"checks.envParity.exampleFile", c.ExampleFile})
+	}
+	if c := cfg.Checks.SEOMeta; c != nil {
+		paths = append(paths, struct{ key, value string }{"checks.seoMeta.mainLayout", c.MainLayout})
+	}
+	for _, p := range paths {
+		if p.value == "" {
+			continue
+		}
+		if !filepath.IsLocal(filepath.FromSlash(p.value)) {
+			return fmt.Errorf("%s must be a path inside the project, without a leading / or any .. (got %q)", p.key, p.value)
+		}
+	}
+	return nil
+}
+
 // validateMailDomain normalizes checks.emailAuth.domain and rejects one
 // that is not a plain ASCII DNS name. An empty domain is valid.
 func validateMailDomain(c *EmailAuthConfig) error {
-	domain := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(c.Domain)), ".")
+	domain, err := NormalizeMailDomain(c.Domain)
 	c.Domain = domain
+	return err
+}
+
+// NormalizeMailDomain lowercases and trims an email sending domain and
+// rejects one that is not a plain ASCII DNS name. An empty domain is
+// valid. preflight init calls it at the prompt, so a bad answer is asked
+// again there instead of failing the whole run at the end.
+func NormalizeMailDomain(raw string) (string, error) {
+	domain := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(raw)), ".")
 	if domain == "" {
-		return nil
+		return "", nil
 	}
 	if strings.ContainsAny(domain, "/:@ ?#") || !strings.Contains(domain, ".") {
-		return fmt.Errorf("emailAuth.domain must name the email sending domain, e.g. mail.example.com")
+		return domain, fmt.Errorf("emailAuth.domain must name the email sending domain, e.g. mail.example.com")
 	}
 	for _, label := range strings.Split(domain, ".") {
 		if len(label) == 0 || len(label) > 63 || strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
-			return fmt.Errorf("invalid emailAuth.domain")
+			return domain, fmt.Errorf("invalid emailAuth.domain")
 		}
 		for _, r := range label {
 			letter := r >= 'a' && r <= 'z'
 			digit := r >= '0' && r <= '9'
 			if !letter && !digit && r != '-' {
-				return fmt.Errorf("emailAuth.domain must be an ASCII DNS name")
+				return domain, fmt.Errorf("emailAuth.domain must be an ASCII DNS name")
 			}
 		}
 	}
-	return nil
+	return domain, nil
 }
 
 var unknownFieldRe = regexp.MustCompile(`^line (\d+): field (.+) not found in type \S+$`)
@@ -371,7 +422,13 @@ func validateServices(cfg *PreflightConfig) error {
 		delete(cfg.Services, id)
 	}
 	if len(unknown) > 0 {
-		cfg.Notes = append(cfg.Notes, fmt.Sprintf("skipping undeclared service IDs this version does not know: %s (a newer Preflight may support them).", strings.Join(unknown, ", ")))
+		// %q: the IDs are map keys from the file, so quote them rather
+		// than print whatever bytes (terminal escapes included) they hold.
+		quoted := make([]string, len(unknown))
+		for i, id := range unknown {
+			quoted[i] = strconv.Quote(id)
+		}
+		cfg.Notes = append(cfg.Notes, fmt.Sprintf("skipping undeclared service IDs this version does not know: %s (a newer Preflight may support them).", strings.Join(quoted, ", ")))
 	}
 	return nil
 }
@@ -397,6 +454,47 @@ func markExplicitEnabled(cfg *PreflightConfig, doc *yaml.Node) {
 	}
 	if s := cfg.Checks.SEOMeta; s != nil {
 		s.EnabledSet = nodeAt(nodeAt(checks, "seoMeta"), "enabled") != nil
+	}
+
+	// The remaining checks are off unless their block asks for them. A
+	// block that holds settings but no enabled key is asking: someone who
+	// wrote secrets.allowlist or emailAuth.domain wants that check, and
+	// reading the missing key as enabled: false left the check silently
+	// off with nothing printed. An explicit enabled: false still wins.
+	c := &cfg.Checks
+	optIn := map[string]*bool{}
+	if c.EnvParity != nil {
+		optIn["envParity"] = &c.EnvParity.Enabled
+	}
+	if c.StripeWebhook != nil {
+		optIn["stripeWebhook"] = &c.StripeWebhook.Enabled
+	}
+	if c.Security != nil {
+		optIn["security"] = &c.Security.Enabled
+	}
+	if c.Secrets != nil {
+		optIn["secrets"] = &c.Secrets.Enabled
+	}
+	if c.AdsTxt != nil {
+		optIn["adsTxt"] = &c.AdsTxt.Enabled
+	}
+	if c.License != nil {
+		optIn["license"] = &c.License.Enabled
+	}
+	if c.IndexNow != nil {
+		optIn["indexNow"] = &c.IndexNow.Enabled
+	}
+	if c.EmailAuth != nil {
+		optIn["emailAuth"] = &c.EmailAuth.Enabled
+	}
+	if c.HumansTxt != nil {
+		optIn["humansTxt"] = &c.HumansTxt.Enabled
+	}
+	for key, enabled := range optIn {
+		block := nodeAt(checks, key)
+		if block != nil && block.Kind == yaml.MappingNode && nodeAt(block, "enabled") == nil {
+			*enabled = true
+		}
 	}
 }
 

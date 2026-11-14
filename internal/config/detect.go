@@ -2,6 +2,7 @@ package config
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -131,12 +132,17 @@ func DetectStack(rootDir string) string {
 		return "go"
 	}
 
-	// Check for Python (Django/Flask)
+	// Check for Python (Django/Flask). A requirements.txt next to a
+	// frontend app (a Vite or Next project with a few Python scripts) does
+	// not make the project a Python one: the framework named in
+	// package.json decides, further down.
 	if fileExists(rootDir, "requirements.txt") || fileExists(rootDir, "pyproject.toml") || fileExists(rootDir, "Pipfile") {
 		if fileExists(rootDir, "manage.py") {
 			return "django"
 		}
-		return "python"
+		if !hasUIFramework(rootDir) {
+			return "python"
+		}
 	}
 
 	// Check for Rust
@@ -152,6 +158,11 @@ func DetectStack(rootDir string) string {
 
 	// Check for Node.js frameworks
 	if fileExists(rootDir, "package.json") {
+		// Next.js needs no next.config.* file, so a project without one
+		// used to fall through to "react" and lose the Next layout.
+		if fileContains(rootDir, "package.json", `"next":`) {
+			return "next"
+		}
 		// Vite-based meta-frameworks (SvelteKit, Remix, Nuxt) all ship a
 		// vite.config.*, so they must be told apart before plain Vite: each
 		// has its own layout file for the SEO checks.
@@ -266,6 +277,19 @@ func hasFrontendFramework(rootDir string) bool {
 	return false
 }
 
+// hasUIFramework is hasFrontendFramework without the bare bundler: a
+// Flask app that builds its assets with Vite is still a Python project,
+// while one whose package.json depends on React, Vue, or Svelte is a
+// frontend app that happens to ship a requirements.txt.
+func hasUIFramework(rootDir string) bool {
+	for _, dep := range []string{`"react":`, `"next":`, `"vue":`, `"nuxt":`, `"svelte":`, `"@sveltejs/kit":`, `"astro":`} {
+		if fileContains(rootDir, "package.json", dep) {
+			return true
+		}
+	}
+	return false
+}
+
 // DetectServices scans the project for known service integrations
 func DetectServices(rootDir string) map[string]bool {
 	services := make(map[string]bool)
@@ -275,7 +299,7 @@ func DetectServices(rootDir string) map[string]bool {
 
 	// Check package.json at root
 	if pkgJSON, err := fsutil.ReadFile(filepath.Join(rootDir, "package.json"), 8<<20); err == nil {
-		content := strings.ToLower(string(pkgJSON))
+		content := strings.ToLower(manifestDependencies(pkgJSON, packageJSONDependencyKeys))
 		detectServicesFromContent(content, services, "node")
 	}
 
@@ -293,7 +317,7 @@ func DetectServices(rootDir string) map[string]bool {
 			}
 			pkgPath := filepath.Join(monoDir, entry.Name(), "package.json")
 			if pkgJSON, err := fsutil.ReadFile(pkgPath, 8<<20); err == nil {
-				content := strings.ToLower(string(pkgJSON))
+				content := strings.ToLower(manifestDependencies(pkgJSON, packageJSONDependencyKeys))
 				detectServicesFromContent(content, services, "node")
 			}
 		}
@@ -301,7 +325,7 @@ func DetectServices(rootDir string) map[string]bool {
 
 	// Check Gemfile
 	if gemfile, err := fsutil.ReadFile(filepath.Join(rootDir, "Gemfile"), 8<<20); err == nil {
-		content := strings.ToLower(string(gemfile))
+		content := strings.ToLower(stripHashComments(string(gemfile)))
 		detectServicesFromContent(content, services, "ruby")
 	}
 
@@ -313,7 +337,7 @@ func DetectServices(rootDir string) map[string]bool {
 
 	// Check composer.json for Laravel
 	if composer, err := fsutil.ReadFile(filepath.Join(rootDir, "composer.json"), 8<<20); err == nil {
-		content := strings.ToLower(string(composer))
+		content := strings.ToLower(manifestDependencies(composer, []string{"require", "require-dev"}))
 		detectServicesFromContent(content, services, "php")
 	}
 
@@ -335,6 +359,53 @@ func DetectServices(rootDir string) map[string]bool {
 	}
 
 	return services
+}
+
+// packageJSONDependencyKeys are the package.json sections that name what
+// a project depends on.
+var packageJSONDependencyKeys = []string{"dependencies", "devDependencies", "peerDependencies", "optionalDependencies"}
+
+// manifestDependencies returns just the dependency sections of a JSON
+// manifest (package.json, composer.json), re-encoded as JSON. Service
+// detection matches substrings, and matching the whole file meant a
+// description ("take payments with stripe"), a keyword, a script name or
+// the package's own name declared a service the project does not use. A
+// manifest that does not parse is returned whole, as before.
+func manifestDependencies(raw []byte, keys []string) string {
+	var manifest map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return string(raw)
+	}
+	deps := map[string]json.RawMessage{}
+	for _, key := range keys {
+		if section, ok := manifest[key]; ok {
+			deps[key] = section
+		}
+	}
+	out, err := json.Marshal(deps)
+	if err != nil {
+		return string(raw)
+	}
+	return string(out)
+}
+
+// stripHashComments removes # comments from a Gemfile-style manifest: a
+// commented-out gem, or a note that mentions a service, is not a
+// dependency.
+func stripHashComments(content string) string {
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			lines[i] = ""
+			continue
+		}
+		// A trailing comment starts at a # preceded by whitespace; a # inside
+		// a quoted string (a git ref, a URL fragment) is left alone.
+		if idx := strings.Index(line, " #"); idx >= 0 && strings.Count(line[:idx], `"`)%2 == 0 && strings.Count(line[:idx], "'")%2 == 0 {
+			lines[i] = line[:idx]
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func detectServicesFromContent(content string, services map[string]bool, lang string) {
@@ -766,7 +837,10 @@ func scanEnvFile(path string, envPatterns map[string][]string, services map[stri
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		line := strings.ToUpper(scanner.Text())
+		line := envLineKey(scanner.Text())
+		if line == "" {
+			continue
+		}
 		for service, patterns := range envPatterns {
 			for _, pattern := range patterns {
 				if strings.HasPrefix(line, pattern) {
@@ -776,6 +850,21 @@ func scanEnvFile(path string, envPatterns map[string][]string, services map[stri
 		}
 	}
 	_ = scanner.Err()
+}
+
+// envLineKey returns the upper-cased start of an env file line with
+// leading whitespace and a shell `export ` removed, so "  export
+// STRIPE_KEY=..." is matched like "STRIPE_KEY=...". A comment line
+// yields "".
+func envLineKey(line string) string {
+	line = strings.TrimSpace(strings.TrimPrefix(line, "\ufeff"))
+	if strings.HasPrefix(line, "#") {
+		return ""
+	}
+	if rest, ok := strings.CutPrefix(line, "export"); ok && (strings.HasPrefix(rest, " ") || strings.HasPrefix(rest, "\t")) {
+		line = strings.TrimSpace(rest)
+	}
+	return strings.ToUpper(line)
 }
 
 // analyticsServicePatterns holds the service-detection regexes used by
@@ -879,6 +968,67 @@ var analyticsServicePatterns = map[string]*regexp.Regexp{
 	"iubenda":       regexp.MustCompile(`cdn\.iubenda\.com|_iub\.csConfiguration`),
 }
 
+// detectionSkipDirs are directories no detection walk descends into, at
+// any depth: dependency trees, build output, caches, and bundled
+// third-party code. One list serves the service scan and the IndexNow
+// scan; they used to keep one each, and the two had drifted (only one
+// knew .svelte-kit and target, only the other .claude and wp-admin, and
+// neither knew a Python virtualenv, so a .venv full of installed packages
+// "detected" OpenAI, Redis, and Sentry in a project that used none).
+var detectionSkipDirs = map[string]bool{
+	"node_modules":  true,
+	"vendor":        true,
+	".git":          true,
+	"dist":          true,
+	"out":           true,
+	"target":        true,
+	".next":         true,
+	".nuxt":         true,
+	".svelte-kit":   true,
+	".output":       true,
+	".vercel":       true,
+	"coverage":      true,
+	"__pycache__":   true,
+	".venv":         true,
+	"venv":          true,
+	"site-packages": true,
+	".cache":        true,
+	"tmp":           true,
+	"logs":          true,
+	"testdata":      true,
+	"cpresources":   true, // Craft CMS control panel assets
+	"wp-admin":      true, // WordPress core
+	"wp-includes":   true, // WordPress core
+	// Agent tooling vendors example skills/scripts that reference services
+	// the project doesn't actually use (e.g. the mcp-builder skill ships an
+	// evaluation.py with "from anthropic import Anthropic"). Skip them like
+	// other bundled third-party code to avoid false positives.
+	".agents": true, // vendored agent skills (Claude Code, Cursor, etc.)
+	".claude": true, // Claude Code project config and skills
+}
+
+// detectionSkipRootDirs are skipped only directly under the project root,
+// where they are a web root holding compiled assets, framework storage,
+// logs, or build output. Deeper down the same names are ordinary source
+// directories: apps/web is the web app of a monorepo, and skipping it at
+// any depth hid everything that app uses.
+var detectionSkipRootDirs = map[string]bool{
+	"web":     true, // Common public web root (contains compiled assets)
+	"public":  true, // Common public web root
+	"storage": true, // Laravel/Craft CMS storage (backups, logs, etc.)
+	"log":     true,
+	"build":   true,
+}
+
+// skipDetectionDir reports whether a detection walk rooted at rootDir
+// should skip the directory at path.
+func skipDetectionDir(rootDir, path, name string) bool {
+	if detectionSkipDirs[name] {
+		return true
+	}
+	return detectionSkipRootDirs[name] && filepath.Dir(path) == filepath.Clean(rootDir)
+}
+
 // scriptSrcRe extracts the src attribute of <script src=...> tags.
 var scriptSrcRe = regexp.MustCompile(`<script[^>]+src=["']([^"']+)["']`)
 
@@ -892,7 +1042,6 @@ func detectAnalyticsScripts(rootDir string, services map[string]bool) {
 		".htm":    true,
 		".erb":    true,
 		".twig":   true,
-		".blade":  true,
 		".vue":    true,
 		".svelte": true,
 		".astro":  true,
@@ -914,35 +1063,6 @@ func detectAnalyticsScripts(rootDir string, services map[string]bool) {
 		".toml": true,
 	}
 
-	// Directories to skip
-	skipDirs := map[string]bool{
-		"node_modules": true,
-		"vendor":       true,
-		".git":         true,
-		"dist":         true,
-		"build":        true,
-		".next":        true,
-		".nuxt":        true,
-		"coverage":     true,
-		"__pycache__":  true,
-		".cache":       true,
-		"tmp":          true,
-		"log":          true,
-		"logs":         true,
-		"storage":      true, // Laravel/Craft CMS storage (backups, logs, etc.)
-		"cpresources":  true, // Craft CMS control panel assets
-		"web":          true, // Common public web root (contains compiled assets)
-		"public":       true, // Common public web root
-		"wp-admin":     true, // WordPress core
-		"wp-includes":  true, // WordPress core
-		// Agent tooling vendors example skills/scripts that reference services
-		// the project doesn't actually use (e.g. the mcp-builder skill ships an
-		// evaluation.py with "from anthropic import Anthropic"). Skip them like
-		// other bundled third-party code to avoid false positives.
-		".agents": true, // vendored agent skills (Claude Code, Cursor, etc.)
-		".claude": true, // Claude Code project config and skills
-	}
-
 	// Collect external script URLs to fetch
 	var externalScripts []string
 
@@ -956,7 +1076,7 @@ func detectAnalyticsScripts(rootDir string, services map[string]bool) {
 
 		// Skip ignored directories
 		if d.IsDir() {
-			if skipDirs[d.Name()] {
+			if path != rootDir && skipDetectionDir(rootDir, path, d.Name()) {
 				return filepath.SkipDir
 			}
 			// Skip bundled third-party code (WordPress plugins and uploads).
@@ -1397,14 +1517,6 @@ var indexNowSourceExts = map[string]bool{
 	".yaml": true, ".toml": true, ".cr": true, ".dart": true,
 }
 
-// indexNowSkipDirs are directories never worth walking when looking for a
-// dynamic IndexNow integration: dependency trees and build outputs.
-var indexNowSkipDirs = map[string]bool{
-	"node_modules": true, ".git": true, "vendor": true, "testdata": true,
-	"dist": true, "build": true, "out": true, "target": true, ".next": true,
-	".nuxt": true, ".svelte-kit": true, "coverage": true, "tmp": true, ".cache": true,
-}
-
 var (
 	// indexNowKeyFileRe matches the served filename form, e.g. "abc...def.txt".
 	indexNowKeyFileRe = regexp.MustCompile(`([a-f0-9]{32})\.txt`)
@@ -1494,7 +1606,10 @@ func detectIndexNowDynamic(rootDir string) (bool, string) {
 			return nil
 		}
 		if fi.IsDir() {
-			if path != rootDir && indexNowSkipDirs[fi.Name()] {
+			// build is skipped at any depth here, as it always was: a
+			// build directory never holds the route or deploy script
+			// this walk looks for.
+			if path != rootDir && (detectionSkipDirs[fi.Name()] || fi.Name() == "build") {
 				return filepath.SkipDir
 			}
 			return nil

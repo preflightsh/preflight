@@ -25,7 +25,8 @@ type Check struct {
 	Category string
 	// Group is the heading `preflight checks` lists the check under.
 	Group string
-	// OptIn marks checks that only run when enabled in preflight.yml.
+	// OptIn marks checks that only run when preflight.yml has a block for
+	// them under checks: (preflight init writes one for most of these).
 	OptIn bool
 }
 
@@ -49,13 +50,13 @@ var Checks = []Check{
 	{ID: "viewport", Category: "MOBILE", Group: "SEO & Social"},
 	{ID: "lang", Category: "LANG", Group: "SEO & Social"},
 
-	{ID: "security_headers", Category: "SECURITY", Group: "Security & Infrastructure"},
+	{ID: "security_headers", Category: "SECURITY", Group: "Security & Infrastructure", OptIn: true},
 	{ID: "ssl", Category: "SSL", Group: "Security & Infrastructure"},
 	{ID: "www_redirect", Category: "INFRA", Group: "Security & Infrastructure"},
 	{ID: "email_auth", Category: "EMAIL", Group: "Security & Infrastructure", OptIn: true},
-	{ID: "secrets", Category: "SECRETS", Group: "Security & Infrastructure"},
+	{ID: "secrets", Category: "SECRETS", Group: "Security & Infrastructure", OptIn: true},
 
-	{ID: "env_parity", Category: "ENV", Group: "Environment & Health"},
+	{ID: "env_parity", Category: "ENV", Group: "Environment & Health", OptIn: true},
 	{ID: "health_endpoint", Category: "HEALTH", Group: "Environment & Health"},
 
 	{ID: "vulnerability", Category: "DEPS", Group: "Code Quality & Performance"},

@@ -9,11 +9,14 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/preflightsh/preflight/internal/dashboard"
+	"github.com/preflightsh/preflight/internal/output"
 	"github.com/spf13/cobra"
 )
 
@@ -23,23 +26,28 @@ var authCmd = &cobra.Command{
 	Use:   "auth",
 	Short: "Manage authentication with your Preflight account",
 	Long:  `Log in to app.preflight.sh to publish scan results and view them in your dashboard.`,
+	Args:  cobra.ArbitraryArgs,
+	RunE:  unknownSubcommand,
 }
 
 var authLoginCmd = &cobra.Command{
 	Use:   "login",
 	Short: "Authenticate this CLI with your Preflight account",
+	Args:  cobra.NoArgs,
 	RunE:  runAuthLogin,
 }
 
 var authLogoutCmd = &cobra.Command{
 	Use:   "logout",
 	Short: "Sign out and remove stored credentials",
+	Args:  cobra.NoArgs,
 	RunE:  runAuthLogout,
 }
 
 var authStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show the current authentication status",
+	Args:  cobra.NoArgs,
 	RunE:  runAuthStatus,
 }
 
@@ -50,8 +58,13 @@ func init() {
 }
 
 func runAuthLogin(cmd *cobra.Command, args []string) error {
+	// Ctrl-C cancels the requests in flight and the wait for approval, and
+	// exits 130 like a cancelled scan. cmd.Context() alone is never
+	// cancelled, so the cancellation branch in pollLogin was unreachable.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	client := dashboard.NewClient()
-	client.Ctx = cmd.Context()
+	client.Ctx = ctx
 
 	// Headless / paste fallback: validate the token and store it. A token
 	// on the command line lands in shell history and `ps`, so "-" reads it
@@ -75,8 +88,10 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println()
-	fmt.Printf("  Your authorization code: %s\n", start.UserCode)
-	fmt.Printf("  Opening %s\n", start.VerifyURL)
+	// The code and URL come from the dashboard's response; print them as
+	// text, not as whatever control bytes a wrong PREFLIGHT_API_URL sends.
+	fmt.Printf("  Your authorization code: %s\n", output.Sanitize(start.UserCode))
+	fmt.Printf("  Opening %s\n", output.Sanitize(start.VerifyURL))
 	fmt.Println("  (If your browser doesn't open, paste that URL in manually.)")
 	fmt.Println()
 	openBrowser(start.VerifyURL)
@@ -88,13 +103,13 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 	deadline := time.Now().Add(10 * time.Minute)
 
 	fmt.Print("  Waiting for you to authorize in the browser...")
-	token, err = pollLogin(cmd.Context(), func() (*dashboard.PollStatus, error) { return client.Poll(start.DeviceCode) }, interval, deadline, os.Stdout)
+	token, err = pollLogin(ctx, func() (*dashboard.PollStatus, error) { return client.Poll(start.DeviceCode) }, interval, deadline, os.Stdout)
 	if err != nil {
 		return err
 	}
 	email, err := client.Whoami(token)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "  Could not look up the account email (%v); the login is saved.\n", err)
+		fmt.Fprintf(os.Stderr, "  Could not look up the account email (%s); the login is saved.\n", output.Sanitize(err.Error()))
 		email = ""
 	}
 	return saveLogin(client.BaseURL, token, email)
@@ -116,7 +131,8 @@ func pollLogin(ctx context.Context, poll func() (*dashboard.PollStatus, error), 
 		select {
 		case <-time.After(interval):
 		case <-ctx.Done():
-			return "", &ExitError{Code: ExitCanceled, Err: ctx.Err()}
+			fmt.Fprintln(out, "\n  Login cancelled.")
+			return "", &ExitError{Code: ExitCanceled}
 		}
 		status, err := poll()
 		if err != nil {
@@ -132,7 +148,7 @@ func pollLogin(ctx context.Context, poll func() (*dashboard.PollStatus, error), 
 			}
 			if err.Error() != lastErr {
 				lastErr = err.Error()
-				fmt.Fprintf(out, "\n  Could not reach the dashboard (%v); retrying", err)
+				fmt.Fprintf(out, "\n  Could not reach the dashboard (%s); retrying", output.Sanitize(err.Error()))
 			} else {
 				fmt.Fprint(out, ".")
 			}
@@ -188,7 +204,7 @@ func saveLogin(apiURL, token, email string) error {
 		return &ExitError{Code: ExitFail, Err: fmt.Errorf("could not save credentials: %w", err)}
 	}
 	if email != "" {
-		fmt.Printf("\n✓ Logged in as %s\n", email)
+		fmt.Printf("\n✓ Logged in as %s\n", output.Sanitize(email))
 	} else {
 		fmt.Println("\n✓ Logged in")
 	}
@@ -221,9 +237,9 @@ func runAuthStatus(cmd *cobra.Command, args []string) error {
 func authStatusText(creds *dashboard.Credentials) string {
 	who := "Logged in (account email unknown; run 'preflight auth login' again to look it up)"
 	if creds.Email != "" {
-		who = "Logged in as " + creds.Email
+		who = "Logged in as " + output.Sanitize(creds.Email)
 	}
-	return fmt.Sprintf("%s\nDashboard:  %s\n", who, creds.APIURL)
+	return fmt.Sprintf("%s\nDashboard:  %s\n", who, output.Sanitize(creds.APIURL))
 }
 
 // openBrowser best-effort opens a URL in the user's default browser. Failure is

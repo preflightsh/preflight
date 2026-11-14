@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/preflightsh/preflight/internal/config"
@@ -68,6 +69,52 @@ func TestInitWrittenHealthOptOutKeepsV023Behavior(t *testing.T) {
 	}
 	if !enabledIDs(t, dir)["health_endpoint"] {
 		t.Error("init-written healthEndpoint block with a URL: health_endpoint did not run")
+	}
+}
+
+// A block that holds settings but no enabled key turns its check on. It
+// used to read as enabled: false, so a config with only a secrets
+// allowlist never ran the secrets scan and printed nothing about it.
+func TestSettingsOnlyBlockEnablesEveryCheck(t *testing.T) {
+	cases := []struct {
+		block string
+		id    string
+	}{
+		{"  secrets:\n    allowlist:\n      - path: foo.js\n", "secrets"},
+		{"  envParity:\n    envFile: .env.production\n", "env_parity"},
+		{"  emailAuth:\n    domain: mail.example.com\n", "email_auth"},
+		{"  security: {}\n", "security_headers"},
+		{"  indexNow:\n    key: 0123456789abcdef0123456789abcdef\n", "index_now"},
+		{"  stripeWebhook:\n    url: https://example.com/hook\n", "stripe"},
+		{"  adsTxt: {}\n", "ads_txt"},
+		{"  humansTxt: {}\n", "humans_txt"},
+		{"  license: {}\n", "license"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.id, func(t *testing.T) {
+			dir := scanProject(t, "projectName: p\nstack: unknown\nchecks:\n"+tc.block)
+			if !enabledIDs(t, dir)[tc.id] {
+				t.Errorf("block without enabled: %s did not run", tc.id)
+			}
+			// An explicit enabled: false is still an opt-out.
+			off := strings.Replace(tc.block, " {}\n", "\n    enabled: false\n", 1)
+			if off == tc.block {
+				off = tc.block + "    enabled: false\n"
+			}
+			dir = scanProject(t, "projectName: p\nstack: unknown\nchecks:\n"+off)
+			if enabledIDs(t, dir)[tc.id] {
+				t.Errorf("enabled: false ignored: %s ran", tc.id)
+			}
+		})
+	}
+}
+
+// A key with no value is not a block, and no block means the check is off.
+func TestNullBlockStaysOff(t *testing.T) {
+	dir := scanProject(t, "projectName: p\nstack: unknown\nchecks:\n  secrets:\n  security:\n")
+	ids := enabledIDs(t, dir)
+	if ids["secrets"] || ids["security_headers"] {
+		t.Errorf("a null block enabled its check: %v", ids)
 	}
 }
 
