@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,7 +31,7 @@ const renderedWithViewportAndLang = `<!doctype html>
 <body></body></html>`
 
 // A Craft layout whose <html lang> and viewport live in an unconventional
-// partial (header.twig) the static scanner doesn't know about — so the layout
+// partial (header.twig) the static scanner doesn't know about, so the layout
 // itself carries neither tag. Mirrors the joncphillips.com false positive.
 const craftLayoutNoTags = `{% extends "_partials/header.twig" %}
 {% block content %}<h1>Hi</h1>{% endblock %}`
@@ -109,8 +108,8 @@ func TestLangRenderedHTMLFallback(t *testing.T) {
 }
 
 func TestVulnerabilitySummaryNamesEcosystem(t *testing.T) {
-	out := "Found 79 security vulnerability advisories affecting 16 packages:"
-	res, _ := VulnerabilityCheck{}.parseResult(fmt.Errorf("exit status 1"), out, "composer audit")
+	out := `{"advisories": {"craftcms/cms": [{"severity": "high"}, {"severity": "medium"}]}, "abandoned": []}`
+	res := VulnerabilityCheck{}.composerResult(out, out, "composer audit")
 
 	if res.Passed {
 		t.Fatal("expected WARN for vulnerabilities present")
